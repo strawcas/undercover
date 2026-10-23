@@ -8,6 +8,22 @@ Welcome to the most substantive commercial project I've ever made on any course!
 
 This is the repo that accompanies the course. UnderCover is a fictional travel insurer. Over the three weeks we build its claims platform and an AI agent that handles claims, and in Week 3 we deploy it all to AWS.
 
+## Run the pilot
+
+Use Python 3.12, uv and Node 26. From the repository root:
+
+```powershell
+uv sync
+npm install
+npm run dev
+```
+
+Open [the claims dashboard](http://localhost:5173). The backend is at [localhost:8000](http://localhost:8000/docs). Add `OPENROUTER_API_KEY` to your existing `.env` for agent runs; `.env.example` lists the supported settings. Set `MODEL_NAME=openrouter/free` to use the free model option, or leave it unset for the default model.
+
+Select a claim and choose **Run agent** to follow its activity and decision. Approved payouts up to $1,000 can be paid automatically. Above $1,000, select a reviewing handler and **Sign off payout**, then **Record simulated payment**. No real money is transferred. Everyone shares the local pilot; selecting a handler records attribution without sign-in.
+
+`npm run check` runs all checks, including model-free Playwright tests on separate ports with a temporary database. Claims, decisions, activity, sign-offs and payments persist in the ignored `undercover.db`. After a server interruption, unfinished claims can be retried; recorded decisions and payments are preserved. See [the pilot status](docs/STATUS.md) for details and limitations.
+
 _If you're looking at this in VS Code or Cursor, right-click `README.md` in the Explorer on the left and choose **Open Preview** to see it formatted._
 
 ## Key links

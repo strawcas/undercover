@@ -122,7 +122,9 @@ function ClaimRecords({ claim }: Readonly<{ claim: Detail }>) {
       <section className="panel">
         <div className="section-title">
           <h3>Items claimed</h3>
-          <span>{claim.items.length} items</span>
+          <span>
+            {claim.items.length} {claim.items.length === 1 ? "item" : "items"}
+          </span>
         </div>
         <table className="items-table">
           <caption className="sr-only">Claimed expenses in USD</caption>
@@ -154,7 +156,10 @@ function ClaimRecords({ claim }: Readonly<{ claim: Detail }>) {
       <section className="panel">
         <div className="section-title">
           <h3>Supporting documents</h3>
-          <span>{claim.documents.length} documents</span>
+          <span>
+            {claim.documents.length}{" "}
+            {claim.documents.length === 1 ? "document" : "documents"}
+          </span>
         </div>
         {claim.documents.map((document, index) => (
           <details className="document" key={index}>

@@ -13,7 +13,8 @@ export default defineConfig({
       reuseExistingServer: false,
     },
     {
-      command: "npx vite dashboard --port 5174 --strictPort",
+      command:
+        "node node_modules/vite/bin/vite.js dashboard --port 5174 --strictPort",
       url: "http://localhost:5174",
       env: { UNDERCOVER_API_PROXY: "http://127.0.0.1:8011" },
       reuseExistingServer: false,

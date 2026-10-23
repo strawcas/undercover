@@ -148,14 +148,14 @@ Update the short README and `docs/STATUS.md` with setup, run commands, required 
 
 Success criteria:
 
-- [ ] From the repository root, `uv sync` and `npm install` succeed. `npm run dev` starts the backend and dashboard on Windows; `GET /api/health` returns `{"status":"ok"}` and the queue loads.
-- [ ] Full-stack Playwright tests cover approval/payment, decline, referral, approval awaiting sign-off, handler sign-off/payment, direct API payment rejection before sign-off, duplicate actions, failed-run retry, read-only instructions and persisted state after refresh.
-- [ ] Persistence tests reopen the same database and verify that decisions, sign-offs, payments and activity survive restart without reseeding over them. Automated tests use temporary storage and never change the development database.
-- [ ] Repeat the core handler journey in Playwright MCP and inspect screenshots and the browser console: queue -> claim -> run -> activity -> decision -> sign-off when required -> simulated payment. There are no uncaught browser errors.
-- [ ] `npm run check` exits `0`: Ruff formatting and lint, Pyright, pytest with at least 80% Python coverage, Prettier, ESLint, TypeScript, Vitest with at least 80% coverage, and Playwright all pass. Every automated test uses stubs rather than live models.
-- [ ] Inspect the diff to confirm that no evaluation files, secrets, local databases, course notebooks or later-day features are included.
-- [ ] README and `docs/STATUS.md` accurately describe what is built and how to run it, including the lack of sign-in and durable background execution.
-- [ ] All phase criteria are checked only after verification; the final handover reports check results and any remaining limitations.
+- [x] From the repository root, `uv sync` and `npm install` succeed. `npm run dev` starts the backend and dashboard on Windows; `GET /api/health` returns `{"status":"ok"}` and the queue loads.
+- [x] Full-stack Playwright tests cover approval/payment, decline, referral, approval awaiting sign-off, handler sign-off/payment, direct API payment rejection before sign-off, duplicate actions, failed-run retry, read-only instructions and persisted state after refresh.
+- [x] Persistence tests reopen the same database and verify that decisions, sign-offs, payments and activity survive restart without reseeding over them. Automated tests use temporary storage and never change the development database.
+- [x] Repeat the core handler journey in Playwright MCP and inspect screenshots and the browser console: queue -> claim -> run -> activity -> decision -> sign-off when required -> simulated payment. There are no uncaught browser errors.
+- [x] `npm run check` exits `0`: Ruff formatting and lint, Pyright, pytest with at least 80% Python coverage, Prettier, ESLint, TypeScript, Vitest with at least 80% coverage, and Playwright all pass. Every automated test uses stubs rather than live models.
+- [x] Inspect the diff to confirm that no evaluation files, secrets, local databases, course notebooks or later-day features are included.
+- [x] README and `docs/STATUS.md` accurately describe what is built and how to run it, including the lack of sign-in and durable background execution.
+- [x] All phase criteria are checked only after verification; the final handover reports check results and any remaining limitations.
 
 ## Implementation procedure
 

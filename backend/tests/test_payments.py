@@ -3,9 +3,12 @@ from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 
 import pytest
+from fastapi.testclient import TestClient
 
 from backend.claims import ClaimError, Claims
+from backend.main import create_app
 from backend.models import DecisionInput
+from backend.storage import Store
 from backend.tests.conftest import decision_payload
 
 
@@ -144,3 +147,25 @@ def test_competing_runs(repository):
         claims.start("CLM-1001")
     with pytest.raises(ClaimError, match="not found"):
         claims.start("missing")
+
+
+def test_financial_records_survive_a_new_app_and_store(repository):
+    claims = approve(repository, "1250.00")
+    claims.sign_off("CLM-1001", "HND-01")
+    claims.pay("CLM-1001", Decimal("1250.00"))
+    original = claims.detail("CLM-1001")
+    claims.finish("CLM-1001", original["thread_id"])
+    original_events = claims.events("CLM-1001")
+    with TestClient(create_app(Store(repository.path))) as restarted:
+        saved = restarted.get("/api/claims/CLM-1001").json()
+        assert saved["decision"] == original["decision"]
+        assert saved["sign_off"] == original["sign_off"]
+        assert saved["payment"] == original["payment"]
+        assert saved["run_active"] is False
+        assert restarted.get("/api/claims/CLM-1001/events").json() == original_events
+        assert (
+            restarted.post(
+                "/api/claims/CLM-1001/pay", json={"amount": "1250"}
+            ).status_code
+            == 409
+        )

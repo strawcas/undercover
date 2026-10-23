@@ -150,7 +150,9 @@ function Activity({ events }: Readonly<{ events: ClaimEvent[] }>) {
     <section className="panel activity" aria-label="Agent activity">
       <div className="section-title">
         <h3>Claim activity</h3>
-        <span>{events.length} events</span>
+        <span>
+          {events.length} {events.length === 1 ? "event" : "events"}
+        </span>
       </div>
       {events.length === 0 ? (
         <p className="muted">Activity will appear when the agent starts.</p>
