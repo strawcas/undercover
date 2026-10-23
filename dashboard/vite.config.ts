@@ -4,7 +4,11 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  server: { proxy: { "/api": "http://127.0.0.1:8000" } },
+  server: {
+    proxy: {
+      "/api": process.env.UNDERCOVER_API_PROXY ?? "http://127.0.0.1:8000",
+    },
+  },
   test: {
     environment: "jsdom",
     coverage: {

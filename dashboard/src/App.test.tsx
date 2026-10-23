@@ -7,11 +7,13 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { App } from "./App";
-import { ClaimReader, ClaimView } from "./ClaimDetail";
+import { ClaimView } from "./ClaimDetail";
+import { ClaimReader } from "./ClaimWorkflow";
 import { errorMessage, money, request } from "./api";
 import { claim, decision, rows } from "./testData";
 
 function respond(path: string) {
+  if (path.endsWith("/events")) return new Response("[]");
   if (path === "/api/claims") return new Response(JSON.stringify(rows));
   if (path === "/api/agent-instructions")
     return new Response(
@@ -109,10 +111,12 @@ it("shows an empty queue", async () => {
 it("handles a missing claim and retries", async () => {
   vi.stubGlobal(
     "fetch",
-    vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ detail: "Claim not found." }), {
-        status: 404,
-      }),
+    vi.fn(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ detail: "Claim not found." }), {
+          status: 404,
+        }),
+      ),
     ),
   );
   render(<ClaimReader claimId="missing" />);

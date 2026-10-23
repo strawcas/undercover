@@ -5,8 +5,9 @@ import {
   money,
   label,
   stateLabels,
+  request,
 } from "./api";
-import { ClaimReader } from "./ClaimDetail";
+import { ClaimReader } from "./ClaimWorkflow";
 import { useResource } from "./useResource";
 
 const states: ClaimState[] = [
@@ -15,6 +16,10 @@ const states: ClaimState[] = [
   "awaiting_sign_off",
   "decided",
 ];
+
+function queueRunning(rows: QueueRow[]) {
+  return rows.some((row) => row.run_active);
+}
 
 function Instructions() {
   const { data, error, refresh } = useResource<{ text: string }>(
@@ -99,7 +104,11 @@ function Queue({
 export function App() {
   const [page, setPage] = useState<"claims" | "instructions">("claims");
   const [selected, setSelected] = useState<string>();
-  const { data: rows, error, refresh } = useResource<QueueRow[]>("/api/claims");
+  const {
+    data: rows,
+    error,
+    refresh,
+  } = useResource("/api/claims", request<QueueRow[]>, queueRunning);
   const activeId = selected ?? rows?.[0]?.claim_id;
   return (
     <div className="workspace">
@@ -185,7 +194,11 @@ export function App() {
               <div className="claims-layout">
                 <Queue rows={rows} selected={activeId} onSelect={setSelected} />
                 {activeId ? (
-                  <ClaimReader key={activeId} claimId={activeId} />
+                  <ClaimReader
+                    key={activeId}
+                    claimId={activeId}
+                    onChange={refresh}
+                  />
                 ) : (
                   <div className="panel empty-detail">Your queue is clear.</div>
                 )}

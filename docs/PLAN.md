@@ -132,13 +132,13 @@ Use the handlers API for the required sign-off selection. After sign-off succeed
 
 Success criteria:
 
-- [ ] Component tests with controlled API responses verify waiting -> in progress -> decided, and waiting -> in progress -> waiting for sign-off -> decided. They also verify polling cleanup and recovery from request failures.
-- [ ] In Playwright MCP with the scripted backend test runner, start a claim and see activity appear while processing, followed by its decision, explanation, calculation and policy sections without reloading the page.
-- [ ] An approval over $1,000 displays Waiting for sign-off and its approved payout, with no available payment action before sign-off. Select `HND-01`, sign off, record payment and verify handler, timestamp, amount and paid state after refresh.
-- [ ] A normal approval records an eligible payment; a decline or referral shows its explanation and no sign-off or payment action. If an approved run ends before payment, the handler can record that eligible payment separately.
-- [ ] Repeated clicks do not create duplicate runs or payments. A backend `409` is shown clearly and the UI refreshes the authoritative claim state.
-- [ ] The activity view shows ordered actions, tool outcomes and errors with timestamps. It shows no secrets or hidden model reasoning.
-- [ ] `npm run check:ts` and `npm run e2e` pass using synthetic fixtures and a stub model, with no external model calls.
+- [x] Component tests with controlled API responses verify waiting -> in progress -> decided, and waiting -> in progress -> waiting for sign-off -> decided. They also verify polling cleanup and recovery from request failures.
+- [x] In Playwright MCP with the scripted backend test runner, start a claim and see activity appear while processing, followed by its decision, explanation, calculation and policy sections without reloading the page.
+- [x] An approval over $1,000 displays Waiting for sign-off and its approved payout, with no available payment action before sign-off. Select `HND-01`, sign off, record payment and verify handler, timestamp, amount and paid state after refresh.
+- [x] A normal approval records an eligible payment; a decline or referral shows its explanation and no sign-off or payment action. If an approved run ends before payment, the handler can record that eligible payment separately.
+- [x] Repeated clicks do not create duplicate runs or payments. A backend `409` is shown clearly and the UI refreshes the authoritative claim state.
+- [x] The activity view shows ordered actions, tool outcomes and errors with timestamps. It shows no secrets or hidden model reasoning.
+- [x] `npm run check:ts` and `npm run e2e` pass using synthetic fixtures and a stub model, with no external model calls.
 
 ## Phase 6: Verify the complete pilot and document the handover
 

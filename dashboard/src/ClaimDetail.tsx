@@ -6,7 +6,6 @@ import {
   money,
   stateLabels,
 } from "./api";
-import { useResource } from "./useResource";
 
 function RecordValue({ value }: Readonly<{ value: JsonValue }>) {
   if (value === null) return <span>None</span>;
@@ -226,25 +225,4 @@ export function ClaimView({
       <ClaimRecords claim={claim} />
     </article>
   );
-}
-
-export function ClaimReader({ claimId }: Readonly<{ claimId: string }>) {
-  const { data, error, refresh } = useResource<Detail>(
-    `/api/claims/${claimId}`,
-  );
-  if (error)
-    return (
-      <div className="panel" role="alert">
-        <h2>Unable to load claim</h2>
-        <p>{error}</p>
-        <button onClick={refresh}>Try again</button>
-      </div>
-    );
-  if (!data)
-    return (
-      <p className="panel" role="status">
-        Loading claim…
-      </p>
-    );
-  return <ClaimView claim={data} />;
 }
