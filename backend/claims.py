@@ -250,3 +250,41 @@ class Claims:
             if row["thread_id"] != event.thread_id or not row["active"]:
                 raise ClaimError(409, "The event must belong to the active run.")
             append_event(connection, claim_id, event)
+
+    def finish(self, claim_id: str, thread_id: str, error: str = "") -> None:
+        with self.store.transaction() as connection:
+            row = claim_row(connection, claim_id)
+            if row["thread_id"] != thread_id or not row["active"]:
+                return
+            failed = bool(error) or not row["decision"]
+            state = row["state"] if row["decision"] else "waiting"
+            connection.execute(
+                "UPDATE claims SET active=0, state=? WHERE id=?", (state, claim_id)
+            )
+            append_event(
+                connection,
+                claim_id,
+                EventInput(
+                    thread_id=thread_id,
+                    action="Run agent",
+                    status="failed" if failed else "completed",
+                    detail=error
+                    or (
+                        "No decision was recorded. You can retry the run."
+                        if failed
+                        else "Decision recorded. Agent run finished."
+                    ),
+                ),
+            )
+
+    def recover_interrupted(self) -> None:
+        with self.store.connect() as connection:
+            rows = connection.execute(
+                "SELECT id, thread_id FROM claims WHERE active=1"
+            ).fetchall()
+        for row in rows:
+            self.finish(
+                row["id"],
+                row["thread_id"],
+                "Backend restarted during this run. Review the claim and retry.",
+            )

@@ -2,10 +2,11 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
 
 from backend.claims import Claims
 from backend.models import DecisionInput, EventInput, PaymentInput, SignOffInput
+from backend.worker import execute
 
 router = APIRouter(prefix="/api")
 
@@ -97,3 +98,13 @@ def sign_off_claim(claim_id: str, sign_off: SignOffInput, claims: Service):
 def pay_claim(claim_id: str, payment: PaymentInput, claims: Service):
     """Record a simulated payment for the approved amount."""
     return claims.pay(claim_id, payment.amount)
+
+
+@router.post("/claims/{claim_id}/runs", operation_id="start_claim_run", status_code=202)
+def start_claim_run(
+    claim_id: str, tasks: BackgroundTasks, request: Request, claims: Service
+):
+    """Start the agent on one waiting claim."""
+    thread_id = claims.start(claim_id)
+    tasks.add_task(execute, claims, claim_id, thread_id, request.app.state.runner)
+    return {"claim_id": claim_id, "thread_id": thread_id, "status": "in_progress"}

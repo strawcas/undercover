@@ -99,15 +99,15 @@ Add the start-run API and a small background-task adapter. Record run start, too
 
 Success criteria:
 
-- [ ] `uv run pytest agent/tests backend/tests/test_runs.py -q` passes using scripted model replies and HTTP test clients; no test calls OpenRouter or another model provider.
-- [ ] A scripted approval run reads all required context through the backend API, records its outcome, calculation, two- or three-sentence explanation and policy references, and records one eligible payment.
-- [ ] Scripted decline and referral runs finish decided with zero payout and no payment. The referral explanation identifies the missing information or judgment required.
-- [ ] A scripted approval over $1,000 remains approved and waiting for sign-off. Even when the stub explicitly attempts payment, the backend returns `409`, records no payment and exposes the blocked action in the trace.
-- [ ] Agent tool tests cover HTTP failures and confirm that no tool imports backend storage or opens business-data files. The agent has no sign-off tool.
-- [ ] Model-construction tests verify the default model and low reasoning setting, `MODEL_NAME` override behavior and backend-fetched instructions without making a model call or printing secrets.
-- [ ] `POST /api/claims/CLM-1001/runs` returns `202` with an active thread ID. A second start while active returns `409`; a completed decision cannot be rerun. Events retain the correct claim and thread IDs and appear before the stub run completes.
-- [ ] A failing stub records a visible failure, leaves no active task stuck in progress and permits a new run when no decision exists. Failed work cannot erase an existing decision or payment.
-- [ ] `npm run check:python` passes with at least 80% coverage.
+- [x] `uv run pytest agent/tests backend/tests/test_runs.py -q` passes using scripted model replies and HTTP test clients; no test calls OpenRouter or another model provider.
+- [x] A scripted approval run reads all required context through the backend API, records its outcome, calculation, two- or three-sentence explanation and policy references, and records one eligible payment.
+- [x] Scripted decline and referral runs finish decided with zero payout and no payment. The referral explanation identifies the missing information or judgment required.
+- [x] A scripted approval over $1,000 remains approved and waiting for sign-off. Even when the stub explicitly attempts payment, the backend returns `409`, records no payment and exposes the blocked action in the trace.
+- [x] Agent tool tests cover HTTP failures and confirm that no tool imports backend storage or opens business-data files. The agent has no sign-off tool.
+- [x] Model-construction tests verify the default model and low reasoning setting, `MODEL_NAME` override behavior and backend-fetched instructions without making a model call or printing secrets.
+- [x] `POST /api/claims/CLM-1001/runs` returns `202` with an active thread ID. A second start while active returns `409`; a completed decision cannot be rerun. Events retain the correct claim and thread IDs and appear before the stub run completes.
+- [x] A failing stub records a visible failure, leaves no active task stuck in progress and permits a new run when no decision exists. Failed work cannot erase an existing decision or payment.
+- [x] `npm run check:python` passes with at least 80% coverage.
 
 ## Phase 4: Build the handler dashboard
 
