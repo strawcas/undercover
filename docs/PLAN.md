@@ -117,12 +117,12 @@ Apply `docs/BRAND.md`: Manrope for body and headings, Fraunces for a short accen
 
 Success criteria:
 
-- [ ] `npm run check:ts` passes with strict TypeScript, no `any` and at least 80% Vitest coverage. Component tests cover queue rendering, detail selection, all workflow labels and read-only instructions.
-- [ ] Component tests cover loading, empty queue, missing claim and failed API requests, with visible recovery actions where appropriate.
-- [ ] Start `npm run dev`. In the Playwright MCP browser, open `http://localhost:5173`, see 25 queue rows, select `CLM-1001` and verify its story, three items, four documents, policy, plan and customer history against the permitted seed data.
-- [ ] In the Playwright MCP browser, open Agent instructions and verify that its text matches `GET /api/agent-instructions` and provides no editing control.
-- [ ] Inspect desktop and 390-pixel-wide views in light and dark modes with Playwright MCP screenshots. Text is readable, panels match the brand, all document text is accessible and controls remain usable without page-wide horizontal overflow.
-- [ ] Keyboard navigation reaches queue rows and actions, labels are accessible, state is conveyed by text as well as color, and USD values appear in forms such as `$1,250.00`.
+- [x] `npm run check:ts` passes with strict TypeScript, no `any` and at least 80% Vitest coverage. Component tests cover queue rendering, detail selection, all workflow labels and read-only instructions.
+- [x] Component tests cover loading, empty queue, missing claim and failed API requests, with visible recovery actions where appropriate.
+- [x] Start `npm run dev`. In the Playwright MCP browser, open `http://localhost:5173`, see 25 queue rows, select `CLM-1001` and verify its story, three items, four documents, policy, plan and customer history against the permitted seed data.
+- [x] In the Playwright MCP browser, open Agent instructions and verify that its text matches `GET /api/agent-instructions` and provides no editing control.
+- [x] Inspect desktop and 390-pixel-wide views in light and dark modes with Playwright MCP screenshots. Text is readable, panels match the brand, all document text is accessible and controls remain usable without page-wide horizontal overflow.
+- [x] Keyboard navigation reaches queue rows and actions, labels are accessible, state is conveyed by text as well as color, and USD values appear in forms such as `$1,250.00`.
 
 ## Phase 5: Connect processing, live activity and handler actions
 
