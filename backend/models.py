@@ -1,9 +1,10 @@
 """Shared records and exact USD amounts."""
 
+import re
 from decimal import Decimal
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Money = Annotated[Decimal, Field(ge=0, max_digits=12, decimal_places=2)]
 State = Literal["waiting", "in_progress", "awaiting_sign_off", "decided"]
@@ -76,3 +77,39 @@ class Company(BaseModel):
     currency: Literal["USD"]
     payout_approval_limit: Money
     policy_wording_version: str
+
+
+class DecisionInput(BaseModel):
+    thread_id: str = Field(min_length=1)
+    outcome: Literal["approve", "decline", "refer"]
+    payout: Money
+    calculation: str = Field(min_length=1)
+    explanation: str = Field(min_length=20)
+    policy_sections: list[Annotated[str, Field(pattern=r"^(?:[1-9]|1[0-2])$")]] = Field(
+        min_length=1
+    )
+
+    @model_validator(mode="after")
+    def valid_decision(self) -> Self:
+        if (self.outcome == "approve") != (self.payout > 0):
+            raise ValueError(
+                "Approvals need a positive payout; other outcomes need zero."
+            )
+        if len(re.split(r"(?<=[.!?])\s+", self.explanation.strip())) not in {2, 3}:
+            raise ValueError("Explain the decision in two or three sentences.")
+        return self
+
+
+class PaymentInput(BaseModel):
+    amount: Annotated[Decimal, Field(gt=0, max_digits=12, decimal_places=2)]
+
+
+class SignOffInput(BaseModel):
+    handler_id: str = Field(min_length=1)
+
+
+class EventInput(BaseModel):
+    thread_id: str = Field(min_length=1)
+    action: str = Field(min_length=1, max_length=100)
+    status: Literal["started", "completed", "blocked", "failed"]
+    detail: str = Field(min_length=1, max_length=2000)

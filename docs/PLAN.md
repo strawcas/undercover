@@ -79,15 +79,15 @@ Approvals require a positive payout, while declines and referrals require zero. 
 
 Success criteria:
 
-- [ ] `uv run pytest backend/tests/test_api.py backend/tests/test_payments.py -q` passes, using isolated databases and synthetic decisions.
-- [ ] With the backend running, `Invoke-RestMethod http://localhost:8000/api/claims` returns 25 waiting claims. `Invoke-RestMethod http://localhost:8000/api/claims/CLM-1001` returns the complete claim and linked Premium policy and customer history.
-- [ ] API tests show that policy wording, read-only instructions, handlers and company settings are available, and no response exposes manual-derived rules or evaluation data.
-- [ ] Parameterized payment tests allow $999.99 and exactly $1,000 without sign-off. A $1,000.01 approval enters waiting for sign-off; a direct payment request returns `409` and creates no payment.
-- [ ] For a synthetic $1,250 approval, sign-off by `HND-01` records the handler, amount and timestamp. A subsequent payment request for $1,250 succeeds and records one simulated payment.
-- [ ] Tests reject unknown or ineligible handlers, sign-off on non-approvals, negative or zero payments, invalid precision, mismatched amounts, payment before a decision, payment on a decline or referral, and duplicate payment. Rejected operations leave payment state unchanged.
-- [ ] Transaction tests verify that competing payment calls produce exactly one payment. A second decision cannot overwrite a recorded outcome or signed-off payout.
-- [ ] An OpenAPI test verifies unique operation IDs, route docstrings and required inputs for every operation. Unknown claim IDs return `404`; malformed decision payloads return `422`.
-- [ ] `npm run check:python` passes with at least 80% coverage.
+- [x] `uv run pytest backend/tests/test_api.py backend/tests/test_payments.py -q` passes, using isolated databases and synthetic decisions.
+- [x] With the backend running, `Invoke-RestMethod http://localhost:8000/api/claims` returns 25 waiting claims. `Invoke-RestMethod http://localhost:8000/api/claims/CLM-1001` returns the complete claim and linked Premium policy and customer history.
+- [x] API tests show that policy wording, read-only instructions, handlers and company settings are available, and no response exposes manual-derived rules or evaluation data.
+- [x] Parameterized payment tests allow $999.99 and exactly $1,000 without sign-off. A $1,000.01 approval enters waiting for sign-off; a direct payment request returns `409` and creates no payment.
+- [x] For a synthetic $1,250 approval, sign-off by `HND-01` records the handler, amount and timestamp. A subsequent payment request for $1,250 succeeds and records one simulated payment.
+- [x] Tests reject unknown or ineligible handlers, sign-off on non-approvals, negative or zero payments, invalid precision, mismatched amounts, payment before a decision, payment on a decline or referral, and duplicate payment. Rejected operations leave payment state unchanged.
+- [x] Transaction tests verify that competing payment calls produce exactly one payment. A second decision cannot overwrite a recorded outcome or signed-off payout.
+- [x] An OpenAPI test verifies unique operation IDs, route docstrings and required inputs for every operation. Unknown claim IDs return `404`; malformed decision payloads return `422`.
+- [x] `npm run check:python` passes with at least 80% coverage.
 
 ## Phase 3: Run the UnderCover Agent and record its work
 
