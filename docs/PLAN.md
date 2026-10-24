@@ -4,7 +4,7 @@
 
 Revise the implemented claims pilot so the UnderCover Agent runs one pass through the waiting queue when the app starts, and runs again when explicitly invoked with `uv run -m agent`. Remove the continuous automatic worker that watches for new waiting claims. Handlers continue to follow progress, inspect decisions and policy references, and sign off approved payouts over $1,000.
 
-The earlier six-phase build is implemented and verified. Preserve its necessary features: database rebuilding, persisted queue order and results, atomic reservation, database ownership, terminal decisions and totals, failure handling, model configuration, HTTP tools, dashboard activity, handler sign-off and payment safeguards. The startup-pass and dashboard changes in phases 2 and 5 are implemented and verified with 103 Python tests, 17 component tests and Playwright MCP checks. Final integration follow-up remains pending in phase 6.
+The earlier six-phase build and this startup-pass revision are implemented and verified. Database rebuilding, persisted queue order and results, atomic reservation, database ownership, terminal decisions and totals, failure handling, model configuration, HTTP tools, dashboard activity, handler sign-off and payment safeguards are preserved. The follow-up in phases 2, 5 and 6 passes 103 Python tests, 17 component tests, seven Playwright tests and Playwright MCP checks.
 
 For this revision, an app start means backend startup. Each backend start makes one finite pass; refreshing or navigating the dashboard does not start another pass. Once that pass finishes, the backend remains available but does not launch further agent work until the next backend start or an explicit terminal run.
 
@@ -168,25 +168,25 @@ Success criteria:
 
 ## Phase 6: Verify both execution modes and document the handover
 
-Extend full-stack and terminal integration coverage to the revised workflow. Use separate temporary databases and stub runners for every automated check. Keep the existing payment, exact-money, persistence and data-access regression coverage. The planning revision itself neither resets the student's database nor starts any model runs.
+Extend full-stack and terminal integration coverage to the revised workflow. Use separate temporary databases and stub runners for every automated check. Keep the existing payment, exact-money, persistence and data-access regression coverage. Verification leaves the student's working database and model configuration unchanged.
 
-During implementation, update the short README and `docs/STATUS.md` to explain one finite pass per backend startup, explicit terminal runs and no continuous queue watcher. Preserve documentation for queue order, database ownership, stopping the app before terminal commands, rebuild's deletion of previous work, output/exit codes, failures and restart limits. This planning edit does not change the implemented application or its current status documentation.
+Update the short README and `docs/STATUS.md` to explain one finite pass per backend startup, explicit terminal runs and no continuous queue watcher. Preserve documentation for queue order, database ownership, stopping the app before terminal commands, rebuild's deletion of previous work, output/exit codes, failures and restart limits.
 
 Success criteria:
 
 - [x] `uv sync`, `npm install` and `npm run dev` work on Windows. Health returns `{"status":"ok"}`, and a stub-backed isolated backend starts processing without a browser.
-- [ ] Full-stack tests verify exactly one startup pass, no processing of later arrivals, an empty startup queue, retry only on a later startup/terminal run, and no browser-triggered assessments. Retain approval/payment, decline, referral, sign-off, the exact $1,000 boundary, blocked/duplicate payment and recovery coverage.
+- [x] Full-stack tests verify exactly one startup pass, no processing of later arrivals, an empty startup queue, retry only on a later startup/terminal run, and no browser-triggered assessments. Retain approval/payment, decline, referral, sign-off, the exact $1,000 boundary, blocked/duplicate payment and recovery coverage.
 - [x] A terminal integration test rebuilds a temporary database, drains its queue with stubs, verifies every printed decision and summary count against stored results, then proves a repeat drain processes zero claims.
 - [x] Rebuilding that temporary database again restores all permitted claims to Waiting and clears prior results. Rebuilding while its backend runs is rejected without modifying the database.
-- [ ] Repeat the startup-pass handler journey in Playwright MCP: queue -> activity -> decision -> sign-off when required -> simulated payment, with no Run agent action and no unexpected console errors.
-- [ ] `npm run check` exits 0 after the revision: Ruff, Pyright, pytest, Prettier, ESLint, TypeScript, Vitest and Playwright all pass with the existing coverage thresholds and hooks enabled. All automated models are stubs.
+- [x] Repeat the startup-pass handler journey in Playwright MCP: queue -> activity -> decision -> sign-off when required -> simulated payment, with no Run agent action and no unexpected console errors.
+- [x] `npm run check` exits 0 after the revision: Ruff, Pyright, pytest, Prettier, ESLint, TypeScript, Vitest and Playwright all pass with the existing coverage thresholds and hooks enabled. All automated models are stubs.
 - [x] Inspect the diff for unrelated changes, secrets, databases, course notebooks, evaluation data and later-day features. No student configuration or working database is reset as part of the build.
-- [ ] README and `docs/STATUS.md` describe the implemented startup-pass behavior and retained terminal commands accurately. Mark changed criteria complete only after verification; report check results and remaining limitations.
+- [x] README and `docs/STATUS.md` describe the implemented startup-pass behavior and retained terminal commands accurately. Mark changed criteria complete only after verification; report check results and remaining limitations.
 
 ## Implementation procedure
 
-The earlier six-phase build was tested, documented and committed, with 101 Python tests, 16 component tests and six Playwright tests passing. Its retained features remain the implementation baseline. This startup-pass revision is a planning change only and awaits a separate implementation request.
+The earlier six-phase build was tested, documented and committed, with 101 Python tests, 16 component tests and six Playwright tests passing. Its retained features remain the implementation baseline. The startup-pass revision is now implemented and verified with 103 Python tests, 17 component tests and seven Playwright tests passing, plus a successful production dashboard build.
 
-When authorized, implement the unchecked follow-up criteria in phases 2, 5 and 6. Reuse the completed foundations and terminal commands in phases 1, 3 and 4. Do not rebuild those features or remove their safeguards. Check changed criteria only after verification, update status/run documentation to match the resulting behavior and commit the revision with the pre-commit hook enabled.
+The implementation changed startup task lifetime and database ownership release, updated dashboard waiting/failure text, and extended regression coverage. The completed foundations and terminal commands in phases 1, 3 and 4 were reused without rebuilding them or removing their safeguards. Changed criteria were checked after verification, run documentation was updated, and each follow-up phase was committed with the pre-commit hook enabled.
 
 Use uv and Windows-compatible commands. Preserve unrelated student changes. Never lower checks, bypass hooks, push commits, create AWS resources or read the evaluation answer key. Run `npm run check` after the final phase and report the result. Live model accuracy remains unmeasured unless a separate evaluation is explicitly requested.

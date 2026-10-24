@@ -20,7 +20,7 @@ npm run dev
 
 Open [the claims dashboard](http://localhost:5173). The backend is at [localhost:8000](http://localhost:8000/docs). Add `OPENROUTER_API_KEY` to your existing `.env` for agent runs; `.env.example` lists the supported settings. Set `MODEL_NAME=openrouter/free` to use the free model option, or leave it unset for the default model.
 
-The backend automatically works waiting claims in queue order, one at a time, even with the dashboard closed. Select a claim to follow its activity and decision. Approved payouts up to $1,000 can be paid automatically. Above $1,000, select a reviewing handler and **Sign off payout**, then **Record simulated payment**. Everyone shares the local pilot; selecting a handler records attribution without sign-in. All payments are simulated.
+Each backend start processes one snapshot of waiting claims in queue order, one at a time, then stops processing while the app stays available. Later arrivals and failed claims wait for another backend start or `uv run -m agent`; browser refreshes do not start runs. Select a claim to follow its activity and decision. Approved payouts up to $1,000 can be paid automatically. Above $1,000, select a reviewing handler and **Sign off payout**, then **Record simulated payment**. Everyone shares the local pilot; selecting a handler records attribution without sign-in. All payments are simulated.
 
 Stop `npm run dev` with Ctrl+C before using either terminal command below. Rebuild the database from `data/`, clearing previous decisions, sign-offs, payments and activity and putting every source claim back in Waiting:
 
@@ -34,7 +34,7 @@ Work every waiting claim in queue order, printing each decision followed by tota
 uv run -m agent
 ```
 
-The agent command starts its own local backend and exits after one pass; no dashboard is needed. Both commands use `UNDERCOVER_DB_PATH` when set, otherwise `undercover.db`, and refuse a database already owned by another backend or command. Each worker session attempts a claim once; restart processing to retry a failed undecided claim. Decided claims are skipped.
+The agent command starts its own local backend and exits after one pass; no dashboard is needed. Both commands use `UNDERCOVER_DB_PATH` when set, otherwise `undercover.db`, and refuse a database already owned by another backend or command. Each startup or terminal pass attempts a claim once. Decided claims are skipped. The app retains database ownership after its startup pass because its APIs still serve handler actions, so stop it before either terminal command.
 
 `npm run check` runs all checks with stub models and temporary databases, including terminal and Playwright integration tests. Normal startup preserves saved work. Source-file changes are loaded on a fresh database or an explicit rebuild. See [the pilot status](docs/STATUS.md) for output, exit codes and restart limits.
 

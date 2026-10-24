@@ -1,6 +1,6 @@
 # Status
 
-The startup-pass revision in `docs/PLAN.md` is in progress. The backend and dashboard follow-up is implemented, with 103 Python tests, 17 component tests and Playwright MCP checks passing. Both terminal commands and the prior safeguards are preserved; the final full-suite verification and documentation follow-up remain pending.
+The startup-pass revision in `docs/PLAN.md` is implemented and verified. Each backend start processes one snapshot of waiting claims, then leaves the app available for handlers. Both terminal commands and the prior safeguards are preserved. All 103 Python tests, 17 component tests and seven Playwright tests pass.
 
 ## Run locally
 
@@ -16,7 +16,7 @@ Open http://localhost:5173 for the dashboard. The backend is at http://localhost
 
 Add `OPENROUTER_API_KEY` to the existing root `.env` for real agent runs. The default model is `openai/gpt-6-luna` with low reasoning effort. `MODEL_NAME` overrides it, for example `openrouter/free`. Your existing model selection is preserved. Never commit `.env`.
 
-At each backend startup, the app snapshots waiting claims, processes them one at a time once its HTTP API is ready, then ends the processing task. Claims arriving during or after that pass wait for another backend start or explicit terminal run. Dashboard refreshes do not trigger processing. Select a claim to follow its activity and decision; there is no Run agent button.
+At each backend startup, the app snapshots waiting claims, processes them one at a time once its HTTP API is ready, then ends the processing task. There is no continuous queue watcher. An empty startup queue finishes without model calls. Claims arriving during or after that pass wait for another backend start or explicit terminal run. Dashboard refreshes and navigation do not trigger processing. Select a claim to follow its activity and decision; there is no Run agent button.
 
 ## Rebuild the database
 
@@ -38,7 +38,7 @@ Stop `npm run dev` with Ctrl+C first, then run:
 uv run -m agent
 ```
 
-This starts its own local HTTP backend, processes the waiting queue present at startup in persisted order, then shuts down and exits. No dashboard or separately running backend is needed. It uses the same configured model, instructions, tools and payment checks as automatic processing.
+This starts its own local HTTP backend, processes the waiting queue present at invocation in persisted order, then shuts down and exits. No dashboard or separately running backend is needed. It uses the same configured model, instructions, tools and payment checks as the app's startup pass.
 
 After each attempt, it prints the claim ID, recorded outcome, USD payout, explanation, policy references and payment/sign-off state. Failures are printed and processing continues with later claims. The final line reports attempted and decided counts, approved/declined/referred counts, failed runs and approvals awaiting sign-off. A failure after a saved decision contributes to both the decided and failed-run counts.
 
@@ -48,26 +48,28 @@ Decided claims and approvals awaiting sign-off are skipped. An empty queue print
 
 Use one backend process or terminal command per database. All three execution modes honor `UNDERCOVER_DB_PATH`, defaulting to the root `undercover.db`, and reject competing owners. The terminal agent also refuses an occupied HTTP address. Lock files are ignored by Git and do not block reuse after the owning process exits.
 
+Finishing the startup pass ends its processing task, but the backend retains ownership while it serves claim, sign-off and payment APIs. Stop the backend before rebuilding or running the standalone terminal agent, even after its startup pass has finished.
+
 `UNDERCOVER_BACKEND_URL` defaults to `http://localhost:8000`. The standalone agent binds this local HTTP address. When starting the normal backend at a custom address, its listening host/port must match the URL used by agent tools.
 
-Each session attempts a claim once. Failed attempts without a decision return to Waiting and are skipped for the rest of that session. Restart the backend, or stop it and run the terminal agent, to retry them. Shutdown stops new reservations and allows the active run five seconds to finish. If it takes longer, the database remains owned until that run finishes or its process exits. Restart retries abandoned undecided work from the beginning and preserves saved decisions, sign-offs and payments; it does not resume model execution.
+Each startup or terminal pass attempts a claim once. Failed attempts without a decision return to Waiting and are not retried by the same pass. Restart the backend, or stop it and run the terminal agent, to retry them. Shutdown stops new reservations and allows the active run five seconds to finish. If it takes longer, the database remains owned until that run finishes or its process exits. Restart retries abandoned undecided work from the beginning and preserves saved decisions, sign-offs and payments; it does not resume model execution.
 
 ## What is built
 
 - SQLite stores the source claims and their linked policies and customers, plans, add-ons, handlers, company settings and policy wording. A persisted queue position controls both dashboard display and worker selection. Existing databases migrate without clearing work.
 - The LangChain agent reads instructions and claim context and records activity, decisions and payments through backend HTTP tools. Startup processing atomically reserves one claim at a time from a fixed snapshot, then terminates while the API remains available.
-- The dashboard follows waiting and active claims automatically, including idle gaps and new stored arrivals. It shows complete records, decisions, calculations, references, errors, read-only instructions and timestamped activity. Polling cleans up on navigation.
-- Approval, decline and referral remain distinct from payment state. Approvals up to and including $1,000 can be paid automatically. Larger approvals require handler sign-off before the separate payment operation can succeed; the worker continues with other claims while sign-off is pending.
+- The dashboard refreshes waiting and active claims, including later stored arrivals, without starting assessments. It shows complete records, decisions, calculations, references, errors, read-only instructions and timestamped activity. Waiting and failure messages explain that another queue run is needed; polling cleans up on navigation.
+- Approval, decline and referral remain distinct from payment state. Approvals up to and including $1,000 can be paid automatically. Larger approvals require handler sign-off before the separate payment operation can succeed; the pass continues with its other claims while sign-off is pending.
 - Handler sign-off and eligible simulated payment remain available in the dashboard. The backend enforces exact approved amounts, sign-off and duplicate-payment checks in transactions.
 - Terminal commands share configuration, database ownership, source validation and queue execution with the backend. There is no reset HTTP endpoint or per-claim start-run endpoint.
 
 ## Verification
 
 - `uv sync`, `npm install`, development startup and the production dashboard build succeed on Windows. Both terminal entry points were also run against separate test databases.
-- `npm run check` passes: Ruff, Pyright, 101 pytest tests with 99.60% Python coverage, Prettier, ESLint, strict TypeScript, 16 Vitest tests with 99.18% statement coverage, and six Playwright tests. Compatible development dependency updates were applied; `npm audit` reports zero vulnerabilities.
+- `npm run check` passes: Ruff, Pyright, 103 pytest tests with 99.60% Python coverage, Prettier, ESLint, strict TypeScript, 17 Vitest tests with 99.18% statement coverage, and seven Playwright tests. Existing coverage thresholds and pre-commit hooks remain enabled. Previously applied compatible dependency updates are retained.
 - Automated checks use temporary databases and stub models, including actual local HTTP tool calls, queue migration/order, exclusive ownership and crash recovery, failures before/after decisions, Ctrl+C, rebuild validation, totals, empty queues and repeated drains.
 - A complete terminal integration test rebuilds the temporary source queue, processes all 25 claims in order, verifies the printed results and counts, confirms a repeated drain attempts zero claims, then rebuilds the queue again with all previous results cleared. A running backend blocks rebuilding; a slow stopping worker retains ownership until its active attempt finishes.
-- Playwright MCP checks verified automatic updates, handler sign-off and a $1,250 simulated payment, exact read-only instructions, keyboard focus and desktop/390-pixel layouts in light and dark modes without horizontal overflow or browser console errors after services were ready. Screenshots are in the ignored `.playwright-mcp` directory.
+- Playwright MCP checks verified the startup pass, a later arrival remaining Waiting after completion, refresh and navigation, exact read-only instructions, and handler sign-off plus a $1,250 simulated payment after processing ended. The current browser checks have no console errors. Prior desktop/390-pixel light/dark layouts and keyboard checks remain applicable; screenshots are in the ignored `.playwright-mcp` directory.
 - The working database and `.env` have not been reset or changed during this build. Evaluation answer keys remain unopened. No automated test calls a live model.
 
 ## Pilot limits
