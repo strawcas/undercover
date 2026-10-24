@@ -141,6 +141,7 @@ class Store:
                 if name.endswith(".json")
                 else content
             )
+        self._validate_links(sources)
         claims = sources["claims.json"]
         policy_ids = {claim["policy_id"] for claim in claims}
         customer_ids = {claim["customer_id"] for claim in claims}
@@ -168,6 +169,21 @@ class Store:
             "instructions",
             (ROOT / "backend" / "instructions.md").read_text(encoding="utf-8"),
         )
+
+    @staticmethod
+    def _validate_links(sources: dict[str, Any]) -> None:
+        policies = {row["policy_id"]: row for row in sources["policies.json"]}
+        customers = {row["customer_id"] for row in sources["customers.json"]}
+        plans = {row["plan"] for row in sources["plans.json"]["plans"]}
+        add_ons = {row["add_on"] for row in sources["plans.json"]["add_ons"]}
+        for claim in sources["claims.json"]:
+            policy = policies.get(claim["policy_id"])
+            if policy is None or claim["customer_id"] not in customers:
+                raise ValueError(f"Missing policy or customer for {claim['claim_id']}.")
+            if policy["customer_id"] != claim["customer_id"]:
+                raise ValueError(f"Policy/customer mismatch for {claim['claim_id']}.")
+            if policy["plan"] not in plans or not set(policy["add_ons"]) <= add_ons:
+                raise ValueError(f"Unknown plan or add-on for {claim['claim_id']}.")
 
     @staticmethod
     def _insert(connection: sqlite3.Connection, kind: str, key: str, body: Any):

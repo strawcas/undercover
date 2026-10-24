@@ -116,14 +116,14 @@ This gives the student a repeatable fresh queue while preserving ordinary startu
 
 Success criteria:
 
-- [ ] `uv run pytest backend/tests/test_reset_db.py -q` covers the command in subprocesses with temporary database paths.
-- [ ] After synthetic decisions, sign-offs, payments, failures and activity are recorded, `uv run -m backend.reset_db` restores every permitted source claim to Waiting in source order. No old decision, sign-off, payment, active run, thread ID or event remains.
-- [ ] The command reports the resolved path and source claim count, honors `.env` and `UNDERCOVER_DB_PATH`, creates a missing target and succeeds repeatedly on Windows.
-- [ ] A synthetic addition to a copied `claims.json`, with valid linked records, appears in the rebuilt queue. Tests derive counts from the permitted source file rather than assuming 25 forever.
-- [ ] Missing or invalid seed data fails without replacing an existing database. A live owner or competing reset causes a clear nonzero exit without changes.
-- [ ] File-access tests enforce the seed allowlist without opening evaluation or security files. Only the selected database and owned temporary files can be replaced; business files, secrets and other databases remain intact.
-- [ ] Rebuilding makes no model calls and starts no queue worker. The restored queue stays waiting until the backend or terminal processing command starts.
-- [ ] `npm run check:python` passes with at least 80% coverage.
+- [x] `uv run pytest backend/tests/test_reset_db.py -q` covers the command in subprocesses with temporary database paths.
+- [x] After synthetic decisions, sign-offs, payments, failures and activity are recorded, `uv run -m backend.reset_db` restores every permitted source claim to Waiting in source order. No old decision, sign-off, payment, active run, thread ID or event remains.
+- [x] The command reports the resolved path and source claim count, honors `.env` and `UNDERCOVER_DB_PATH`, creates a missing target and succeeds repeatedly on Windows.
+- [x] A synthetic addition to a copied `claims.json`, with valid linked records, appears in the rebuilt queue. Tests derive counts from the permitted source file rather than assuming 25 forever.
+- [x] Missing or invalid seed data fails without replacing an existing database. A live owner or competing reset causes a clear nonzero exit without changes.
+- [x] File-access tests enforce the seed allowlist without opening evaluation or security files. Only the selected database and owned temporary files can be replaced; business files, secrets and other databases remain intact.
+- [x] Rebuilding makes no model calls and starts no queue worker. The restored queue stays waiting until the backend or terminal processing command starts.
+- [x] `npm run check:python` passes with at least 80% coverage.
 
 ## Phase 4: Work the entire waiting queue from the terminal
 

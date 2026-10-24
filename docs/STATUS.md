@@ -1,6 +1,6 @@
 # Status
 
-Implementation of the revised `docs/PLAN.md` is in progress. Phases 1 and 2 are verified, with 77 Python tests passing: queue ordering, database ownership and automatic sequential backend processing are built. The terminal commands and dashboard changes are still pending.
+Implementation of the revised `docs/PLAN.md` is in progress. Phases 1 through 3 are verified, with 86 Python tests passing: queue ordering, database ownership, automatic processing and the database rebuild command are built. The terminal agent command and dashboard changes are still pending.
 
 ## Run locally
 
@@ -16,9 +16,9 @@ Open http://localhost:5173 for the dashboard. The backend is at http://localhost
 
 Add `OPENROUTER_API_KEY` to the existing root `.env` for real agent runs. The default model is `openai/gpt-6-luna` with low reasoning effort. `MODEL_NAME` can override it, for example `openrouter/free`. `.env.example` lists optional settings. Never commit `.env`.
 
-## Planned database and queue commands
+## Database and queue commands
 
-These commands are specified in `docs/PLAN.md` but are not implemented yet. After implementation, stop `npm run dev` with Ctrl+C and run them from the repository root.
+The rebuild command is available. The terminal agent command below is still pending implementation. Stop `npm run dev` with Ctrl+C and run commands from the repository root.
 
 Rebuild the database from `data/`, returning every claim in `data/claims.json` to Waiting:
 
@@ -28,7 +28,7 @@ uv run -m backend.reset_db
 
 This clears previous decisions, sign-offs, simulated payments and activity, reloads the permitted source records, and prints the database path and restored claim count. It leaves the claims waiting until processing starts.
 
-Process every waiting claim in queue order:
+Planned: process every waiting claim in queue order:
 
 ```powershell
 uv run -m agent
