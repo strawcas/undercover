@@ -1,6 +1,6 @@
 # Status
 
-The original claims pilot is complete. The revised `docs/PLAN.md` plans automatic queue processing, a database rebuild command and a terminal command that processes waiting claims in order and prints decisions and totals. Those extensions are not implemented yet; the revised plan's criteria remain unchecked. The run instructions and built features below describe the existing manual-start pilot.
+The original claims pilot is complete. Implementation of the revised `docs/PLAN.md` is in progress. Phase 1 is verified: persisted queue order, atomic reservation and process ownership are built, with 72 Python tests passing. Automatic processing and the two terminal commands are still pending. The run instructions below describe the current manual-start pilot.
 
 ## Run locally
 

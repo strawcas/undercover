@@ -106,26 +106,50 @@ class Claims:
         return "unavailable"
 
     def start(self, claim_id: str) -> str:
-        thread_id = str(uuid4())
         with self.store.transaction() as connection:
             row = claim_row(connection, claim_id)
             if row["active"] or row["decision"]:
                 raise ClaimError(409, "This claim is already running or decided.")
-            connection.execute(
-                "UPDATE claims SET state='in_progress', active=1, thread_id=? "
-                "WHERE id=?",
-                (thread_id, claim_id),
-            )
-            append_event(
-                connection,
-                claim_id,
-                EventInput(
-                    thread_id=thread_id,
-                    action="Run agent",
-                    status="started",
-                    detail="Reading the claim and policy evidence.",
-                ),
-            )
+            if connection.execute("SELECT 1 FROM claims WHERE active=1").fetchone():
+                raise ClaimError(409, "Another claim is already running.")
+            return self._start(connection, claim_id)
+
+    def start_next(
+        self, excluded: set[str], eligible: set[str] | None = None
+    ) -> tuple[str, str] | None:
+        """Atomically reserve the next eligible waiting claim in queue order."""
+        with self.store.transaction() as connection:
+            if connection.execute("SELECT 1 FROM claims WHERE active=1").fetchone():
+                return None
+            rows = connection.execute(
+                "SELECT id FROM claims WHERE state='waiting' AND decision IS NULL "
+                "AND active=0 ORDER BY queue_position"
+            ).fetchall()
+            for row in rows:
+                claim_id = row["id"]
+                if claim_id not in excluded and (
+                    eligible is None or claim_id in eligible
+                ):
+                    return claim_id, self._start(connection, claim_id)
+        return None
+
+    @staticmethod
+    def _start(connection: sqlite3.Connection, claim_id: str) -> str:
+        thread_id = str(uuid4())
+        connection.execute(
+            "UPDATE claims SET state='in_progress', active=1, thread_id=? WHERE id=?",
+            (thread_id, claim_id),
+        )
+        append_event(
+            connection,
+            claim_id,
+            EventInput(
+                thread_id=thread_id,
+                action="Run agent",
+                status="started",
+                detail="Reading the claim and policy evidence.",
+            ),
+        )
         return thread_id
 
     def decide(self, claim_id: str, decision: DecisionInput) -> dict[str, Any]:

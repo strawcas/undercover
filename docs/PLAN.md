@@ -4,7 +4,7 @@
 
 Extend the implemented claims pilot so the UnderCover Agent automatically works waiting claims in queue order. Handlers follow progress, inspect decisions and policy references, and sign off approved payouts over $1,000. Starting each assessment must no longer require a dashboard action.
 
-Add two terminal commands: one rebuilds the database from `data/`, returning every source claim to Waiting; the other works every waiting claim in order, prints each result, then prints totals. This revision is a planning deliverable. These changes and commands are not implemented yet; all criteria below remain unchecked until verified.
+Add two terminal commands: one rebuilds the database from `data/`, returning every source claim to Waiting; the other works every waiting claim in order, prints each result, then prints totals. Implementation of this revision is in progress. Checked criteria have been verified; unchecked criteria remain to be implemented and checked.
 
 Keep the existing FastAPI, SQLite, LangChain, React, Vite, Tailwind and TypeScript implementation. Use Python 3.12 with uv and Node 26 as specified in `docs/TECH_STACK.md`. The existing claim context, exact monetary amounts, model tools, policy assessment, payment gate and handler actions are the baseline to preserve.
 
@@ -82,13 +82,13 @@ This establishes one ordering and one owner for both execution modes, so automat
 
 Success criteria:
 
-- [ ] `uv run pytest backend/tests/test_seed.py backend/tests/test_queue.py -q` passes using temporary databases and no model calls.
-- [ ] Fresh initialization assigns positions in source-file order. Synthetic IDs whose lexical order differs from source order prove that API display and worker selection follow the same persisted positions.
-- [ ] Existing databases migrate in current displayed order without changing saved decisions, exact monetary amounts, sign-offs, payments or events. Repeated initialization preserves both records and positions.
-- [ ] Concurrent reservation attempts cannot claim the same row, create more than one active assessment, select an already decided claim or skip queue order. Decided and awaiting-sign-off rows do not block later waiting claims.
-- [ ] A new waiting row appended after the queue has emptied is selectable next. A worker session can exclude its failed attempts without excluding later arrivals.
-- [ ] Temporary-path ownership tests reject a second backend, command or reset against the same database, permit separate databases, and permit a new owner after a prior process exits unexpectedly.
-- [ ] `npm run check:python` passes with at least 80% coverage and no relaxed checks.
+- [x] `uv run pytest backend/tests/test_seed.py backend/tests/test_queue.py -q` passes using temporary databases and no model calls.
+- [x] Fresh initialization assigns positions in source-file order. Synthetic IDs whose lexical order differs from source order prove that API display and worker selection follow the same persisted positions.
+- [x] Existing databases migrate in current displayed order without changing saved decisions, exact monetary amounts, sign-offs, payments or events. Repeated initialization preserves both records and positions.
+- [x] Concurrent reservation attempts cannot claim the same row, create more than one active assessment, select an already decided claim or skip queue order. Decided and awaiting-sign-off rows do not block later waiting claims.
+- [x] A new waiting row appended after the queue has emptied is selectable next. A worker session can exclude its failed attempts without excluding later arrivals.
+- [x] Temporary-path ownership tests reject a second backend, command or reset against the same database, permit separate databases, and permit a new owner after a prior process exits unexpectedly.
+- [x] `npm run check:python` passes with at least 80% coverage and no relaxed checks.
 
 ## Phase 2: Start and drain the queue automatically
 
@@ -177,6 +177,6 @@ Success criteria:
 
 ## Implementation procedure
 
-This revised plan is ready for the student's review. Implement it only when asked. Preserve the completed pilot and work through the six extension phases in order. For each phase, add tests, verify its criteria, update this plan and `docs/STATUS.md`, and commit with the pre-commit hook enabled.
+Implementation of this revised plan is authorized. Preserve the completed pilot and work through the six extension phases in order. For each phase, add tests, verify its criteria, update this plan and `docs/STATUS.md`, and commit with the pre-commit hook enabled.
 
 Use uv and Windows-compatible commands. Preserve unrelated student changes. Never lower checks, bypass hooks, push commits, create AWS resources or read the evaluation answer key. Run `npm run check` after the final phase and report the result. Live model accuracy remains unmeasured unless a separate evaluation is explicitly requested.

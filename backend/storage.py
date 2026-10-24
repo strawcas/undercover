@@ -77,7 +77,8 @@ class Store:
                 "CREATE TABLE IF NOT EXISTS claims ("
                 "id TEXT PRIMARY KEY, state TEXT NOT NULL, thread_id TEXT, "
                 "active INTEGER NOT NULL DEFAULT 0, decision TEXT, "
-                "payout_cents INTEGER, sign_off TEXT, payment TEXT)"
+                "payout_cents INTEGER, sign_off TEXT, payment TEXT, "
+                "queue_position INTEGER)"
             )
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS events ("
@@ -86,9 +87,50 @@ class Store:
                 "status TEXT NOT NULL, detail TEXT NOT NULL, "
                 "created_at TEXT NOT NULL)"
             )
+            self._migrate_positions(connection)
             if connection.execute("SELECT 1 FROM records LIMIT 1").fetchone():
                 return
             self._seed(connection, data_dir)
+
+    @staticmethod
+    def _migrate_positions(connection: sqlite3.Connection) -> None:
+        columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(claims)")
+        }
+        if "queue_position" not in columns:
+            connection.execute("ALTER TABLE claims ADD COLUMN queue_position INTEGER")
+        position = connection.execute(
+            "SELECT COALESCE(MAX(queue_position), 0) FROM claims"
+        ).fetchone()[0]
+        for row in connection.execute(
+            "SELECT id FROM claims WHERE queue_position IS NULL ORDER BY id"
+        ).fetchall():
+            position += 1
+            connection.execute(
+                "UPDATE claims SET queue_position=? WHERE id=?", (position, row["id"])
+            )
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS queue_positions "
+            "ON claims(queue_position)"
+        )
+
+    def add_claim(self, claim: dict[str, Any]) -> None:
+        """Append a waiting claim with existing linked records to the queue."""
+        policy = self.record("policy", claim["policy_id"])
+        self.record("customer", claim["customer_id"])
+        if policy["customer_id"] != claim["customer_id"]:
+            raise ValueError("The claim's policy must belong to its customer.")
+        with self.transaction() as connection:
+            self._enqueue(connection, claim)
+
+    def _enqueue(self, connection: sqlite3.Connection, claim: dict[str, Any]) -> None:
+        record = Claim.model_validate(claim | {"status": "waiting"}).model_dump()
+        self._insert(connection, "claim", record["claim_id"], record)
+        connection.execute(
+            "INSERT INTO claims (id, state, queue_position) "
+            "SELECT ?, 'waiting', COALESCE(MAX(queue_position), 0) + 1 FROM claims",
+            (record["claim_id"],),
+        )
 
     def _seed(self, connection: sqlite3.Connection, data_dir: Path) -> None:
         sources: dict[str, Any] = {}
@@ -103,13 +145,7 @@ class Store:
         policy_ids = {claim["policy_id"] for claim in claims}
         customer_ids = {claim["customer_id"] for claim in claims}
         for claim in claims:
-            claim["status"] = "waiting"
-            Claim.model_validate(claim)
-            self._insert(connection, "claim", claim["claim_id"], claim)
-            connection.execute(
-                "INSERT INTO claims (id, state) VALUES (?, 'waiting')",
-                (claim["claim_id"],),
-            )
+            self._enqueue(connection, claim)
         linked = (
             ("policy", "policies.json", "policy_id", policy_ids, Policy),
             ("customer", "customers.json", "customer_id", customer_ids, Customer),
@@ -151,8 +187,14 @@ class Store:
         return decode(json.loads(row["body"]))
 
     def records(self, kind: str) -> list[Any]:
-        """Read all records of one kind in identifier order."""
+        """Read claims in queue order and other records in identifier order."""
         with self.connect() as connection:
+            if kind == "claim":
+                rows = connection.execute(
+                    "SELECT r.body FROM records r JOIN claims c ON c.id=r.id "
+                    "WHERE r.kind='claim' ORDER BY c.queue_position"
+                ).fetchall()
+                return [decode(json.loads(row["body"])) for row in rows]
             rows = connection.execute(
                 "SELECT body FROM records WHERE kind = ? ORDER BY id", (kind,)
             ).fetchall()
