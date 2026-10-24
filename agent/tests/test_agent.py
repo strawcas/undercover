@@ -2,14 +2,17 @@ import inspect
 
 import httpx
 import pytest
+from langchain_core.messages import AIMessage
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
+from ollama import ResponseError
 from pydantic import SecretStr
 
 from agent import main
-from agent.tests.stubs import api_client, scripted_model
+from agent.tests.stubs import StubModel, api_client, scripted_model
 from agent.tools import ClaimTools
 from backend.claims import Claims
+from backend.worker import execute
 
 
 @pytest.mark.parametrize(
@@ -75,10 +78,75 @@ def test_ollama_model_configuration(monkeypatch, name):
     assert selected.model == name
     assert selected.base_url == "http://localhost:11434"
     assert selected.temperature == 0
+    assert selected.num_ctx == 16384
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:12345")
+    monkeypatch.setenv("OLLAMA_NUM_CTX", "32768")
     custom = main.model()
     assert isinstance(custom, ChatOllama)
     assert custom.base_url == "http://localhost:12345"
+    assert custom.num_ctx == 32768
+
+
+@pytest.mark.parametrize("length", ["", "0", "-1", "1.5", "many"])
+def test_ollama_rejects_invalid_context_length(monkeypatch, length):
+    monkeypatch.setenv("MODEL_PROVIDER", "ollama")
+    monkeypatch.setenv("MODEL_NAME", "gemma4:e4b")
+    monkeypatch.setenv("OLLAMA_NUM_CTX", length)
+    with pytest.raises(ValueError, match="OLLAMA_NUM_CTX must be a positive integer"):
+        main.validate_model_config()
+
+
+def test_openrouter_ignores_ollama_context_setting(monkeypatch):
+    monkeypatch.setenv("OLLAMA_NUM_CTX", "unused")
+    assert isinstance(main.model(), ChatOpenAI)
+
+
+@pytest.mark.parametrize("saved", [False, True])
+def test_truncated_response_has_actionable_failure(
+    client, repository, monkeypatch, saved
+):
+    monkeypatch.setattr(main, "backend", lambda: api_client(client))
+    replies = list(scripted_model().messages)[:-1] if saved else []
+    replies.append(AIMessage(content="", response_metadata={"done_reason": "length"}))
+    llm = StubModel(messages=iter(replies))
+    claims = Claims(repository)
+    thread = claims.start("CLM-1001")
+    execute(claims, "CLM-1001", thread, lambda c, t: main.run(c, t, llm))
+    detail = claims.detail("CLM-1001")
+    assert detail["status"] == ("decided" if saved else "waiting")
+    assert detail["run_active"] is False
+    assert bool(detail["decision"]) == saved
+    assert bool(detail["payment"]) == saved
+    event = claims.events("CLM-1001")[-1]
+    assert event["status"] == "failed"
+    assert "context or generation limit" in event["detail"]
+    assert "OLLAMA_NUM_CTX" in event["detail"]
+
+
+@pytest.mark.parametrize(
+    ("status", "message"),
+    [(404, "ollama list"), (400, "tool calling"), (500, "HTTP 500")],
+)
+def test_ollama_failure_is_actionable_and_redacted(
+    client, repository, monkeypatch, status, message
+):
+    monkeypatch.setattr(main, "backend", lambda: api_client(client))
+
+    def failed_generation(*args, **kwargs):
+        raise ResponseError("secret provider details", status_code=status)
+
+    monkeypatch.setattr(StubModel, "_generate", failed_generation)
+    claims = Claims(repository)
+    thread = claims.start("CLM-1001")
+    execute(claims, "CLM-1001", thread, lambda c, t: main.run(c, t, scripted_model()))
+    detail = claims.detail("CLM-1001")
+    assert detail["status"] == "waiting"
+    assert detail["decision"] is None
+    assert detail["run_active"] is False
+    events = claims.events("CLM-1001")
+    assert events[-1]["status"] == "failed"
+    assert message in events[-1]["detail"]
+    assert "secret" not in str(events)
 
 
 @pytest.mark.parametrize("provider", ["unknown", ""])

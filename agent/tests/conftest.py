@@ -11,3 +11,4 @@ def model_environment(monkeypatch):
     monkeypatch.setenv("MODEL_NAME", "")
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    monkeypatch.delenv("OLLAMA_NUM_CTX", raising=False)

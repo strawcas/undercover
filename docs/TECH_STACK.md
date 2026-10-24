@@ -6,4 +6,4 @@
 - `e2e/`: Playwright tests.
 - `data/`: the business data the backend starts from. The agent never sees `data/evals/`, which holds the answer key.
 
-Python 3.12 with uv, all in the root `pyproject.toml`. Node 26. Configure the provider and model in the root `.env`. OpenRouter requires `OPENROUTER_API_KEY`; local Ollama requires no API key.
+Python 3.12 with uv, all in the root `pyproject.toml`. Node 26. Configure the provider and model in the root `.env`. OpenRouter requires `OPENROUTER_API_KEY`; local Ollama requires no API key. Ollama requests use 16,384 context tokens by default; `OLLAMA_NUM_CTX` overrides this with a positive integer to fit policy evidence, tool history and available memory.

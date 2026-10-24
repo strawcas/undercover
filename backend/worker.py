@@ -5,7 +5,7 @@ from threading import Event, Thread
 
 import httpx
 
-from agent.main import run
+from agent.main import AgentRunError, run
 from backend.claims import Claims
 
 Runner = Callable[[str, str], str]
@@ -18,6 +18,8 @@ def default_runner(claim_id: str, thread_id: str) -> str:
 def execute(claims: Claims, claim_id: str, thread_id: str, runner: Runner) -> None:
     try:
         runner(claim_id, thread_id)
+    except AgentRunError as error:
+        claims.finish(claim_id, thread_id, str(error))
     except Exception as error:
         claims.finish(
             claim_id,

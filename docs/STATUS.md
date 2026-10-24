@@ -1,6 +1,6 @@
 # Status
 
-The startup-pass revision in `docs/PLAN.md` is implemented and verified. Each backend start processes one snapshot of waiting claims, then leaves the app available for handlers. The agent now supports switching between OpenRouter and local Ollama, with a configurable model. Both execution modes use the same provider settings, claim tools and payment safeguards.
+The startup-pass revision in `docs/PLAN.md` is implemented and verified. Each backend start processes one snapshot of waiting claims, then leaves the app available for handlers. The agent supports switching between OpenRouter and local Ollama, with a configurable model. Ollama requests now allocate 16,384 context tokens by default, with an override for larger policy/tool histories and clearer failure messages. Both execution modes use the same provider settings, claim tools and payment safeguards.
 
 ## Run locally
 
@@ -50,6 +50,8 @@ The default model is `openai/gpt-6-luna` with low reasoning effort. Set `MODEL_N
    MODEL_PROVIDER=ollama
    MODEL_NAME=qwen3:8b
    OLLAMA_BASE_URL=http://localhost:11434
+   # Optional context-token override; the default is 16384:
+   # OLLAMA_NUM_CTX=32768
    ```
 
    `MODEL_NAME` is required for Ollama. To choose a different local LLM, pull that model and use its exact tag from `ollama list`. The selected model must support tool calling so the agent can read context and save decisions. `OLLAMA_BASE_URL` is optional and defaults to the address above; it uses Ollama's native API, so do not append `/v1`. No OpenRouter key or Ollama sign-in is needed for downloaded local models.
@@ -62,7 +64,9 @@ The default model is `openai/gpt-6-luna` with low reasoning effort. Set `MODEL_N
 
    Alternatively, with UnderCover stopped, run `uv run -m agent` for a terminal pass. Keep Ollama running for either mode. The integration uses LangChain's [ChatOllama](https://docs.langchain.com/oss/python/integrations/chat/ollama); installing the Python dependency does not install Ollama or download models.
 
-The full policy wording and tool history need sufficient context. Check [Ollama's context settings](https://docs.ollama.com/context-length) and increase the context length in the Ollama app if needed; larger contexts and models require more memory. Choose a model size that fits your RAM/GPU memory. If a connection fails, check the API command above and `OLLAMA_BASE_URL`. If a model is missing, pull its exact tag; if tool calls fail, choose a model with tool support. Local model speed and decision accuracy depend on the model and hardware; live accuracy has not been evaluated.
+The full policy wording and tool history need sufficient context. UnderCover explicitly requests 16,384 tokens through `ChatOllama`'s `num_ctx`, avoiding Ollama's 4,096-token default on smaller GPUs. Set `OLLAMA_NUM_CTX` to a positive integer in the root `.env` to change that budget, then restart UnderCover. This per-request setting applies to both execution modes; it does not change the Ollama app's global settings. Check [Ollama's context settings](https://docs.ollama.com/context-length) for memory considerations: larger contexts and models require more RAM/GPU memory. Choose a model size and context that fit your machine.
+
+If a connection fails, check the API command above and `OLLAMA_BASE_URL`. HTTP 404 failures now direct you to check the exact installed model tag and native API address; HTTP 400 failures direct you to tool support and the Ollama server log. Provider response bodies are not exposed in claim activity. When Ollama reports a response stopped for length, activity identifies the context/generation limit and suggests increasing `OLLAMA_NUM_CTX`, rather than reporting only that no decision was recorded. An ordinary final reply without a saved decision still fails; the app never turns model prose into a decision. Local model speed and decision accuracy depend on the model and hardware; live accuracy has not been evaluated.
 
 Switching providers affects future attempts. Existing saved decisions remain unchanged. Failed undecided claims return to Waiting and can be retried on the next backend start or terminal pass. The system does not fall back to OpenRouter when Ollama fails.
 
@@ -114,8 +118,9 @@ Each startup or terminal pass attempts a claim once. Failed attempts without a d
 ## Verification
 
 - `uv sync`, `npm install`, development startup and the production dashboard build succeed on Windows. Both terminal entry points were also run against separate test databases.
-- `npm run check` passes: Ruff, Pyright, 117 pytest tests with 99.61% Python coverage, Prettier, ESLint, strict TypeScript, 17 Vitest tests with 99.18% statement coverage, and seven Playwright tests. Existing coverage thresholds and pre-commit hooks remain enabled. Previously applied compatible dependency updates are retained.
+- `npm run check` passes: Ruff, Pyright, 129 pytest tests with 99.63% Python coverage, Prettier, ESLint, strict TypeScript, 17 Vitest tests with 99.18% statement coverage, and seven Playwright tests. Existing coverage thresholds and pre-commit hooks remain enabled. Previously applied compatible dependency updates are retained.
 - Provider tests cover OpenRouter defaults and overrides, Ollama model selection and custom API addresses, required settings, invalid providers, assessments through the existing HTTP tools, and terminal processing with Ollama and no OpenRouter key. Model factories return scripted models for assessment tests. No live Ollama inference or model accuracy evaluation was performed for this addition.
+- Ollama regressions cover the default and overridden context budget, invalid context configuration before terminal reservations, truncated replies before and after saved decisions/payments, and redacted HTTP 400/404/500 errors. Local Ollama logs confirmed the reported 2:33:05 failure hit a 4,096-token context and was truncated; the earlier ResponseError timestamps corresponded to HTTP 404 responses. These diagnostics used existing logs and read-only model metadata, with no new live inference or working-database changes.
 - Automated checks use temporary databases and stub models, including actual local HTTP tool calls, queue migration/order, exclusive ownership and crash recovery, failures before/after decisions, Ctrl+C, rebuild validation, totals, empty queues and repeated drains.
 - A complete terminal integration test rebuilds the temporary source queue, processes all 25 claims in order, verifies the printed results and counts, confirms a repeated drain attempts zero claims, then rebuilds the queue again with all previous results cleared. A running backend blocks rebuilding; a slow stopping worker retains ownership until its active attempt finishes.
 - Playwright MCP checks verified the startup pass, a later arrival remaining Waiting after completion, refresh and navigation, exact read-only instructions, and handler sign-off plus a $1,250 simulated payment after processing ended. The current browser checks have no console errors. Prior desktop/390-pixel light/dark layouts and keyboard checks remain applicable; screenshots are in the ignored `.playwright-mcp` directory.

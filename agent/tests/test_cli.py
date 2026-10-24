@@ -215,6 +215,17 @@ def test_invalid_provider_configuration_leaves_queue_unattempted(
     assert Claims(terminal).events("CLM-1001") == []
 
 
+def test_invalid_ollama_context_leaves_queue_unattempted(terminal, monkeypatch, capsys):
+    monkeypatch.setenv("MODEL_PROVIDER", "ollama")
+    monkeypatch.setenv("MODEL_NAME", "gemma4:e4b")
+    monkeypatch.setenv("OLLAMA_NUM_CTX", "invalid")
+    assert batch.main() == 1
+    captured = capsys.readouterr()
+    assert "OLLAMA_NUM_CTX must be a positive integer" in captured.err
+    assert "Attempted: 0" in captured.out
+    assert Claims(terminal).events("CLM-1001") == []
+
+
 def test_occupied_address_leaves_database_unchanged(terminal, monkeypatch, capsys):
     parsed = urlsplit(batch.backend_url())
     assert parsed.port is not None
