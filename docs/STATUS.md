@@ -1,6 +1,6 @@
 # Status
 
-Implementation of the revised `docs/PLAN.md` is in progress. Phases 1 through 4 are verified, with 98 Python tests passing: ordered automatic processing and both terminal commands are built. Dashboard updates and final integration verification remain.
+Implementation of the revised `docs/PLAN.md` is in progress. Phases 1 through 5 are verified: both terminal commands, ordered automatic processing and dashboard updates are built. Checks pass with 98 Python tests, 16 component tests and six Playwright tests. Final integration verification and handover remain.
 
 ## Run locally
 
@@ -42,7 +42,7 @@ Both commands use the configured `UNDERCOVER_DB_PATH`, defaulting to `undercover
 
 - FastAPI and SQLite seed the 25 pilot claims, linked policies and customers, plans, add-ons, handlers, company settings and policy wording. No evaluation or security claims, claims manual or manual-only settings are exposed.
 - The dashboard shows the queue's four workflow states, every claim item and document, policy and customer history, decisions and calculations, policy references, read-only instructions and timestamped activity. It supports light and dark browser preferences and narrow screens.
-- The backend automatically works waiting claims in persisted queue order, one at a time, after its HTTP API is ready. Each session attempts a claim once and continues after failures. All agent context and writes go through backend HTTP tools. The dashboard's old Run agent control is pending replacement.
+- The backend automatically works waiting claims in persisted queue order, one at a time, after its HTTP API is ready. Each session attempts a claim once and continues after failures. All agent context and writes go through backend HTTP tools. The dashboard follows waiting and active claims automatically and has no Run agent button.
 - Approve, decline and refer are distinct from payment state. An approved payout up to and including $1,000 can be paid automatically. Above $1,000, a handler must sign off before the separate payment operation succeeds. The backend checks the approved amount, sign-off and duplicate payment within a transaction.
 - Sign-off records the selected handler, amount and timestamp. All payments are simulated. Eligible unpaid approvals can also be paid from the dashboard.
 - Records persist in the ignored root `undercover.db`. `UNDERCOVER_DB_PATH` optionally changes its location. Seeding preserves existing work. `UNDERCOVER_BACKEND_URL` optionally changes the agent's HTTP destination.

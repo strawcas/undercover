@@ -36,8 +36,6 @@ function api(initial: ClaimDetail) {
     if (path.endsWith("/events"))
       return Promise.resolve(new Response(JSON.stringify(events)));
     if (options?.method === "POST") {
-      if (path.endsWith("/runs"))
-        current = { ...current, status: "in_progress", run_active: true };
       if (path.endsWith("/sign-off"))
         current = {
           ...current,
@@ -72,7 +70,7 @@ function api(initial: ClaimDetail) {
   };
 }
 
-it("starts a claim, polls live activity, and stops after the decision", async () => {
+it("follows an automatic assessment from waiting through completion", async () => {
   vi.useFakeTimers();
   const backend = api(claim);
   const onChange = vi.fn();
@@ -80,9 +78,11 @@ it("starts a claim, polls live activity, and stops after the decision", async ()
     render(<ClaimReader claimId="CLM-1001" onChange={onChange} />);
     await Promise.resolve();
   });
+  expect(screen.getByText("Waiting for automatic assessment")).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Run agent" })).toBeNull();
+  backend.update({ ...claim, status: "in_progress", run_active: true });
   await act(async () => {
-    fireEvent.click(screen.getByRole("button", { name: "Run agent" }));
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(1000);
   });
   expect(screen.getByText("Agent is reviewing this claim")).toBeDefined();
   backend.update({ ...claim, decision, status: "decided" }, [
@@ -105,12 +105,15 @@ it("starts a claim, polls live activity, and stops after the decision", async ()
     await vi.advanceTimersByTimeAsync(3000);
   });
   expect(backend.fetcher).toHaveBeenCalledTimes(count);
-  expect(onChange).toHaveBeenCalled();
+  expect(
+    backend.fetcher.mock.calls.some((call) => call[1]?.method === "POST"),
+  ).toBe(false);
 });
 
 it("requires handler selection, signs off, then permits a separate payment", async () => {
   const backend = api({ ...claim, decision, status: "awaiting_sign_off" });
-  render(<ClaimReader claimId="CLM-1001" />);
+  const onChange = vi.fn();
+  render(<ClaimReader claimId="CLM-1001" onChange={onChange} />);
   const sign = await screen.findByRole("button", { name: "Sign off payout" });
   expect(sign).toHaveProperty("disabled", true);
   expect(
@@ -130,24 +133,27 @@ it("requires handler selection, signs off, then permits a separate payment", asy
     "/api/claims/CLM-1001/pay",
     expect.objectContaining({ body: JSON.stringify({ amount: "1250.00" }) }),
   );
+  expect(onChange).toHaveBeenCalledTimes(2);
 });
 
 it("shows backend rejection and refreshes authoritative claim state", async () => {
-  const backend = api(claim);
+  const backend = api({ ...claim, decision, status: "decided" });
   render(<ClaimReader claimId="CLM-1001" />);
-  const run = await screen.findByRole("button", { name: "Run agent" });
+  const pay = await screen.findByRole("button", {
+    name: "Record simulated payment",
+  });
   backend.fetcher.mockImplementationOnce(() =>
     Promise.resolve(
       new Response(
-        JSON.stringify({ detail: "This claim is already running." }),
+        JSON.stringify({ detail: "Payment has already been recorded." }),
         { status: 409 },
       ),
     ),
   );
-  fireEvent.click(run);
+  fireEvent.click(pay);
   expect(await screen.findByRole("alert")).toHaveProperty(
     "textContent",
-    expect.stringContaining("already running"),
+    expect.stringContaining("already been recorded"),
   );
   fireEvent.click(screen.getByRole("button", { name: "Refresh claim" }));
   await waitFor(() => {
@@ -157,6 +163,24 @@ it("shows backend rejection and refreshes authoritative claim state", async () =
       ).length,
     ).toBeGreaterThan(1);
   });
+});
+
+it("shows a failed automatic attempt without offering a manual start", async () => {
+  const backend = api(claim);
+  backend.update(claim, [
+    {
+      id: 1,
+      thread_id: "thread",
+      action: "Run agent",
+      status: "failed",
+      detail: "Agent run failed. Retry in a new processing session.",
+      created_at: decision.created_at,
+    },
+  ]);
+  render(<ClaimReader claimId="CLM-1001" />);
+  expect(await screen.findByText("Assessment paused")).toBeDefined();
+  expect(screen.getByText(/Agent run failed/)).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Run agent" })).toBeNull();
 });
 
 it.each(["decline", "refer"] as const)(

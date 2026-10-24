@@ -23,7 +23,7 @@ export function useResource<T>(
   useEffect(() => {
     let current = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let poll = false;
+    let poll = pollWhile !== neverPoll;
     async function load() {
       try {
         const data = await loader(path);

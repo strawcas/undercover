@@ -11,8 +11,9 @@ from agent.main import run
 from agent.tests.stubs import scripted_model
 from backend.main import create_app
 from backend.storage import Store
+from backend.worker import api_ready
 
-PORT = 8011
+PORT = int(os.getenv("UNDERCOVER_TEST_PORT", "8011"))
 os.environ["UNDERCOVER_BACKEND_URL"] = f"http://127.0.0.1:{PORT}"
 attempts: dict[str, int] = {}
 
@@ -33,8 +34,19 @@ def scripted_runner(claim_id: str, thread_id: str) -> str:
 
 if __name__ == "__main__":
     with TemporaryDirectory(prefix="undercover-e2e-") as directory:
+        gate = os.getenv("UNDERCOVER_TEST_GATE")
+
+        def ready():
+            return (gate is None or Path(gate).exists()) and api_ready(
+                f"http://127.0.0.1:{PORT}", app.state.instance_id
+            )
+
+        app = create_app(
+            Store(Path(directory) / "claims.db"), scripted_runner, worker_ready=ready
+        )
         uvicorn.run(
-            create_app(Store(Path(directory) / "claims.db"), scripted_runner),
+            app,
             host="127.0.0.1",
             port=PORT,
+            log_level="warning",
         )

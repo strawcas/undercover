@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -33,7 +34,40 @@ function mockApi() {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
+});
+
+it("keeps watching an idle queue and stops polling when navigating away", async () => {
+  vi.useFakeTimers();
+  let queue = rows.slice(0, 0);
+  const fetcher = vi.fn((path: string) =>
+    Promise.resolve(
+      path === "/api/claims"
+        ? new Response(JSON.stringify(queue))
+        : respond(path),
+    ),
+  );
+  vi.stubGlobal("fetch", fetcher);
+  await act(async () => {
+    render(<App />);
+    await Promise.resolve();
+  });
+  expect(screen.getByText("No claims in the queue.")).toBeDefined();
+  queue = rows.slice(0, 1);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000);
+  });
+  expect(screen.getByRole("button", { name: "Open CLM-1001" })).toBeDefined();
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Agent instructions" }));
+    await Promise.resolve();
+  });
+  const calls = fetcher.mock.calls.length;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3000);
+  });
+  expect(fetcher).toHaveBeenCalledTimes(calls);
 });
 
 it("renders the queue, all states and the complete claim", async () => {

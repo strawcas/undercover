@@ -17,8 +17,8 @@ const states: ClaimState[] = [
   "decided",
 ];
 
-function queueRunning(rows: QueueRow[]) {
-  return rows.some((row) => row.run_active);
+function watchQueue() {
+  return true;
 }
 
 function Instructions() {
@@ -108,7 +108,11 @@ export function App() {
     data: rows,
     error,
     refresh,
-  } = useResource("/api/claims", request<QueueRow[]>, queueRunning);
+  } = useResource(
+    "/api/claims",
+    request<QueueRow[]>,
+    page === "claims" ? watchQueue : undefined,
+  );
   const activeId = selected ?? rows?.[0]?.claim_id;
   return (
     <div className="workspace">

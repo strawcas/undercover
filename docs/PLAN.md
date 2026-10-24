@@ -150,13 +150,13 @@ Preserve `docs/BRAND.md`, accessible keyboard operation, narrow layouts and ligh
 
 Success criteria:
 
-- [ ] `npm run check:ts` passes with strict TypeScript, no `any` and at least 80% Vitest coverage.
-- [ ] Component tests show waiting -> in progress -> decided and waiting -> in progress -> waiting for sign-off without a start button or start-run request. Another claim beginning after the queue was idle appears automatically.
-- [ ] Selected waiting claims refresh without user actions. Queue ordering, counts, new arrivals, errors, final decisions and payment state remain accurate across automatic transitions.
-- [ ] Polling tests cover idle gaps, request failure recovery, navigation and unmount without duplicate polling or stale updates.
-- [ ] Handler sign-off and separate payment remain usable for an approval over $1,000 while the worker assesses subsequent claims. Rejected and duplicate actions show the backend response.
-- [ ] In Playwright MCP with the scripted backend, open the dashboard, follow automatic activity and decisions, and verify instructions remain read only. Refreshing preserves committed records.
-- [ ] Inspect desktop and 390-pixel-wide layouts in light and dark modes; automatic status text, activity and handler actions remain readable and keyboard accessible without horizontal overflow or uncaught browser errors.
+- [x] `npm run check:ts` passes with strict TypeScript, no `any` and at least 80% Vitest coverage.
+- [x] Component tests show waiting -> in progress -> decided and waiting -> in progress -> waiting for sign-off without a start button or start-run request. Another claim beginning after the queue was idle appears automatically.
+- [x] Selected waiting claims refresh without user actions. Queue ordering, counts, new arrivals, errors, final decisions and payment state remain accurate across automatic transitions.
+- [x] Polling tests cover idle gaps, request failure recovery, navigation and unmount without duplicate polling or stale updates.
+- [x] Handler sign-off and separate payment remain usable for an approval over $1,000 while the worker assesses subsequent claims. Rejected and duplicate actions show the backend response.
+- [x] In Playwright MCP with the scripted backend, open the dashboard, follow automatic activity and decisions, and verify instructions remain read only. Refreshing preserves committed records.
+- [x] Inspect desktop and 390-pixel-wide layouts in light and dark modes; automatic status text, activity and handler actions remain readable and keyboard accessible without horizontal overflow or uncaught browser errors.
 
 ## Phase 6: Verify both execution modes and document the handover
 

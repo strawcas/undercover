@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   type ClaimDetail,
   type ClaimEvent,
@@ -25,7 +25,7 @@ async function loadClaim(path: string): Promise<Bundle> {
 }
 
 function isRunning(bundle: Bundle) {
-  return bundle.claim.run_active;
+  return bundle.claim.run_active || bundle.claim.status === "waiting";
 }
 function noChange() {
   return;
@@ -85,7 +85,13 @@ function Actions({
   claim,
   action,
   busy,
-}: Readonly<{ claim: ClaimDetail; action: Action; busy: boolean }>) {
+  failed,
+}: Readonly<{
+  claim: ClaimDetail;
+  action: Action;
+  busy: boolean;
+  failed: boolean;
+}>) {
   if (claim.run_active)
     return (
       <section className="panel action-panel">
@@ -100,18 +106,15 @@ function Actions({
     return (
       <section className="panel action-panel">
         <div>
-          <h3>Start a claim assessment</h3>
-          <p>The agent reads the evidence and applies the policy wording.</p>
+          <h3>
+            {failed ? "Assessment paused" : "Waiting for automatic assessment"}
+          </h3>
+          <p>
+            {failed
+              ? "The last attempt failed. Its details are in the activity below."
+              : "The agent will pick up this claim in queue order."}
+          </p>
         </div>
-        <button
-          className="primary-button"
-          disabled={busy}
-          onClick={() => {
-            action("runs");
-          }}
-        >
-          Run agent
-        </button>
       </section>
     );
   if (claim.status === "awaiting_sign_off")
@@ -189,9 +192,6 @@ export function ClaimReader({
   const { data, error, refresh } = useResource(path, loadClaim, isRunning);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
-  useEffect(() => {
-    if (data) onChange();
-  }, [data, onChange]);
 
   async function perform(operation: string, body?: Record<string, string>) {
     if (busy) return;
@@ -243,7 +243,12 @@ export function ClaimReader({
           </button>
         </div>
       )}
-      <Actions claim={data.claim} action={action} busy={busy} />
+      <Actions
+        claim={data.claim}
+        action={action}
+        busy={busy}
+        failed={data.events.at(-1)?.status === "failed"}
+      />
       <Activity events={data.events} />
     </ClaimView>
   );

@@ -5,13 +5,12 @@ test("approves, shows live activity and records an eligible payment", async ({
   request,
 }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Run agent" }).click();
-  await expect(page.getByText("Agent is reviewing this claim")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Run agent" })).toHaveCount(0);
   await expect(
     page.getByRole("list", { name: "Claim activity" }),
   ).toContainText("Run agent");
   const duplicate = await request.post("/api/claims/CLM-1001/runs");
-  expect(duplicate.status()).toBe(409);
+  expect(duplicate.status()).toBe(404);
   await expect(page.getByText(/Simulated payment recorded/)).toBeVisible({
     timeout: 10000,
   });
@@ -32,7 +31,6 @@ test("requires handler sign-off before paying more than USD 1,000", async ({
 }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Open CLM-1003" }).click();
-  await page.getByRole("button", { name: "Run agent" }).click();
   await expect(
     page.getByRole("heading", { name: "Handler sign-off required" }),
   ).toBeVisible({ timeout: 10000 });
@@ -63,7 +61,6 @@ for (const [id, outcome] of [
   test(`records a ${outcome} decision without payment`, async ({ page }) => {
     await page.goto("/");
     await page.getByRole("button", { name: `Open ${id}` }).click();
-    await page.getByRole("button", { name: "Run agent" }).click();
     await expect(
       page
         .getByRole("region", { name: "Agent decision" })
@@ -75,18 +72,23 @@ for (const [id, outcome] of [
   });
 }
 
-test("retries a failed run without losing the failure trace", async ({
+test("shows a failed attempt while automatic processing continues", async ({
   page,
+  request,
 }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Open CLM-1005" }).click();
-  await page.getByRole("button", { name: "Run agent" }).click();
   await expect(page.getByText(/Agent run failed/)).toBeVisible({
     timeout: 10000,
   });
-  await page.getByRole("button", { name: "Run agent" }).click();
-  await expect(page.getByText(/Simulated payment recorded/)).toBeVisible({
-    timeout: 10000,
-  });
+  await expect(page.getByText("Assessment paused")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Run agent" })).toHaveCount(0);
+  await expect
+    .poll(async () => {
+      const next = await request.get("/api/claims/CLM-1006");
+      const detail = (await next.json()) as { status: string };
+      return detail.status;
+    })
+    .toBe("decided");
   await expect(page.getByText(/Agent run failed/)).toBeVisible();
 });
