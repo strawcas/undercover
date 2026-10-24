@@ -16,6 +16,28 @@ Open http://localhost:5173 for the dashboard. The backend is at http://localhost
 
 Add `OPENROUTER_API_KEY` to the existing root `.env` for real agent runs. The default model is `openai/gpt-6-luna` with low reasoning effort. `MODEL_NAME` can override it, for example `openrouter/free`. `.env.example` lists optional settings. Never commit `.env`.
 
+## Planned database and queue commands
+
+These commands are specified in `docs/PLAN.md` but are not implemented yet. After implementation, stop `npm run dev` with Ctrl+C and run them from the repository root.
+
+Rebuild the database from `data/`, returning every claim in `data/claims.json` to Waiting:
+
+```powershell
+uv run -m backend.reset_db
+```
+
+This clears previous decisions, sign-offs, simulated payments and activity, reloads the permitted source records, and prints the database path and restored claim count. It leaves the claims waiting until processing starts.
+
+Process every waiting claim in queue order:
+
+```powershell
+uv run -m backend.work_queue
+```
+
+This starts its own local backend, runs the configured agent one claim at a time, prints each decision, payout, explanation and payment/sign-off state, then prints totals and exits. Failed claims are reported and later claims continue. Existing decided claims are skipped. No dashboard or separately running backend is needed.
+
+Both commands use the configured `UNDERCOVER_DB_PATH`, defaulting to `undercover.db`, and refuse to run while another process owns that database. Processing uses `OPENROUTER_API_KEY` and the optional `MODEL_NAME` from `.env`. Payouts over $1,000 still require a handler's sign-off.
+
 ## What is built
 
 - FastAPI and SQLite seed the 25 pilot claims, linked policies and customers, plans, add-ons, handlers, company settings and policy wording. No evaluation or security claims, claims manual or manual-only settings are exposed.
