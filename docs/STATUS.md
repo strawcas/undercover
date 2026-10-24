@@ -1,6 +1,6 @@
 # Status
 
-The claims pilot is complete. All six phases in `docs/PLAN.md` have been verified.
+The original claims pilot is complete. The revised `docs/PLAN.md` plans automatic queue processing, a database rebuild command and a terminal command that processes waiting claims in order and prints decisions and totals. Those extensions are not implemented yet; the revised plan's criteria remain unchecked. The run instructions and built features below describe the existing manual-start pilot.
 
 ## Run locally
 
