@@ -1,6 +1,6 @@
 # Status
 
-The revised claims pilot is complete. Automatic queue processing, both terminal commands and the updated dashboard are implemented. All six phases in `docs/PLAN.md` have been verified.
+The startup-pass revision in `docs/PLAN.md` is in progress. The backend now processes one startup snapshot and finishes, with 103 Python tests passing. Both terminal commands and the prior safeguards are preserved; dashboard wording and final integration follow-up are pending.
 
 ## Run locally
 
@@ -16,7 +16,7 @@ Open http://localhost:5173 for the dashboard. The backend is at http://localhost
 
 Add `OPENROUTER_API_KEY` to the existing root `.env` for real agent runs. The default model is `openai/gpt-6-luna` with low reasoning effort. `MODEL_NAME` overrides it, for example `openrouter/free`. Your existing model selection is preserved. Never commit `.env`.
 
-The backend automatically starts processing waiting claims, one at a time, once its HTTP API is ready. It keeps watching for stored arrivals even when the dashboard is closed. Select a claim to follow its activity and decision; there is no Run agent button.
+At each backend startup, the app snapshots waiting claims, processes them one at a time once its HTTP API is ready, then ends the processing task. Claims arriving during or after that pass wait for another backend start or explicit terminal run. Dashboard refreshes do not trigger processing. Select a claim to follow its activity and decision; there is no Run agent button.
 
 ## Rebuild the database
 
@@ -55,7 +55,7 @@ Each session attempts a claim once. Failed attempts without a decision return to
 ## What is built
 
 - SQLite stores the source claims and their linked policies and customers, plans, add-ons, handlers, company settings and policy wording. A persisted queue position controls both dashboard display and worker selection. Existing databases migrate without clearing work.
-- The LangChain agent reads instructions and claim context and records activity, decisions and payments through backend HTTP tools. The queue worker atomically reserves one claim at a time and keeps the API responsive.
+- The LangChain agent reads instructions and claim context and records activity, decisions and payments through backend HTTP tools. Startup processing atomically reserves one claim at a time from a fixed snapshot, then terminates while the API remains available.
 - The dashboard follows waiting and active claims automatically, including idle gaps and new stored arrivals. It shows complete records, decisions, calculations, references, errors, read-only instructions and timestamped activity. Polling cleans up on navigation.
 - Approval, decline and referral remain distinct from payment state. Approvals up to and including $1,000 can be paid automatically. Larger approvals require handler sign-off before the separate payment operation can succeed; the worker continues with other claims while sign-off is pending.
 - Handler sign-off and eligible simulated payment remain available in the dashboard. The backend enforces exact approved amounts, sign-off and duplicate-payment checks in transactions.

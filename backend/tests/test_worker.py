@@ -12,11 +12,11 @@ from backend.tests.conftest import decision_payload
 from backend.worker import QueueWorker, api_ready, execute
 
 
-def test_automatic_lifecycle_readiness_and_arrivals(repository):
+def test_startup_snapshot_finishes_and_later_arrivals_wait(repository):
     claims = Claims(repository)
     gate = Event()
-    drained = Event()
-    arrival_done = Event()
+    initial_ids = [row["claim_id"] for row in claims.queue()]
+    original = repository.record("claim", "CLM-1001")
     started = []
 
     def decide(claim_id, thread_id):
@@ -24,13 +24,11 @@ def test_automatic_lifecycle_readiness_and_arrivals(repository):
         active = [row for row in claims.queue() if row["run_active"]]
         assert len(active) == 1
         assert active[0]["claim_id"] == claim_id
+        if claim_id == initial_ids[0]:
+            repository.add_claim(original | {"claim_id": "CLM-0001"})
         claims.decide(
             claim_id, DecisionInput.model_validate(decision_payload(thread_id))
         )
-        if len(started) == 25:
-            drained.set()
-        if claim_id == "CLM-0000":
-            arrival_done.set()
         return "Complete"
 
     app = create_app(repository, decide, worker_ready=gate.is_set)
@@ -42,17 +40,97 @@ def test_automatic_lifecycle_readiness_and_arrivals(repository):
             "/api/claims/{claim_id}/runs"
             not in client.get("/openapi.json").json()["paths"]
         )
+        repository.add_claim(original | {"claim_id": "CLM-0000"})
         gate.set()
-        assert drained.wait(15)
-        assert started == [row["claim_id"] for row in claims.queue()]
-        repository.add_claim(
-            repository.record("claim", "CLM-1001") | {"claim_id": "CLM-0000"}
+        app.state.worker.thread.join(timeout=15)
+        assert not app.state.worker.thread.is_alive()
+        assert started == initial_ids
+        repository.add_claim(original | {"claim_id": "CLM-0002"})
+        for claim_id in ("CLM-0000", "CLM-0001", "CLM-0002"):
+            assert client.get(f"/api/claims/{claim_id}").json()["status"] == "waiting"
+            assert claims.events(claim_id) == []
+        assert client.get("/api/health").status_code == 200
+        assert client.get("/api/claims").status_code == 200
+        assert (
+            client.post(
+                "/api/claims/CLM-1001/sign-off", json={"handler_id": "HND-01"}
+            ).status_code
+            == 201
         )
-        assert arrival_done.wait(5)
+        assert (
+            client.post(
+                "/api/claims/CLM-1001/pay", json={"amount": "1250.00"}
+            ).status_code
+            == 201
+        )
+        with (
+            pytest.raises(RuntimeError, match="already in use"),
+            DatabaseOwner(repository.path),
+        ):
+            pass
     assert not app.state.worker.thread.is_alive()
-    assert claims.detail("CLM-0000")["decision"] is not None
+    original_events = claims.events("CLM-1001")
+    restarted = create_app(repository, decide, worker_ready=lambda: True)
+    with TestClient(restarted):
+        restarted.state.worker.thread.join(timeout=15)
+        assert not restarted.state.worker.thread.is_alive()
+    assert started == initial_ids + ["CLM-0000", "CLM-0001", "CLM-0002"]
+    assert claims.events("CLM-1001") == original_events
     with DatabaseOwner(repository.path):
         pass
+
+
+def test_empty_startup_queue_finishes_without_waiting_for_api_or_later_arrivals(
+    repository,
+):
+    with repository.transaction() as connection:
+        connection.execute("UPDATE claims SET state='decided', decision='{}'")
+    attempted = []
+    ready = Event()
+    app = create_app(
+        repository,
+        lambda c, _t: attempted.append(c) or "Complete",
+        worker_ready=ready.is_set,
+    )
+    with TestClient(app):
+        app.state.worker.thread.join(timeout=5)
+        assert not app.state.worker.thread.is_alive()
+        repository.add_claim(
+            repository.record("claim", "CLM-1001") | {"claim_id": "TEST-LATER"}
+        )
+        assert not attempted
+        assert Claims(repository).detail("TEST-LATER")["status"] == "waiting"
+
+
+def test_startup_failure_is_retried_only_on_a_later_start(repository):
+    with repository.transaction() as connection:
+        connection.execute(
+            "UPDATE claims SET state='decided', decision='{}' WHERE queue_position > 2"
+        )
+    claims = Claims(repository)
+    attempted = []
+
+    def decide(claim_id, thread_id):
+        attempted.append(claim_id)
+        if claim_id == "CLM-1001" and attempted.count(claim_id) == 1:
+            raise RuntimeError("Synthetic provider failure")
+        claims.decide(
+            claim_id, DecisionInput.model_validate(decision_payload(thread_id))
+        )
+        return "Complete"
+
+    app = create_app(repository, decide, worker_ready=lambda: True)
+    with TestClient(app):
+        app.state.worker.thread.join(timeout=10)
+        assert not app.state.worker.thread.is_alive()
+        assert attempted == ["CLM-1001", "CLM-1002"]
+        assert claims.detail("CLM-1001")["status"] == "waiting"
+    restarted = create_app(repository, decide, worker_ready=lambda: True)
+    with TestClient(restarted):
+        restarted.state.worker.thread.join(timeout=10)
+        assert not restarted.state.worker.thread.is_alive()
+        assert attempted == ["CLM-1001", "CLM-1002", "CLM-1001"]
+        assert claims.detail("CLM-1001")["decision"] is not None
 
 
 def test_shutdown_before_readiness_starts_nothing(repository):

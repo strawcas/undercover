@@ -33,6 +33,11 @@ def create_app(
     async def lifespan(_app: FastAPI):
         owner = DatabaseOwner(repository.path).acquire()
         worker = None
+
+        def release_after_shutdown():
+            if worker is not None and worker.stopping.is_set():
+                owner.release()
+
         try:
             repository.initialize()
             claims.recover_interrupted()
@@ -42,16 +47,14 @@ def create_app(
                     claims,
                     runner,
                     worker_ready or (lambda: api_ready(url, instance_id)),
-                    owner.release,
+                    release_after_shutdown,
                 )
                 _app.state.worker = worker
                 worker.start()
             yield
         finally:
-            if worker is None:
+            if worker is None or await asyncio.to_thread(worker.stop):
                 owner.release()
-            else:
-                await asyncio.to_thread(worker.stop)
 
     app = FastAPI(title="UnderCover", lifespan=lifespan)
     app.state.claims = claims

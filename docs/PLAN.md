@@ -4,7 +4,7 @@
 
 Revise the implemented claims pilot so the UnderCover Agent runs one pass through the waiting queue when the app starts, and runs again when explicitly invoked with `uv run -m agent`. Remove the continuous automatic worker that watches for new waiting claims. Handlers continue to follow progress, inspect decisions and policy references, and sign off approved payouts over $1,000.
 
-The earlier six-phase build is implemented and verified. Preserve its necessary features: database rebuilding, persisted queue order and results, atomic reservation, database ownership, terminal decisions and totals, failure handling, model configuration, HTTP tools, dashboard activity, handler sign-off and payment safeguards. This document now plans a change to when processing runs; that change is not implemented yet. Retained checked criteria record verified baseline behavior. Unchecked criteria identify the follow-up work.
+The earlier six-phase build is implemented and verified. Preserve its necessary features: database rebuilding, persisted queue order and results, atomic reservation, database ownership, terminal decisions and totals, failure handling, model configuration, HTTP tools, dashboard activity, handler sign-off and payment safeguards. The phase 2 startup-pass changes are implemented and verified with 103 Python tests. Dashboard wording and final integration follow-up remain pending in phases 5 and 6.
 
 For this revision, an app start means backend startup. Each backend start makes one finite pass; refreshing or navigating the dashboard does not start another pass. Once that pass finishes, the backend remains available but does not launch further agent work until the next backend start or an explicit terminal run.
 
@@ -103,17 +103,17 @@ Reuse the implemented activity, failure handling, restart recovery and test inje
 
 Success criteria:
 
-- [ ] Updated lifecycle tests, including `backend/tests/test_worker.py`, pass with scripted models and HTTP clients only.
-- [ ] A backend started with a temporary queue makes exactly one pass through the initial waiting snapshot after HTTP readiness. At most one claim is active, and attempts follow persisted queue order without a browser or start-run request.
-- [ ] The startup processing task terminates when its snapshot is exhausted. A claim added during that pass or after it ends remains Waiting while the backend stays running; no idle polling or new model calls occur.
-- [ ] An initially empty queue ends the startup task without model calls. Adding a waiting claim afterward does not restart processing.
+- [x] Updated lifecycle tests, including `backend/tests/test_worker.py`, pass with scripted models and HTTP clients only.
+- [x] A backend started with a temporary queue makes exactly one pass through the initial waiting snapshot after HTTP readiness. At most one claim is active, and attempts follow persisted queue order without a browser or start-run request.
+- [x] The startup processing task terminates when its snapshot is exhausted. A claim added during that pass or after it ends remains Waiting while the backend stays running; no idle polling or new model calls occur.
+- [x] An initially empty queue ends the startup task without model calls. Adding a waiting claim afterward does not restart processing.
 - [x] A scripted approval, decline and referral read required context through HTTP and record the expected outcomes, explanations and references. Eligible payment is recorded exactly once.
 - [x] A scripted approval over $1,000 remains awaiting sign-off, blocks attempted payment and allows the next waiting claim to run.
 - [x] A failed attempt records its error, returns an undecided claim to Waiting, and allows later claims to finish. It is not retried in the same session. A later session retries it once; an error after a committed decision or payment preserves that record.
-- [ ] Readiness and shutdown tests preserve the existing safeguards. Finishing the startup pass leaves health, read, handler sign-off and payment APIs available and the database still owned by the backend. Shutdown releases ownership after active work finishes or its process exits.
-- [ ] A later backend start makes a new snapshot and processes remaining undecided claims once, without reassessing saved decisions or duplicating payments. Browser refreshes and page navigation never trigger runs.
+- [x] Readiness and shutdown tests preserve the existing safeguards. Finishing the startup pass leaves health, read, handler sign-off and payment APIs available and the database still owned by the backend. Shutdown releases ownership after active work finishes or its process exits.
+- [x] A later backend start makes a new snapshot and processes remaining undecided claims once, without reassessing saved decisions or duplicating payments. Browser refreshes and page navigation never trigger runs.
 - [x] The removed per-claim start route is absent from OpenAPI; remaining operation IDs, required inputs, thread validation and payment checks still pass their API tests.
-- [ ] `npm run check:python` passes after the startup-pass changes with at least 80% coverage.
+- [x] `npm run check:python` passes after the startup-pass changes with at least 80% coverage.
 
 ## Phase 3: Rebuild the database from the terminal
 

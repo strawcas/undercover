@@ -47,7 +47,7 @@ def api_ready(url: str, instance_id: str) -> bool:
 
 
 class QueueWorker:
-    """Attempt each waiting claim once per session and keep watching for arrivals."""
+    """Process one queue snapshot, shared by startup and terminal runs."""
 
     def __init__(
         self,
@@ -62,7 +62,7 @@ class QueueWorker:
         self.release = release
         self.attempted: set[str] = set()
         self.stopping = Event()
-        self.thread = Thread(target=self.watch, name="claims-queue", daemon=True)
+        self.thread = Thread()
 
     def step(self, eligible: set[str] | None = None) -> dict | None:
         """Run the next claim and return its saved result, or idle."""
@@ -76,19 +76,31 @@ class QueueWorker:
         execute(self.claims, claim_id, thread_id, self.runner)
         return self.claims.detail(claim_id)
 
-    def watch(self) -> None:
+    def run_once(self, eligible: set[str]) -> None:
         try:
+            if not eligible:
+                return
             while not self.stopping.is_set() and not self.ready():
                 self.stopping.wait(0.1)
             while not self.stopping.is_set():
-                if self.step() is None:
-                    self.stopping.wait(1)
+                if self.step(eligible) is None:
+                    break
         finally:
             self.release()
 
     def start(self) -> None:
+        eligible = {
+            row["claim_id"] for row in self.claims.queue() if row["status"] == "waiting"
+        }
+        self.thread = Thread(
+            target=self.run_once,
+            args=(eligible,),
+            name="claims-startup",
+            daemon=True,
+        )
         self.thread.start()
 
-    def stop(self) -> None:
+    def stop(self) -> bool:
         self.stopping.set()
         self.thread.join(timeout=5)
+        return not self.thread.is_alive()
