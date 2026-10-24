@@ -31,7 +31,7 @@ This clears previous decisions, sign-offs, simulated payments and activity, relo
 Process every waiting claim in queue order:
 
 ```powershell
-uv run -m backend.work_queue
+uv run -m agent
 ```
 
 This starts its own local backend, runs the configured agent one claim at a time, prints each decision, payout, explanation and payment/sign-off state, then prints totals and exits. Failed claims are reported and later claims continue. Existing decided claims are skipped. No dashboard or separately running backend is needed.

@@ -45,12 +45,12 @@ These commands become available after implementation. Run them from the reposito
 
 ```powershell
 uv run -m backend.reset_db
-uv run -m backend.work_queue
+uv run -m agent
 ```
 
 `backend.reset_db` resolves the configured database, validates and loads the seed allowlist into a replacement database, then replaces only the selected database after validation succeeds. It prints the resolved database path and restored claim count. Every source claim is Waiting, and prior decisions, sign-offs, simulated payments, activity and attempt state are cleared. A missing database can be created. Invalid input leaves an existing database intact. The command does not start the agent; all restored claims stay waiting until a processing mode starts. Source files and `.env` are not changed.
 
-`backend.work_queue` is a standalone terminal mode. It starts the required local HTTP backend using the configured backend URL, waits for readiness, processes the waiting claims present at the start of that invocation in persisted queue order, then shuts down its local server. It requires no dashboard or separately running `npm run dev`. It refuses to take over an occupied address or database and gives a useful terminal error. Recovered abandoned attempts without decisions are included in the starting queue; decided claims and approvals awaiting sign-off are skipped.
+`uv run -m agent` is a standalone terminal mode. It starts the required local HTTP backend using the configured backend URL, waits for readiness, processes the waiting claims present at the start of that invocation in persisted queue order, then shuts down its local server. It requires no dashboard or separately running `npm run dev`. It refuses to take over an occupied address or database and gives a useful terminal error. Recovered abandoned attempts without decisions are included in the starting queue; decided claims and approvals awaiting sign-off are skipped.
 
 After each attempt finishes, print the claim ID, recorded outcome, USD payout, explanation, policy references and payment/sign-off state. If an attempt fails, print the failure and any decision already committed, then continue. Flush output as work completes. Finish with attempted and decided counts, the approve/decline/refer breakdown, failed-run count and approvals awaiting sign-off. Decided equals approved plus declined plus referred; a failed run after a saved decision can appear in both the decided and failed-run counts.
 
@@ -127,14 +127,14 @@ Success criteria:
 
 ## Phase 4: Work the entire waiting queue from the terminal
 
-Add `backend.work_queue` as a finite execution mode around the same local HTTP backend, queue worker and configured model. Share readiness, ownership, interruption and finish behavior with normal automatic processing. Provide a test-only runner injection seam; production commands must not offer a stub-model selector.
+Add a thin `agent/__main__.py` entry point so `uv run -m agent` provides a finite execution mode around the same local HTTP backend, queue worker and configured model. Keep the shared queue worker in the backend and the existing `run(claim_id, thread_id)` interface in `agent/main.py`. Share readiness, ownership, interruption and finish behavior with normal automatic processing. Provide a test-only runner injection seam; production commands must not offer a stub-model selector.
 
 The terminal mode uses the waiting queue at invocation as its workload, so it prints a final count and exits. The normal backend continues watching for later arrivals.
 
 Success criteria:
 
-- [ ] `uv run pytest backend/tests/test_work_queue.py -q` passes using subprocesses or an injected terminal entry point, temporary databases and stub models; no test contacts OpenRouter.
-- [ ] Starting only the terminal command processes all initially waiting claims in persisted order, one at a time, with no dashboard or separately running backend. Its tools reach the local HTTP APIs.
+- [ ] `uv run pytest agent/tests/test_cli.py -q` passes using subprocesses or an injected terminal entry point, temporary databases and stub models; no test contacts OpenRouter.
+- [ ] Starting only `uv run -m agent` processes all initially waiting claims in persisted order, one at a time, with no dashboard or separately running backend. Its tools reach the local HTTP APIs, and entry-point tests verify that the package invokes the shared queue worker.
 - [ ] Captured output prints each decision once, in queue order, including payout, explanation, policy sections and payment/sign-off state. The final totals match persisted records, with correct counts for approvals, declines, referrals, failures and sign-off requirements.
 - [ ] An empty queue exits 0 with zero totals and no model calls. A second invocation after a successful drain leaves decisions and payments unchanged and prints zero attempted claims.
 - [ ] A failed claim is attempted once, printed as failed and left recoverable while later claims are processed. Exit code 1 and summary counts accurately cover errors both before and after a decision is saved.
