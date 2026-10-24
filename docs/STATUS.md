@@ -1,6 +1,6 @@
 # Status
 
-The startup-pass revision in `docs/PLAN.md` is implemented and verified. Each backend start processes one snapshot of waiting claims, then leaves the app available for handlers. Both terminal commands and the prior safeguards are preserved. All 103 Python tests, 17 component tests and seven Playwright tests pass.
+The startup-pass revision in `docs/PLAN.md` is implemented and verified. Each backend start processes one snapshot of waiting claims, then leaves the app available for handlers. The agent now supports switching between OpenRouter and local Ollama, with a configurable model. Both execution modes use the same provider settings, claim tools and payment safeguards.
 
 ## Run locally
 
@@ -14,9 +14,57 @@ npm run dev
 
 Open http://localhost:5173 for the dashboard. The backend is at http://localhost:8000, with API documentation at `/docs` and health at `/api/health`.
 
-Add `OPENROUTER_API_KEY` to the existing root `.env` for real agent runs. The default model is `openai/gpt-6-luna` with low reasoning effort. `MODEL_NAME` overrides it, for example `openrouter/free`. Your existing model selection is preserved. Never commit `.env`.
+Configure the model provider in the existing root `.env` as described below. OpenRouter remains the default when `MODEL_PROVIDER` is absent, so existing OpenRouter settings continue to work. Never commit `.env`.
 
 At each backend startup, the app snapshots waiting claims, processes them one at a time once its HTTP API is ready, then ends the processing task. There is no continuous queue watcher. An empty startup queue finishes without model calls. Claims arriving during or after that pass wait for another backend start or explicit terminal run. Dashboard refreshes and navigation do not trigger processing. Select a claim to follow its activity and decision; there is no Run agent button.
+
+## Choose the model provider
+
+Stop UnderCover with Ctrl+C before changing provider settings. Edit the root `.env`, then restart `npm run dev` or run `uv run -m agent` with the app stopped. Both commands read the same settings. Environment variables already set in your terminal take precedence over `.env`; update or remove any conflicting values there as well.
+
+### OpenRouter
+
+```dotenv
+MODEL_PROVIDER=openrouter
+OPENROUTER_API_KEY=your-openrouter-key
+# Optional model override:
+# MODEL_NAME=openrouter/free
+```
+
+The default model is `openai/gpt-6-luna` with low reasoning effort. Set `MODEL_NAME` to another OpenRouter model to override it. When switching back from Ollama, replace the Ollama model name with an OpenRouter model, or remove/comment out `MODEL_NAME` to use the default. An OpenRouter API key is required only for this provider.
+
+### Ollama locally
+
+1. Install [Ollama for Windows](https://docs.ollama.com/windows) and keep it running. The Windows app normally serves its API in the background. If you use the standalone CLI instead, start `ollama serve` in a separate terminal when no Ollama server is already running.
+2. Download a model that supports tool calling. For example, [Qwen3 8B](https://ollama.com/library/qwen3:8b) supports tools. In PowerShell:
+
+   ```powershell
+   ollama pull qwen3:8b
+   ollama list
+   Invoke-RestMethod http://localhost:11434/api/tags
+   ```
+
+3. Add or update these values in the root `.env`:
+
+   ```dotenv
+   MODEL_PROVIDER=ollama
+   MODEL_NAME=qwen3:8b
+   OLLAMA_BASE_URL=http://localhost:11434
+   ```
+
+   `MODEL_NAME` is required for Ollama. To choose a different local LLM, pull that model and use its exact tag from `ollama list`. The selected model must support tool calling so the agent can read context and save decisions. `OLLAMA_BASE_URL` is optional and defaults to the address above; it uses Ollama's native API, so do not append `/v1`. No OpenRouter key or Ollama sign-in is needed for downloaded local models.
+4. From the repository root, install the project dependencies and start the app:
+
+   ```powershell
+   uv sync
+   npm run dev
+   ```
+
+   Alternatively, with UnderCover stopped, run `uv run -m agent` for a terminal pass. Keep Ollama running for either mode. The integration uses LangChain's [ChatOllama](https://docs.langchain.com/oss/python/integrations/chat/ollama); installing the Python dependency does not install Ollama or download models.
+
+The full policy wording and tool history need sufficient context. Check [Ollama's context settings](https://docs.ollama.com/context-length) and increase the context length in the Ollama app if needed; larger contexts and models require more memory. Choose a model size that fits your RAM/GPU memory. If a connection fails, check the API command above and `OLLAMA_BASE_URL`. If a model is missing, pull its exact tag; if tool calls fail, choose a model with tool support. Local model speed and decision accuracy depend on the model and hardware; live accuracy has not been evaluated.
+
+Switching providers affects future attempts. Existing saved decisions remain unchanged. Failed undecided claims return to Waiting and can be retried on the next backend start or terminal pass. The system does not fall back to OpenRouter when Ollama fails.
 
 ## Rebuild the database
 
@@ -57,7 +105,7 @@ Each startup or terminal pass attempts a claim once. Failed attempts without a d
 ## What is built
 
 - SQLite stores the source claims and their linked policies and customers, plans, add-ons, handlers, company settings and policy wording. A persisted queue position controls both dashboard display and worker selection. Existing databases migrate without clearing work.
-- The LangChain agent reads instructions and claim context and records activity, decisions and payments through backend HTTP tools. Startup processing atomically reserves one claim at a time from a fixed snapshot, then terminates while the API remains available.
+- The LangChain agent supports OpenRouter and local Ollama with a shared `MODEL_NAME` setting. Ollama uses `ChatOllama` with temperature zero and a configurable native API address. Invalid providers, a missing Ollama model name and a missing OpenRouter key are rejected; terminal configuration errors leave the queue unattempted. The agent reads instructions and claim context and records activity, decisions and payments through backend HTTP tools. Startup processing atomically reserves one claim at a time from a fixed snapshot, then terminates while the API remains available.
 - The dashboard refreshes waiting and active claims, including later stored arrivals, without starting assessments. It shows complete records, decisions, calculations, references, errors, read-only instructions and timestamped activity. Waiting and failure messages explain that another queue run is needed; polling cleans up on navigation.
 - Approval, decline and referral remain distinct from payment state. Approvals up to and including $1,000 can be paid automatically. Larger approvals require handler sign-off before the separate payment operation can succeed; the pass continues with its other claims while sign-off is pending.
 - Handler sign-off and eligible simulated payment remain available in the dashboard. The backend enforces exact approved amounts, sign-off and duplicate-payment checks in transactions.
@@ -66,7 +114,8 @@ Each startup or terminal pass attempts a claim once. Failed attempts without a d
 ## Verification
 
 - `uv sync`, `npm install`, development startup and the production dashboard build succeed on Windows. Both terminal entry points were also run against separate test databases.
-- `npm run check` passes: Ruff, Pyright, 103 pytest tests with 99.60% Python coverage, Prettier, ESLint, strict TypeScript, 17 Vitest tests with 99.18% statement coverage, and seven Playwright tests. Existing coverage thresholds and pre-commit hooks remain enabled. Previously applied compatible dependency updates are retained.
+- `npm run check` passes: Ruff, Pyright, 117 pytest tests with 99.61% Python coverage, Prettier, ESLint, strict TypeScript, 17 Vitest tests with 99.18% statement coverage, and seven Playwright tests. Existing coverage thresholds and pre-commit hooks remain enabled. Previously applied compatible dependency updates are retained.
+- Provider tests cover OpenRouter defaults and overrides, Ollama model selection and custom API addresses, required settings, invalid providers, assessments through the existing HTTP tools, and terminal processing with Ollama and no OpenRouter key. Model factories return scripted models for assessment tests. No live Ollama inference or model accuracy evaluation was performed for this addition.
 - Automated checks use temporary databases and stub models, including actual local HTTP tool calls, queue migration/order, exclusive ownership and crash recovery, failures before/after decisions, Ctrl+C, rebuild validation, totals, empty queues and repeated drains.
 - A complete terminal integration test rebuilds the temporary source queue, processes all 25 claims in order, verifies the printed results and counts, confirms a repeated drain attempts zero claims, then rebuilds the queue again with all previous results cleared. A running backend blocks rebuilding; a slow stopping worker retains ownership until its active attempt finishes.
 - Playwright MCP checks verified the startup pass, a later arrival remaining Waiting after completion, refresh and navigation, exact read-only instructions, and handler sign-off plus a $1,250 simulated payment after processing ended. The current browser checks have no console errors. Prior desktop/390-pixel light/dark layouts and keyboard checks remain applicable; screenshots are in the ignored `.playwright-mcp` directory.

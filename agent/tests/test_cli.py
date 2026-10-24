@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 import pytest
 import uvicorn
 
+from agent import main as agent_main
 from agent.main import run
 from agent.tests.stubs import scripted_model
 from backend import batch
@@ -174,6 +175,44 @@ def test_missing_key_is_a_setup_error_but_empty_queue_needs_no_key(
     limit_queue(terminal, 0)
     assert batch.main() == 0
     assert "Attempted: 0" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("name", ["qwen3:8b", "llama3.1:8b"])
+def test_terminal_uses_selected_ollama_model_without_openrouter_key(
+    terminal, monkeypatch, capsys, name
+):
+    limit_queue(terminal, 1)
+    monkeypatch.setenv("MODEL_PROVIDER", "ollama")
+    monkeypatch.setenv("MODEL_NAME", name)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "")
+    seen = []
+
+    def configured_model(**kwargs):
+        seen.append(kwargs["model"])
+        return scripted_model()
+
+    monkeypatch.setattr(agent_main, "ChatOllama", configured_model)
+    assert batch.main() == 0
+    assert seen == [name]
+    assert "Attempted: 1 | Decided: 1 | Approved: 1" in capsys.readouterr().out
+    assert Claims(terminal).detail("CLM-1001")["payment"]["amount"] == "420.00"
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [("ollama", "", "Set MODEL_NAME"), ("unknown", "test", "MODEL_PROVIDER")],
+)
+def test_invalid_provider_configuration_leaves_queue_unattempted(
+    terminal, monkeypatch, capsys, settings
+):
+    provider, name, message = settings
+    monkeypatch.setenv("MODEL_PROVIDER", provider)
+    monkeypatch.setenv("MODEL_NAME", name)
+    assert batch.main() == 1
+    captured = capsys.readouterr()
+    assert message in captured.err
+    assert "Attempted: 0" in captured.out
+    assert Claims(terminal).events("CLM-1001") == []
 
 
 def test_occupied_address_leaves_database_unchanged(terminal, monkeypatch, capsys):

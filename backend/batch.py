@@ -1,12 +1,12 @@
 """Work the waiting queue once and print each decision and final totals."""
 
-import os
 import sqlite3
 import sys
 from collections import Counter
 from decimal import Decimal
 from typing import Any
 
+from agent.main import validate_model_config
 from backend.claims import Claims
 from backend.config import backend_url, database_path
 from backend.local import local_backend
@@ -70,8 +70,8 @@ class Report:
 def drain(claims: Claims, runner: Runner, report: Report) -> None:
     """Work the initial waiting queue once, preserving results on interruption."""
     pending = {row["claim_id"] for row in claims.queue() if row["status"] == "waiting"}
-    if pending and runner is default_runner and not os.getenv("OPENROUTER_API_KEY"):
-        raise ValueError("Set OPENROUTER_API_KEY in .env before processing claims.")
+    if pending and runner is default_runner:
+        validate_model_config()
     worker = QueueWorker(claims, runner, lambda: True, lambda: None)
     try:
         while (detail := worker.step(pending)) is not None:

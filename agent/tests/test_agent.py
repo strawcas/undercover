@@ -2,6 +2,9 @@ import inspect
 
 import httpx
 import pytest
+from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
+from pydantic import SecretStr
 
 from agent import main
 from agent.tests.stubs import api_client, scripted_model
@@ -44,14 +47,88 @@ def test_scripted_run(client, repository, monkeypatch, outcome, payout):
 
 
 def test_model_configuration(monkeypatch):
+    monkeypatch.delenv("MODEL_PROVIDER", raising=False)
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     monkeypatch.delenv("MODEL_NAME", raising=False)
     default = main.model()
+    assert isinstance(default, ChatOpenAI)
     assert default.model_name == "openai/gpt-6-luna"
     assert default.reasoning_effort == "low"
+    assert str(default.openai_api_base) == main.OPENROUTER_BASE_URL
+    assert isinstance(default.openai_api_key, SecretStr)
+    assert default.openai_api_key.get_secret_value() == "test-key"
+    monkeypatch.setenv("MODEL_PROVIDER", "openrouter")
     monkeypatch.setenv("MODEL_NAME", "openrouter/free")
-    assert main.model().model_name == "openrouter/free"
-    assert main.model().reasoning_effort is None
+    selected = main.model()
+    assert isinstance(selected, ChatOpenAI)
+    assert selected.model_name == "openrouter/free"
+    assert selected.reasoning_effort is None
+
+
+@pytest.mark.parametrize("name", ["qwen3:8b", "llama3.1:8b"])
+def test_ollama_model_configuration(monkeypatch, name):
+    monkeypatch.setenv("MODEL_PROVIDER", "ollama")
+    monkeypatch.setenv("MODEL_NAME", name)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    selected = main.model()
+    assert isinstance(selected, ChatOllama)
+    assert selected.model == name
+    assert selected.base_url == "http://localhost:11434"
+    assert selected.temperature == 0
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:12345")
+    custom = main.model()
+    assert isinstance(custom, ChatOllama)
+    assert custom.base_url == "http://localhost:12345"
+
+
+@pytest.mark.parametrize("provider", ["unknown", ""])
+def test_unknown_model_provider(monkeypatch, provider):
+    monkeypatch.setenv("MODEL_PROVIDER", provider)
+    with pytest.raises(ValueError, match="MODEL_PROVIDER must be openrouter or ollama"):
+        main.model()
+
+
+@pytest.mark.parametrize("name", [None, "", "   "])
+def test_ollama_requires_a_model_name(monkeypatch, name):
+    monkeypatch.setenv("MODEL_PROVIDER", "ollama")
+    if name is None:
+        monkeypatch.delenv("MODEL_NAME", raising=False)
+    else:
+        monkeypatch.setenv("MODEL_NAME", name)
+    with pytest.raises(ValueError, match="Set MODEL_NAME"):
+        main.model()
+
+
+def test_openrouter_requires_a_key(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="Set OPENROUTER_API_KEY"):
+        main.model()
+
+
+@pytest.mark.parametrize(
+    ("provider", "factory"), [("openrouter", "ChatOpenAI"), ("ollama", "ChatOllama")]
+)
+def test_selected_provider_runs_with_existing_http_tools(
+    client, repository, monkeypatch, provider, factory
+):
+    monkeypatch.setenv("MODEL_PROVIDER", provider)
+    monkeypatch.setenv("MODEL_NAME", "test-model")
+    if provider == "ollama":
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    seen = []
+
+    def configured_model(**kwargs):
+        seen.append(kwargs)
+        return scripted_model()
+
+    monkeypatch.setattr(main, factory, configured_model)
+    monkeypatch.setattr(main, "backend", lambda: api_client(client))
+    claims = Claims(repository)
+    thread = claims.start("CLM-1001")
+    assert "complete" in main.run("CLM-1001", thread)
+    claims.finish("CLM-1001", thread)
+    assert seen[0]["model"] == "test-model"
+    assert claims.detail("CLM-1001")["payment"]["amount"] == "420.00"
 
 
 def test_backend_url(monkeypatch):

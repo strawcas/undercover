@@ -6,6 +6,7 @@ import httpx
 from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain_core.language_models import BaseChatModel
+from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
@@ -25,8 +26,32 @@ def backend() -> httpx.Client:
     )
 
 
-def model() -> ChatOpenAI:
-    """Return the model named in MODEL_NAME, or GPT-6 Luna by default."""
+def model_provider() -> str:
+    """Read and validate the selected model provider."""
+    provider = os.getenv("MODEL_PROVIDER", "openrouter").strip().lower()
+    if provider not in {"openrouter", "ollama"}:
+        raise ValueError("MODEL_PROVIDER must be openrouter or ollama.")
+    return provider
+
+
+def validate_model_config() -> None:
+    """Check required settings without contacting either model provider."""
+    if model_provider() == "ollama":
+        if not os.getenv("MODEL_NAME", "").strip():
+            raise ValueError("Set MODEL_NAME in .env to a downloaded Ollama model.")
+    elif not os.getenv("OPENROUTER_API_KEY"):
+        raise ValueError("Set OPENROUTER_API_KEY in .env before processing claims.")
+
+
+def model() -> BaseChatModel:
+    """Return the selected OpenRouter or local Ollama chat model."""
+    validate_model_config()
+    if model_provider() == "ollama":
+        return ChatOllama(
+            model=os.environ["MODEL_NAME"].strip(),
+            base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+            temperature=0,
+        )
     name = os.getenv("MODEL_NAME")
     return ChatOpenAI(
         model=name or DEFAULT_MODEL,
