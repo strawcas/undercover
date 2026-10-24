@@ -98,15 +98,15 @@ Reuse the existing activity and finish behavior, adding the session-level failur
 
 Success criteria:
 
-- [ ] `uv run pytest agent/tests backend/tests/test_runs.py backend/tests/test_queue.py -q` passes with scripted models and HTTP clients only.
-- [ ] A backend started with a temporary queue begins work without a browser, button press or start-run API call. At most one claim is active, and attempts start in persisted queue order.
-- [ ] The worker idles without repeated model calls after draining the queue and picks up a newly stored waiting claim within the documented polling interval.
-- [ ] A scripted approval, decline and referral read required context through HTTP and record the expected outcomes, explanations and references. Eligible payment is recorded exactly once.
-- [ ] A scripted approval over $1,000 remains awaiting sign-off, blocks attempted payment and allows the next waiting claim to run.
-- [ ] A failed attempt records its error, returns an undecided claim to Waiting, and allows later claims to finish. It is not retried in the same session. A later session retries it once; an error after a committed decision or payment preserves that record.
-- [ ] Startup readiness and shutdown tests prevent model calls before the API is reachable and new claims after shutdown starts. Restart recovers abandoned attempts without duplicating decisions or payments.
-- [ ] The removed per-claim start route is absent from OpenAPI; remaining operation IDs, required inputs, thread validation and payment checks still pass their API tests.
-- [ ] `npm run check:python` passes with at least 80% coverage.
+- [x] `uv run pytest agent/tests backend/tests/test_runs.py backend/tests/test_queue.py -q` passes with scripted models and HTTP clients only.
+- [x] A backend started with a temporary queue begins work without a browser, button press or start-run API call. At most one claim is active, and attempts start in persisted queue order.
+- [x] The worker idles without repeated model calls after draining the queue and picks up a newly stored waiting claim within the documented polling interval.
+- [x] A scripted approval, decline and referral read required context through HTTP and record the expected outcomes, explanations and references. Eligible payment is recorded exactly once.
+- [x] A scripted approval over $1,000 remains awaiting sign-off, blocks attempted payment and allows the next waiting claim to run.
+- [x] A failed attempt records its error, returns an undecided claim to Waiting, and allows later claims to finish. It is not retried in the same session. A later session retries it once; an error after a committed decision or payment preserves that record.
+- [x] Startup readiness and shutdown tests prevent model calls before the API is reachable and new claims after shutdown starts. Restart recovers abandoned attempts without duplicating decisions or payments.
+- [x] The removed per-claim start route is absent from OpenAPI; remaining operation IDs, required inputs, thread validation and payment checks still pass their API tests.
+- [x] `npm run check:python` passes with at least 80% coverage.
 
 ## Phase 3: Rebuild the database from the terminal
 

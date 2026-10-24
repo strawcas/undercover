@@ -14,7 +14,7 @@ def repository(tmp_path):
 
 @pytest.fixture
 def client(repository):
-    with TestClient(create_app(repository)) as api:
+    with TestClient(create_app(repository, auto_run=False)) as api:
         yield api
 
 

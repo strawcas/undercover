@@ -156,7 +156,7 @@ def test_financial_records_survive_a_new_app_and_store(repository):
     original = claims.detail("CLM-1001")
     claims.finish("CLM-1001", original["thread_id"])
     original_events = claims.events("CLM-1001")
-    with TestClient(create_app(Store(repository.path))) as restarted:
+    with TestClient(create_app(Store(repository.path), auto_run=False)) as restarted:
         saved = restarted.get("/api/claims/CLM-1001").json()
         assert saved["decision"] == original["decision"]
         assert saved["sign_off"] == original["sign_off"]

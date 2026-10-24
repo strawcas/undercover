@@ -20,32 +20,32 @@ def test_start_run_and_completion(repository):
         )
         return "Complete"
 
-    with TestClient(create_app(repository, runner)) as client:
-        response = client.post("/api/claims/CLM-1001/runs")
-        assert response.status_code == 202
-        assert response.json()["thread_id"]
-        assert response.json()["status"] == "in_progress"
-        detail = client.get("/api/claims/CLM-1001").json()
-        assert detail["status"] == "decided"
-        assert detail["run_active"] is False
-        assert client.post("/api/claims/CLM-1001/runs").status_code == 409
-        assert client.post("/api/claims/missing/runs").status_code == 404
+    queue = worker.QueueWorker(claims, runner, lambda: True, lambda: None)
+    detail = queue.step({"CLM-1001"})
+    assert detail is not None
+    assert detail["status"] == "decided"
+    assert detail["run_active"] is False
+    assert queue.step({"CLM-1001"}) is None
 
 
 def test_failed_run_retry_and_redacted_error(repository):
     def failing(_claim_id, _thread_id):
         raise RuntimeError("secret provider details")
 
-    with TestClient(create_app(repository, failing)) as client:
-        first = client.post("/api/claims/CLM-1001/runs").json()
-        detail = client.get("/api/claims/CLM-1001").json()
-        assert detail["status"] == "waiting"
-        assert detail["decision"] is None
-        events = client.get("/api/claims/CLM-1001/events").json()
-        assert events[-1]["status"] == "failed"
-        assert "secret" not in str(events)
-        second = client.post("/api/claims/CLM-1001/runs").json()
-        assert first["thread_id"] != second["thread_id"]
+    claims = Claims(repository)
+    queue = worker.QueueWorker(claims, failing, lambda: True, lambda: None)
+    first = queue.step({"CLM-1001"})
+    assert first is not None
+    assert first["status"] == "waiting"
+    assert first["decision"] is None
+    events = claims.events("CLM-1001")
+    assert events[-1]["status"] == "failed"
+    assert "secret" not in str(events)
+    assert queue.step({"CLM-1001"}) is None
+    retry = worker.QueueWorker(claims, failing, lambda: True, lambda: None)
+    second = retry.step({"CLM-1001"})
+    assert second is not None
+    assert first["thread_id"] != second["thread_id"]
 
 
 def test_finished_without_decision(repository):
@@ -75,7 +75,7 @@ def test_restart_recovers_interrupted_work(repository, committed):
         claims.decide(
             "CLM-1001", DecisionInput.model_validate(decision_payload(thread))
         )
-    with TestClient(create_app(repository)):
+    with TestClient(create_app(repository, auto_run=False)):
         detail = claims.detail("CLM-1001")
         assert detail["run_active"] is False
         assert detail["status"] == ("awaiting_sign_off" if committed else "waiting")
