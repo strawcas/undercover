@@ -133,14 +133,14 @@ The terminal mode uses the waiting queue at invocation as its workload, so it pr
 
 Success criteria:
 
-- [ ] `uv run pytest agent/tests/test_cli.py -q` passes using subprocesses or an injected terminal entry point, temporary databases and stub models; no test contacts OpenRouter.
-- [ ] Starting only `uv run -m agent` processes all initially waiting claims in persisted order, one at a time, with no dashboard or separately running backend. Its tools reach the local HTTP APIs, and entry-point tests verify that the package invokes the shared queue worker.
-- [ ] Captured output prints each decision once, in queue order, including payout, explanation, policy sections and payment/sign-off state. The final totals match persisted records, with correct counts for approvals, declines, referrals, failures and sign-off requirements.
-- [ ] An empty queue exits 0 with zero totals and no model calls. A second invocation after a successful drain leaves decisions and payments unchanged and prints zero attempted claims.
-- [ ] A failed claim is attempted once, printed as failed and left recoverable while later claims are processed. Exit code 1 and summary counts accurately cover errors both before and after a decision is saved.
-- [ ] Missing configuration, an occupied local address or a database already owned by the backend fails clearly before starting an assessment. The command respects the configured database and local backend URL.
-- [ ] Ctrl+C stops new attempts, prints partial totals, releases process ownership and shuts down the local server. A later invocation recovers abandoned undecided work without repeating committed decisions or payments.
-- [ ] `npm run check:python` passes with at least 80% coverage.
+- [x] `uv run pytest agent/tests/test_cli.py -q` passes using subprocesses or an injected terminal entry point, temporary databases and stub models; no test contacts OpenRouter.
+- [x] Starting only `uv run -m agent` processes all initially waiting claims in persisted order, one at a time, with no dashboard or separately running backend. Its tools reach the local HTTP APIs, and entry-point tests verify that the package invokes the shared queue worker.
+- [x] Captured output prints each decision once, in queue order, including payout, explanation, policy sections and payment/sign-off state. The final totals match persisted records, with correct counts for approvals, declines, referrals, failures and sign-off requirements.
+- [x] An empty queue exits 0 with zero totals and no model calls. A second invocation after a successful drain leaves decisions and payments unchanged and prints zero attempted claims.
+- [x] A failed claim is attempted once, printed as failed and left recoverable while later claims are processed. Exit code 1 and summary counts accurately cover errors both before and after a decision is saved.
+- [x] Missing configuration, an occupied local address or a database already owned by the backend fails clearly before starting an assessment. The command respects the configured database and local backend URL.
+- [x] Ctrl+C stops new attempts, prints partial totals, releases process ownership and shuts down the local server. A later invocation recovers abandoned undecided work without repeating committed decisions or payments.
+- [x] `npm run check:python` passes with at least 80% coverage.
 
 ## Phase 5: Show automatic progress in the dashboard
 

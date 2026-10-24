@@ -1,6 +1,6 @@
 # Status
 
-Implementation of the revised `docs/PLAN.md` is in progress. Phases 1 through 3 are verified, with 86 Python tests passing: queue ordering, database ownership, automatic processing and the database rebuild command are built. The terminal agent command and dashboard changes are still pending.
+Implementation of the revised `docs/PLAN.md` is in progress. Phases 1 through 4 are verified, with 98 Python tests passing: ordered automatic processing and both terminal commands are built. Dashboard updates and final integration verification remain.
 
 ## Run locally
 
@@ -18,7 +18,7 @@ Add `OPENROUTER_API_KEY` to the existing root `.env` for real agent runs. The de
 
 ## Database and queue commands
 
-The rebuild command is available. The terminal agent command below is still pending implementation. Stop `npm run dev` with Ctrl+C and run commands from the repository root.
+Stop `npm run dev` with Ctrl+C and run commands from the repository root. Both commands are implemented.
 
 Rebuild the database from `data/`, returning every claim in `data/claims.json` to Waiting:
 
@@ -28,7 +28,7 @@ uv run -m backend.reset_db
 
 This clears previous decisions, sign-offs, simulated payments and activity, reloads the permitted source records, and prints the database path and restored claim count. It leaves the claims waiting until processing starts.
 
-Planned: process every waiting claim in queue order:
+Process every waiting claim in queue order:
 
 ```powershell
 uv run -m agent
