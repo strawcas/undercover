@@ -1,6 +1,6 @@
 # Status
 
-The startup-pass revision in `docs/PLAN.md` is in progress. The backend now processes one startup snapshot and finishes, with 103 Python tests passing. Both terminal commands and the prior safeguards are preserved; dashboard wording and final integration follow-up are pending.
+The startup-pass revision in `docs/PLAN.md` is in progress. The backend and dashboard follow-up is implemented, with 103 Python tests, 17 component tests and Playwright MCP checks passing. Both terminal commands and the prior safeguards are preserved; the final full-suite verification and documentation follow-up remain pending.
 
 ## Run locally
 

@@ -21,6 +21,9 @@ attempts: dict[str, int] = {}
 def scripted_runner(claim_id: str, thread_id: str) -> str:
     time.sleep(1.2)
     attempts[claim_id] = attempts.get(claim_id, 0) + 1
+    if claim_id == "CLM-1001" and attempts[claim_id] == 1:
+        store = app.state.claims.store
+        store.add_claim(store.record("claim", claim_id) | {"claim_id": "TEST-LATER"})
     if claim_id == "CLM-1005" and attempts[claim_id] == 1:
         raise RuntimeError("Synthetic provider failure")
     outcomes = {

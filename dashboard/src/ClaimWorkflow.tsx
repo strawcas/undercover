@@ -106,13 +106,11 @@ function Actions({
     return (
       <section className="panel action-panel">
         <div>
-          <h3>
-            {failed ? "Assessment paused" : "Waiting for automatic assessment"}
-          </h3>
+          <h3>{failed ? "Assessment paused" : "Waiting for assessment"}</h3>
           <p>
             {failed
-              ? "The last attempt failed. Its details are in the activity below."
-              : "The agent will pick up this claim in queue order."}
+              ? "The last attempt failed. Start another queue run to retry it."
+              : "Claims are assessed during startup or a terminal queue run."}
           </p>
         </div>
       </section>

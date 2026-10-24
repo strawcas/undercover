@@ -72,7 +72,7 @@ for (const [id, outcome] of [
   });
 }
 
-test("shows a failed attempt while automatic processing continues", async ({
+test("shows a failed attempt while the startup pass continues", async ({
   page,
   request,
 }) => {
@@ -91,4 +91,36 @@ test("shows a failed attempt while automatic processing continues", async ({
     })
     .toBe("decided");
   await expect(page.getByText(/Agent run failed/)).toBeVisible();
+});
+
+test("leaves later arrivals waiting after the startup pass and browser refresh", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(45000);
+  await expect
+    .poll(
+      async () => {
+        const response = await request.get("/api/claims/CLM-1025");
+        const detail = (await response.json()) as {
+          status: string;
+          run_active: boolean;
+        };
+        return detail.status === "decided" && !detail.run_active;
+      },
+      { timeout: 30000 },
+    )
+    .toBe(true);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open TEST-LATER" }).click();
+  await expect(page.getByText("Waiting for assessment")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Run agent" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Agent instructions" }).click();
+  await page.getByRole("button", { name: "Claims queue", exact: true }).click();
+  await expect(page.getByText("Waiting for assessment")).toBeVisible();
+  await page.reload();
+  await page.getByRole("button", { name: "Open TEST-LATER" }).click();
+  await expect(page.getByText("Waiting for assessment")).toBeVisible();
+  const events = await request.get("/api/claims/TEST-LATER/events");
+  expect(await events.json()).toEqual([]);
 });

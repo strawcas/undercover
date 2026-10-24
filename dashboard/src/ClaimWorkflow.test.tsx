@@ -70,7 +70,7 @@ function api(initial: ClaimDetail) {
   };
 }
 
-it("follows an automatic assessment from waiting through completion", async () => {
+it("follows a startup or terminal assessment from waiting through completion", async () => {
   vi.useFakeTimers();
   const backend = api(claim);
   const onChange = vi.fn();
@@ -78,7 +78,7 @@ it("follows an automatic assessment from waiting through completion", async () =
     render(<ClaimReader claimId="CLM-1001" onChange={onChange} />);
     await Promise.resolve();
   });
-  expect(screen.getByText("Waiting for automatic assessment")).toBeDefined();
+  expect(screen.getByText("Waiting for assessment")).toBeDefined();
   expect(screen.queryByRole("button", { name: "Run agent" })).toBeNull();
   backend.update({ ...claim, status: "in_progress", run_active: true });
   await act(async () => {
@@ -165,7 +165,7 @@ it("shows backend rejection and refreshes authoritative claim state", async () =
   });
 });
 
-it("shows a failed automatic attempt without offering a manual start", async () => {
+it("explains how to retry a failed pass without offering a manual start", async () => {
   const backend = api(claim);
   backend.update(claim, [
     {
@@ -179,8 +179,31 @@ it("shows a failed automatic attempt without offering a manual start", async () 
   ]);
   render(<ClaimReader claimId="CLM-1001" />);
   expect(await screen.findByText("Assessment paused")).toBeDefined();
+  expect(screen.getByText(/Start another queue run to retry it/)).toBeDefined();
   expect(screen.getByText(/Agent run failed/)).toBeDefined();
   expect(screen.queryByRole("button", { name: "Run agent" })).toBeNull();
+});
+
+it("keeps a later arrival waiting without starting processing while polling", async () => {
+  vi.useFakeTimers();
+  const backend = api({ ...claim, claim_id: "TEST-LATER" });
+  await act(async () => {
+    render(<ClaimReader claimId="TEST-LATER" />);
+    await Promise.resolve();
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3000);
+  });
+  expect(screen.getByText("Waiting for assessment")).toBeDefined();
+  expect(
+    screen.getByText(
+      "Claims are assessed during startup or a terminal queue run.",
+    ),
+  ).toBeDefined();
+  expect(backend.fetcher.mock.calls.length).toBeGreaterThan(2);
+  expect(
+    backend.fetcher.mock.calls.some((call) => call[1]?.method === "POST"),
+  ).toBe(false);
 });
 
 it.each(["decline", "refer"] as const)(

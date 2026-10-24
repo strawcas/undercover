@@ -4,7 +4,7 @@
 
 Revise the implemented claims pilot so the UnderCover Agent runs one pass through the waiting queue when the app starts, and runs again when explicitly invoked with `uv run -m agent`. Remove the continuous automatic worker that watches for new waiting claims. Handlers continue to follow progress, inspect decisions and policy references, and sign off approved payouts over $1,000.
 
-The earlier six-phase build is implemented and verified. Preserve its necessary features: database rebuilding, persisted queue order and results, atomic reservation, database ownership, terminal decisions and totals, failure handling, model configuration, HTTP tools, dashboard activity, handler sign-off and payment safeguards. The phase 2 startup-pass changes are implemented and verified with 103 Python tests. Dashboard wording and final integration follow-up remain pending in phases 5 and 6.
+The earlier six-phase build is implemented and verified. Preserve its necessary features: database rebuilding, persisted queue order and results, atomic reservation, database ownership, terminal decisions and totals, failure handling, model configuration, HTTP tools, dashboard activity, handler sign-off and payment safeguards. The startup-pass and dashboard changes in phases 2 and 5 are implemented and verified with 103 Python tests, 17 component tests and Playwright MCP checks. Final integration follow-up remains pending in phase 6.
 
 For this revision, an app start means backend startup. Each backend start makes one finite pass; refreshing or navigating the dashboard does not start another pass. Once that pass finishes, the backend remains available but does not launch further agent work until the next backend start or an explicit terminal run.
 
@@ -158,12 +158,12 @@ Preserve `docs/BRAND.md`, accessible keyboard operation, narrow layouts and ligh
 Success criteria:
 
 - [x] `npm run check:ts` passes with strict TypeScript, no `any` and at least 80% Vitest coverage.
-- [ ] Updated component tests follow startup/terminal assessments through waiting -> in progress -> decided or awaiting sign-off without a start button or start-run request. A later arrival appears as Waiting and does not imply that a worker will pick it up automatically.
-- [ ] Waiting and failure messages accurately explain the need for another processing pass. Dashboard polling, refreshes and navigation issue no processing requests.
+- [x] Updated component tests follow startup/terminal assessments through waiting -> in progress -> decided or awaiting sign-off without a start button or start-run request. A later arrival appears as Waiting and does not imply that a worker will pick it up automatically.
+- [x] Waiting and failure messages accurately explain the need for another processing pass. Dashboard polling, refreshes and navigation issue no processing requests.
 - [x] Selected claims refresh without user actions. Queue ordering, counts, new arrivals, errors, final decisions and payment state are retained.
 - [x] Polling tests cover idle gaps, request failure recovery, navigation and unmount without duplicate polling or stale updates.
 - [x] Handler sign-off and separate payment remain usable for an approval over $1,000 while the worker assesses subsequent claims. Rejected and duplicate actions show the backend response.
-- [ ] In Playwright MCP with the scripted backend, follow one startup pass and its decisions, verify later arrivals stay Waiting, and confirm read-only instructions and persisted records after refresh.
+- [x] In Playwright MCP with the scripted backend, follow one startup pass and its decisions, verify later arrivals stay Waiting, and confirm read-only instructions and persisted records after refresh.
 - [x] Inspect desktop and 390-pixel-wide layouts in light and dark modes; automatic status text, activity and handler actions remain readable and keyboard accessible without horizontal overflow or uncaught browser errors.
 
 ## Phase 6: Verify both execution modes and document the handover
