@@ -68,6 +68,39 @@ def test_shutdown_before_readiness_starts_nothing(repository):
     assert not app.state.worker.thread.is_alive()
 
 
+def test_slow_shutdown_keeps_ownership_until_the_attempt_finishes(repository):
+    entered = Event()
+    finish = Event()
+    claims = Claims(repository)
+
+    def slow_runner(claim_id, thread_id):
+        entered.set()
+        assert finish.wait(15)
+        claims.decide(
+            claim_id, DecisionInput.model_validate(decision_payload(thread_id))
+        )
+        return "Complete"
+
+    app = create_app(repository, slow_runner, worker_ready=lambda: True)
+    try:
+        with TestClient(app):
+            assert entered.wait(5)
+        assert app.state.worker.thread.is_alive()
+        with (
+            pytest.raises(RuntimeError, match="already in use"),
+            DatabaseOwner(repository.path),
+        ):
+            pass
+    finally:
+        finish.set()
+        app.state.worker.thread.join(timeout=5)
+    assert not app.state.worker.thread.is_alive()
+    assert claims.detail("CLM-1001")["decision"] is not None
+    assert claims.events("CLM-1002") == []
+    with DatabaseOwner(repository.path):
+        pass
+
+
 def test_failed_claim_does_not_block_the_next(repository):
     claims = Claims(repository)
     started = []

@@ -15,6 +15,7 @@ from backend.local import local_address, wait_started
 from backend.main import create_app
 from backend.models import DecisionInput
 from backend.ownership import DatabaseOwner
+from backend.reset_db import rebuild
 from backend.tests.conftest import decision_payload
 
 
@@ -68,6 +69,28 @@ def test_terminal_drains_in_order_and_repeat_is_empty(terminal, capsys):
     assert batch.main(scripted_runner) == 0
     assert "Attempted: 0 | Decided: 0" in capsys.readouterr().out
     assert claims.events("CLM-1001") == events
+
+
+def test_full_rebuild_drain_repeat_and_rebuild(terminal, capsys):
+    count = rebuild(terminal.path)
+    claims = Claims(terminal)
+    ordered = [row["claim_id"] for row in claims.queue()]
+    assert batch.main(scripted_runner) == 0
+    output = capsys.readouterr().out
+    printed = [
+        line.split()[0] for line in output.splitlines() if line.startswith("CLM-")
+    ]
+    assert printed == ordered
+    assert f"Attempted: {count} | Decided: {count}" in output
+    assert "Failed runs: 0 | Awaiting sign-off: 1" in output
+    assert all(row["outcome"] is not None for row in claims.queue())
+    assert sum(row["payment_status"] == "paid" for row in claims.queue()) == count - 3
+    assert batch.main(scripted_runner) == 0
+    assert "Attempted: 0 | Decided: 0" in capsys.readouterr().out
+    assert rebuild(terminal.path) == count
+    assert [row["claim_id"] for row in claims.queue()] == ordered
+    assert {row["status"] for row in claims.queue()} == {"waiting"}
+    assert all(claims.events(claim_id) == [] for claim_id in ordered)
 
 
 def test_failures_before_and_after_saved_decisions(terminal, capsys):

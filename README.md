@@ -20,9 +20,23 @@ npm run dev
 
 Open [the claims dashboard](http://localhost:5173). The backend is at [localhost:8000](http://localhost:8000/docs). Add `OPENROUTER_API_KEY` to your existing `.env` for agent runs; `.env.example` lists the supported settings. Set `MODEL_NAME=openrouter/free` to use the free model option, or leave it unset for the default model.
 
-Select a claim and choose **Run agent** to follow its activity and decision. Approved payouts up to $1,000 can be paid automatically. Above $1,000, select a reviewing handler and **Sign off payout**, then **Record simulated payment**. No real money is transferred. Everyone shares the local pilot; selecting a handler records attribution without sign-in.
+The backend automatically works waiting claims in queue order, one at a time, even with the dashboard closed. Select a claim to follow its activity and decision. Approved payouts up to $1,000 can be paid automatically. Above $1,000, select a reviewing handler and **Sign off payout**, then **Record simulated payment**. Everyone shares the local pilot; selecting a handler records attribution without sign-in. All payments are simulated.
 
-`npm run check` runs all checks, including model-free Playwright tests on separate ports with a temporary database. Claims, decisions, activity, sign-offs and payments persist in the ignored `undercover.db`. After a server interruption, unfinished claims can be retried; recorded decisions and payments are preserved. See [the pilot status](docs/STATUS.md) for details and limitations.
+Stop `npm run dev` with Ctrl+C before using either terminal command below. Rebuild the database from `data/`, clearing previous decisions, sign-offs, payments and activity and putting every source claim back in Waiting:
+
+```powershell
+uv run -m backend.reset_db
+```
+
+Work every waiting claim in queue order, printing each decision followed by totals:
+
+```powershell
+uv run -m agent
+```
+
+The agent command starts its own local backend and exits after one pass; no dashboard is needed. Both commands use `UNDERCOVER_DB_PATH` when set, otherwise `undercover.db`, and refuse a database already owned by another backend or command. Each worker session attempts a claim once; restart processing to retry a failed undecided claim. Decided claims are skipped.
+
+`npm run check` runs all checks with stub models and temporary databases, including terminal and Playwright integration tests. Normal startup preserves saved work. Source-file changes are loaded on a fresh database or an explicit rebuild. See [the pilot status](docs/STATUS.md) for output, exit codes and restart limits.
 
 _If you're looking at this in VS Code or Cursor, right-click `README.md` in the Explorer on the left and choose **Open Preview** to see it formatted._
 

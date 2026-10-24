@@ -1,9 +1,11 @@
 import json
+import socket
 from decimal import Decimal
 
 import pytest
 
 from backend.claims import Claims
+from backend.local import local_backend
 from backend.ownership import DatabaseOwner
 from backend.reset_db import main, rebuild
 from backend.storage import ROOT, SEED_FILES, Store
@@ -94,3 +96,14 @@ def test_mismatched_policy_is_rejected(repository, copied_data):
     path.write_text(json.dumps(records), encoding="utf-8")
     with pytest.raises(ValueError, match="mismatch"):
         rebuild(repository.path, copied_data)
+
+
+def test_rebuild_refuses_a_running_http_backend(repository):
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+    with local_backend(repository, lambda _c, _t: "Unused", f"http://127.0.0.1:{port}"):
+        before = repository.path.read_bytes()
+        with pytest.raises(RuntimeError, match="already in use"):
+            rebuild(repository.path)
+        assert repository.path.read_bytes() == before

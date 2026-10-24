@@ -4,7 +4,7 @@
 
 Extend the implemented claims pilot so the UnderCover Agent automatically works waiting claims in queue order. Handlers follow progress, inspect decisions and policy references, and sign off approved payouts over $1,000. Starting each assessment must no longer require a dashboard action.
 
-Add two terminal commands: one rebuilds the database from `data/`, returning every source claim to Waiting; the other works every waiting claim in order, prints each result, then prints totals. Implementation of this revision is in progress. Checked criteria have been verified; unchecked criteria remain to be implemented and checked.
+The two terminal commands are implemented: one rebuilds the database from `data/`, returning every source claim to Waiting; the other works every waiting claim in order, prints each result, then prints totals. All six phases of this revision have been implemented and verified.
 
 Keep the existing FastAPI, SQLite, LangChain, React, Vite, Tailwind and TypeScript implementation. Use Python 3.12 with uv and Node 26 as specified in `docs/TECH_STACK.md`. The existing claim context, exact monetary amounts, model tools, policy assessment, payment gate and handler actions are the baseline to preserve.
 
@@ -39,9 +39,9 @@ For this pilot, `data/` remains the intake source: changing its files takes effe
 
 Saving a decision and executing payment remain separate operations. The agent has no sign-off tool. Handler attribution remains unauthenticated in this local pilot. Payment checks apply regardless of who calls the API.
 
-### Planned terminal commands
+### Terminal commands
 
-These commands become available after implementation. Run them from the repository root. Stop `npm run dev` with Ctrl+C first; both commands refuse to run against a database owned by an active backend or another command.
+Run these commands from the repository root. Stop `npm run dev` with Ctrl+C first; both commands refuse to run against a database owned by an active backend or another command.
 
 ```powershell
 uv run -m backend.reset_db
@@ -68,7 +68,7 @@ Attempted: 2 | Decided: 2 | Approved: 1 | Declined: 1 | Referred: 0 | Failed run
 
 An empty queue prints zero totals and exits successfully without calling a model. Return exit code 0 when every attempted run completes with a decision, 1 for a setup error or any failed run, and 130 for Ctrl+C. Interruption stops new claims, prints available results and partial totals, and leaves incomplete work recoverable. Neither command performs real payments or grants handler sign-off.
 
-### Planned API surface
+### API surface
 
 Keep existing read, decision, activity, handler sign-off and simulated payment APIs, with their unique operation IDs, one-line docstrings and required inputs. `GET /api/claims` returns persisted queue order. The worker reserves claims through backend-owned transactional code; its agent still accesses context and records outcomes through HTTP tools.
 
@@ -166,17 +166,17 @@ Update the short README, `.env.example` if settings change, and `docs/STATUS.md`
 
 Success criteria:
 
-- [ ] `uv sync`, `npm install` and `npm run dev` work on Windows. Health returns `{"status":"ok"}`, and a stub-backed isolated backend starts processing without a browser.
-- [ ] Full-stack tests cover ordered automatic processing, idle-to-active pickup, approval/payment, decline, referral, sign-off while later claims run, the exact $1,000 boundary, direct blocked/duplicate payment calls, failed attempts and restart recovery.
-- [ ] A terminal integration test rebuilds a temporary database, drains its queue with stubs, verifies every printed decision and summary count against stored results, then proves a repeat drain processes zero claims.
-- [ ] Rebuilding that temporary database again restores all permitted claims to Waiting and clears prior results. Rebuilding while its backend runs is rejected without modifying the database.
-- [ ] Repeat the automatic handler journey in Playwright MCP: queue -> activity -> decision -> sign-off when required -> simulated payment, with no Run agent action and no unexpected console errors.
-- [ ] `npm run check` exits 0: Ruff, Pyright, pytest, Prettier, ESLint, TypeScript, Vitest and Playwright all pass with the existing coverage thresholds and hooks enabled. All automated models are stubs.
-- [ ] Inspect the diff for unrelated changes, secrets, databases, course notebooks, evaluation data and later-day features. No student configuration or working database is reset as part of the build.
-- [ ] README and `docs/STATUS.md` describe the implemented commands and their limits accurately. Mark criteria complete only after verification; report check results and remaining limitations.
+- [x] `uv sync`, `npm install` and `npm run dev` work on Windows. Health returns `{"status":"ok"}`, and a stub-backed isolated backend starts processing without a browser.
+- [x] Full-stack tests cover ordered automatic processing, idle-to-active pickup, approval/payment, decline, referral, sign-off while later claims run, the exact $1,000 boundary, direct blocked/duplicate payment calls, failed attempts and restart recovery.
+- [x] A terminal integration test rebuilds a temporary database, drains its queue with stubs, verifies every printed decision and summary count against stored results, then proves a repeat drain processes zero claims.
+- [x] Rebuilding that temporary database again restores all permitted claims to Waiting and clears prior results. Rebuilding while its backend runs is rejected without modifying the database.
+- [x] Repeat the automatic handler journey in Playwright MCP: queue -> activity -> decision -> sign-off when required -> simulated payment, with no Run agent action and no unexpected console errors.
+- [x] `npm run check` exits 0: Ruff, Pyright, pytest, Prettier, ESLint, TypeScript, Vitest and Playwright all pass with the existing coverage thresholds and hooks enabled. All automated models are stubs.
+- [x] Inspect the diff for unrelated changes, secrets, databases, course notebooks, evaluation data and later-day features. No student configuration or working database is reset as part of the build.
+- [x] README and `docs/STATUS.md` describe the implemented commands and their limits accurately. Mark criteria complete only after verification; report check results and remaining limitations.
 
 ## Implementation procedure
 
-Implementation of this revised plan is authorized. Preserve the completed pilot and work through the six extension phases in order. For each phase, add tests, verify its criteria, update this plan and `docs/STATUS.md`, and commit with the pre-commit hook enabled.
+All six extension phases are complete. Each phase was tested, documented and committed with the pre-commit hook enabled. The final full check passed with 101 Python tests, 16 component tests and six Playwright tests. Both setup commands and the production dashboard build passed; compatible development dependency updates resolved the advisories found during setup, and `npm audit` reports zero vulnerabilities.
 
 Use uv and Windows-compatible commands. Preserve unrelated student changes. Never lower checks, bypass hooks, push commits, create AWS resources or read the evaluation answer key. Run `npm run check` after the final phase and report the result. Live model accuracy remains unmeasured unless a separate evaluation is explicitly requested.
