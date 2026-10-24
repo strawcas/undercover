@@ -2,23 +2,26 @@
 
 ## Goal and scope
 
-Extend the implemented claims pilot so the UnderCover Agent automatically works waiting claims in queue order. Handlers follow progress, inspect decisions and policy references, and sign off approved payouts over $1,000. Starting each assessment must no longer require a dashboard action.
+Revise the implemented claims pilot so the UnderCover Agent runs one pass through the waiting queue when the app starts, and runs again when explicitly invoked with `uv run -m agent`. Remove the continuous automatic worker that watches for new waiting claims. Handlers continue to follow progress, inspect decisions and policy references, and sign off approved payouts over $1,000.
 
-The two terminal commands are implemented: one rebuilds the database from `data/`, returning every source claim to Waiting; the other works every waiting claim in order, prints each result, then prints totals. All six phases of this revision have been implemented and verified.
+The earlier six-phase build is implemented and verified. Preserve its necessary features: database rebuilding, persisted queue order and results, atomic reservation, database ownership, terminal decisions and totals, failure handling, model configuration, HTTP tools, dashboard activity, handler sign-off and payment safeguards. This document now plans a change to when processing runs; that change is not implemented yet. Retained checked criteria record verified baseline behavior. Unchecked criteria identify the follow-up work.
+
+For this revision, an app start means backend startup. Each backend start makes one finite pass; refreshing or navigating the dashboard does not start another pass. Once that pass finishes, the backend remains available but does not launch further agent work until the next backend start or an explicit terminal run.
 
 Keep the existing FastAPI, SQLite, LangChain, React, Vite, Tailwind and TypeScript implementation. Use Python 3.12 with uv and Node 26 as specified in `docs/TECH_STACK.md`. The existing claim context, exact monetary amounts, model tools, policy assessment, payment gate and handler actions are the baseline to preserve.
 
 The source queue is `data/claims.json`, currently containing 25 claims. Rebuilding must load every claim in that file, including later additions, with its linked policies and customers. Read only the existing seed allowlist and backend-owned agent instructions. Never import `data/evals/`, `data/security/`, the claims manual or manual-only company rules. Existing initialization continues to preserve stored work; rebuilding is a separate, explicitly invoked operation.
 
-For this pilot, `data/` remains the intake source: changing its files takes effect on a fresh database or an explicit rebuild. Claims added to the stored waiting queue are picked up automatically. A customer submission screen, live file import, integrations, agent swarms, durable graph execution, sign-in, real payments, customer messages, evaluation scoring and cloud deployment remain outside this revision.
+For this pilot, `data/` remains the intake source: changing its files takes effect on a fresh database or an explicit rebuild. Claims added to the stored queue after a processing pass starts remain Waiting until a later startup pass or explicit terminal run. A customer submission screen, live file import, integrations, agent swarms, durable graph execution, sign-in, real payments, customer messages, evaluation scoring and cloud deployment remain outside this revision.
 
 ## Design decisions
 
-- **One shared sequential worker.** The normal backend and the terminal processing command use the same queue selection and execution code. Process one claim at a time, finish its run, then take the next eligible claim. The worker calls the existing `run(claim_id, thread_id)` entry point; the agent continues to read and write exclusively through backend HTTP tools.
+- **One shared sequential runner.** The startup pass and terminal command reuse the implemented queue selection and execution code. Each pass snapshots the initially waiting claim IDs, processes them in persisted order and ends. Process one claim at a time using the existing `run(claim_id, thread_id)` entry point; the agent continues to read and write exclusively through backend HTTP tools.
 - **Stable queue order.** Persist a queue position assigned in `data/claims.json` order. Display and process claims in that order. Backfill existing databases in their current displayed order without altering decisions, sign-offs, payments or activity. Later stored arrivals append to the queue. Sorting by a claim identifier must not silently change queue order.
-- **Automatic processing by default.** After initialization and interrupted-run recovery, start the worker when the backend HTTP API is ready to accept its tool calls. Continue checking for eligible waiting claims while the backend runs, including when the dashboard is closed or the queue was previously empty. Remove the per-claim Run agent control and its start-run HTTP operation.
+- **One startup pass, then explicit runs.** After initialization and interrupted-run recovery, snapshot the waiting queue. Begin that finite pass once the backend HTTP API is ready to accept tool calls. End the processing task after every claim in that snapshot has been attempted once. An empty startup queue ends immediately without model calls. There is no idle queue-watching loop, timer or automatic pickup of later arrivals. Keep the removed per-claim Run agent control and start-run endpoint removed.
 - **One process owns a database.** The backend, rebuild command and terminal processing command share an exclusive lock for the resolved database path. Refuse a second owner before changing records or making model calls. A process exit releases ownership; an abandoned lock file alone must not block future use. Support the existing default path and `UNDERCOVER_DB_PATH` consistently.
-- **Bounded failure handling.** Attempt a claim at most once per worker session. If a run fails before a decision, keep its error activity, return it to Waiting and continue with later claims. Skip that failed claim for the rest of the session to prevent an endless retry loop. A later backend restart or terminal processing invocation can retry it. Preserve any decision or payment already committed, including when a later operation fails.
+- **Keep ownership after the startup pass.** The backend still serves decision, sign-off and payment operations after processing ends, so it retains database ownership until shutdown. Ending the startup task must not release that ownership prematurely. Stop the app before rebuilding or running the standalone terminal agent, as with the implemented commands.
+- **Bounded failure handling.** Attempt a claim at most once per startup or terminal pass. If a run fails before a decision, keep its error activity, return it to Waiting and continue with the remaining claims in the snapshot. Retry only in a later backend startup or explicit terminal invocation. Preserve any decision or payment already committed, including when a later operation fails.
 - **Local restart recovery.** Stop claiming new work during shutdown and allow the active attempt a bounded time to finish. On the next start, recover abandoned active runs: retry from the beginning only when no decision exists. Never reassess a decided claim or duplicate a payment. This does not add resumable model execution or support multiple backend workers against one database.
 - **Backend owns payment enforcement.** Decisions remain approve, decline or refer. Approval up to and including $1,000 permits simulated payment; approval over $1,000 waits for handler sign-off. Waiting for sign-off must not block processing of subsequent claims. A final decision is not eligible for reassessment until an explicit database rebuild.
 - **Keep the model configuration.** Use `OPENROUTER_API_KEY` and the existing `MODEL_NAME` override behavior. Both execution modes use the same model factory, instructions, tools and payment rules. Automated checks use injected stub models and temporary databases, with no external model calls.
@@ -28,13 +31,15 @@ For this pilot, `data/` remains the intake source: changing its files takes effe
 | Trigger | Queue state | Decision and payment |
 | --- | --- | --- |
 | Initialize or explicitly rebuild a source claim | Waiting | No decision or payment |
-| Worker atomically claims the next eligible row | In progress | One active attempt with a new thread ID |
+| Startup or terminal pass atomically claims the next eligible snapshot row | In progress | One active attempt with a new thread ID |
 | Record a decline or referral | Decided | Zero payout; payment unavailable |
 | Record an approval up to and including $1,000 | Decided | Approved; eligible for simulated payment |
-| Record an approval over $1,000 | Waiting for sign-off | Approved; payment blocked; worker continues the queue |
+| Record an approval over $1,000 | Waiting for sign-off | Approved; payment blocked; pass continues with its remaining claims |
 | A handler signs off that payout | Decided | Approved; eligible for simulated payment |
 | Pay the approved amount | Decided | Exactly one simulated payment recorded |
-| Attempt fails before recording a decision | Waiting | Error visible; skipped until a later worker session |
+| Attempt fails before recording a decision | Waiting | Error visible; retry only in a later pass |
+| A waiting claim arrives after the pass snapshot | Waiting | No attempt until a later startup or terminal run |
+| Startup pass completes | Existing claim states retained | Processing task ends; API and dashboard remain available |
 | Rebuild the database explicitly | Waiting for every source claim | Previous decisions, sign-offs, payments, thread IDs and activity removed |
 
 Saving a decision and executing payment remain separate operations. The agent has no sign-off tool. Handler attribution remains unauthenticated in this local pilot. Payment checks apply regardless of who calls the API.
@@ -70,15 +75,15 @@ An empty queue prints zero totals and exits successfully without calling a model
 
 ### API surface
 
-Keep existing read, decision, activity, handler sign-off and simulated payment APIs, with their unique operation IDs, one-line docstrings and required inputs. `GET /api/claims` returns persisted queue order. The worker reserves claims through backend-owned transactional code; its agent still accesses context and records outcomes through HTTP tools.
+Keep existing read, decision, activity, handler sign-off and simulated payment APIs, with their unique operation IDs, one-line docstrings and required inputs. `GET /api/claims` returns persisted queue order. The shared runner reserves snapshot claims through backend-owned transactional code; its agent still accesses context and records outcomes through HTTP tools.
 
-Remove `POST /api/claims/{claim_id}/runs` and the dashboard dependency on it. Queue processing starts with the backend or terminal mode. Rebuilding remains a terminal-only operation with no reset HTTP endpoint. No batch-control API is needed for the standalone command.
+Keep `POST /api/claims/{claim_id}/runs` and its dashboard dependency removed. Queue processing starts once with the backend or through terminal mode. Rebuilding remains a terminal-only operation with no reset HTTP endpoint. No new batch-control API is needed.
 
 ## Phase 1: Preserve queue order and coordinate database ownership
 
 Extend the existing storage rather than reseeding an established database. Add persisted queue positions and an atomic operation that reserves the next waiting, undecided, inactive claim. Introduce shared process ownership before startup recovery, execution or rebuilding can modify a database.
 
-This establishes one ordering and one owner for both execution modes, so automatic and terminal processing cannot compete or repeat a recorded decision.
+Retain this implemented foundation: one ordering and one owner for startup and terminal processing, preventing competing assessments or repeated recorded decisions.
 
 Success criteria:
 
@@ -90,23 +95,25 @@ Success criteria:
 - [x] Temporary-path ownership tests reject a second backend, command or reset against the same database, permit separate databases, and permit a new owner after a prior process exits unexpectedly.
 - [x] `npm run check:python` passes with at least 80% coverage and no relaxed checks.
 
-## Phase 2: Start and drain the queue automatically
+## Phase 2: Replace continuous processing with one startup pass
 
-Replace per-claim HTTP starts with a backend-managed sequential worker. Retain LangChain `create_agent`, existing HTTP tools and `run(claim_id, thread_id)`. Start model work only after the backend can serve HTTP; polling and shutdown must leave the API responsive.
+Change the implemented backend-managed worker into a finite startup task. Capture eligible waiting claims after initialization and interrupted-run recovery, wait for HTTP readiness, drain that snapshot in queue order, then end the task. Remove the continuous queue polling and pickup of later arrivals. Retain LangChain `create_agent`, existing HTTP tools, `run(claim_id, thread_id)` and responsive API handling.
 
-Reuse the existing activity and finish behavior, adding the session-level failure exclusions and restart rules above. Inject runner and lifecycle controls for deterministic tests so API unit tests do not accidentally start live models. Use one backend process for this pilot; multiple workers and distributed dispatch remain outside scope.
+Reuse the implemented activity, failure handling, restart recovery and test injection seams. Preserve database ownership while the backend remains running, including after the startup pass ends. Keep bounded shutdown behavior for an attempt that is still active. Use one backend process for this pilot; multiple workers and distributed dispatch remain outside scope.
 
 Success criteria:
 
-- [x] `uv run pytest agent/tests backend/tests/test_runs.py backend/tests/test_queue.py -q` passes with scripted models and HTTP clients only.
-- [x] A backend started with a temporary queue begins work without a browser, button press or start-run API call. At most one claim is active, and attempts start in persisted queue order.
-- [x] The worker idles without repeated model calls after draining the queue and picks up a newly stored waiting claim within the documented polling interval.
+- [ ] Updated lifecycle tests, including `backend/tests/test_worker.py`, pass with scripted models and HTTP clients only.
+- [ ] A backend started with a temporary queue makes exactly one pass through the initial waiting snapshot after HTTP readiness. At most one claim is active, and attempts follow persisted queue order without a browser or start-run request.
+- [ ] The startup processing task terminates when its snapshot is exhausted. A claim added during that pass or after it ends remains Waiting while the backend stays running; no idle polling or new model calls occur.
+- [ ] An initially empty queue ends the startup task without model calls. Adding a waiting claim afterward does not restart processing.
 - [x] A scripted approval, decline and referral read required context through HTTP and record the expected outcomes, explanations and references. Eligible payment is recorded exactly once.
 - [x] A scripted approval over $1,000 remains awaiting sign-off, blocks attempted payment and allows the next waiting claim to run.
 - [x] A failed attempt records its error, returns an undecided claim to Waiting, and allows later claims to finish. It is not retried in the same session. A later session retries it once; an error after a committed decision or payment preserves that record.
-- [x] Startup readiness and shutdown tests prevent model calls before the API is reachable and new claims after shutdown starts. Restart recovers abandoned attempts without duplicating decisions or payments.
+- [ ] Readiness and shutdown tests preserve the existing safeguards. Finishing the startup pass leaves health, read, handler sign-off and payment APIs available and the database still owned by the backend. Shutdown releases ownership after active work finishes or its process exits.
+- [ ] A later backend start makes a new snapshot and processes remaining undecided claims once, without reassessing saved decisions or duplicating payments. Browser refreshes and page navigation never trigger runs.
 - [x] The removed per-claim start route is absent from OpenAPI; remaining operation IDs, required inputs, thread validation and payment checks still pass their API tests.
-- [x] `npm run check:python` passes with at least 80% coverage.
+- [ ] `npm run check:python` passes after the startup-pass changes with at least 80% coverage.
 
 ## Phase 3: Rebuild the database from the terminal
 
@@ -127,9 +134,9 @@ Success criteria:
 
 ## Phase 4: Work the entire waiting queue from the terminal
 
-Add a thin `agent/__main__.py` entry point so `uv run -m agent` provides a finite execution mode around the same local HTTP backend, queue worker and configured model. Keep the shared queue worker in the backend and the existing `run(claim_id, thread_id)` interface in `agent/main.py`. Share readiness, ownership, interruption and finish behavior with normal automatic processing. Provide a test-only runner injection seam; production commands must not offer a stub-model selector.
+Retain the implemented thin `agent/__main__.py` entry point: `uv run -m agent` provides a finite execution mode around the same local HTTP backend, shared runner and configured model. Keep shared queue execution in the backend and the existing `run(claim_id, thread_id)` interface in `agent/main.py`. Preserve readiness, ownership, interruption, reporting and test injection behavior. Production commands must not offer a stub-model selector.
 
-The terminal mode uses the waiting queue at invocation as its workload, so it prints a final count and exits. The normal backend continues watching for later arrivals.
+The terminal mode already uses the waiting queue at invocation as its workload, prints each result and final totals, and exits. Preserve that behavior. The revised backend startup pass uses the same finite-workload principle and also does not watch for later arrivals.
 
 Success criteria:
 
@@ -142,41 +149,44 @@ Success criteria:
 - [x] Ctrl+C stops new attempts, prints partial totals, releases process ownership and shuts down the local server. A later invocation recovers abandoned undecided work without repeating committed decisions or payments.
 - [x] `npm run check:python` passes with at least 80% coverage.
 
-## Phase 5: Show automatic progress in the dashboard
+## Phase 5: Preserve dashboard progress and explain finite processing
 
-Replace the Run agent panel with plain waiting/processing information. Keep decisions, activity, handler sign-off and simulated payment controls. Poll the queue while the claims page is open, including when no claim is currently active, so new work and the gap between sequential runs cannot make the screen stale. A selected waiting claim must also refresh into processing and completion automatically.
+Keep the implemented decisions, activity, handler sign-off, simulated payment controls and display polling. Polling refreshes records only and must never trigger agent work. Update waiting-state text so it does not promise continuous automatic pickup: claims outside the startup snapshot wait for another startup or terminal pass. Keep the per-claim Run agent button removed.
 
 Preserve `docs/BRAND.md`, accessible keyboard operation, narrow layouts and light/dark support. Clean up polling on navigation and unmount; recover visibly from request failures. The backend owns processing throughout.
 
 Success criteria:
 
 - [x] `npm run check:ts` passes with strict TypeScript, no `any` and at least 80% Vitest coverage.
-- [x] Component tests show waiting -> in progress -> decided and waiting -> in progress -> waiting for sign-off without a start button or start-run request. Another claim beginning after the queue was idle appears automatically.
-- [x] Selected waiting claims refresh without user actions. Queue ordering, counts, new arrivals, errors, final decisions and payment state remain accurate across automatic transitions.
+- [ ] Updated component tests follow startup/terminal assessments through waiting -> in progress -> decided or awaiting sign-off without a start button or start-run request. A later arrival appears as Waiting and does not imply that a worker will pick it up automatically.
+- [ ] Waiting and failure messages accurately explain the need for another processing pass. Dashboard polling, refreshes and navigation issue no processing requests.
+- [x] Selected claims refresh without user actions. Queue ordering, counts, new arrivals, errors, final decisions and payment state are retained.
 - [x] Polling tests cover idle gaps, request failure recovery, navigation and unmount without duplicate polling or stale updates.
 - [x] Handler sign-off and separate payment remain usable for an approval over $1,000 while the worker assesses subsequent claims. Rejected and duplicate actions show the backend response.
-- [x] In Playwright MCP with the scripted backend, open the dashboard, follow automatic activity and decisions, and verify instructions remain read only. Refreshing preserves committed records.
+- [ ] In Playwright MCP with the scripted backend, follow one startup pass and its decisions, verify later arrivals stay Waiting, and confirm read-only instructions and persisted records after refresh.
 - [x] Inspect desktop and 390-pixel-wide layouts in light and dark modes; automatic status text, activity and handler actions remain readable and keyboard accessible without horizontal overflow or uncaught browser errors.
 
 ## Phase 6: Verify both execution modes and document the handover
 
 Extend full-stack and terminal integration coverage to the revised workflow. Use separate temporary databases and stub runners for every automated check. Keep the existing payment, exact-money, persistence and data-access regression coverage. The planning revision itself neither resets the student's database nor starts any model runs.
 
-Update the short README, `.env.example` if settings change, and `docs/STATUS.md` during implementation. Document automatic processing, one backend process, queue order, how to stop the app before terminal commands, rebuild's deletion of previous work, output/exit codes, failure retries and restart limits. Keep implementation details out of ordinary dashboard guidance.
+During implementation, update the short README and `docs/STATUS.md` to explain one finite pass per backend startup, explicit terminal runs and no continuous queue watcher. Preserve documentation for queue order, database ownership, stopping the app before terminal commands, rebuild's deletion of previous work, output/exit codes, failures and restart limits. This planning edit does not change the implemented application or its current status documentation.
 
 Success criteria:
 
 - [x] `uv sync`, `npm install` and `npm run dev` work on Windows. Health returns `{"status":"ok"}`, and a stub-backed isolated backend starts processing without a browser.
-- [x] Full-stack tests cover ordered automatic processing, idle-to-active pickup, approval/payment, decline, referral, sign-off while later claims run, the exact $1,000 boundary, direct blocked/duplicate payment calls, failed attempts and restart recovery.
+- [ ] Full-stack tests verify exactly one startup pass, no processing of later arrivals, an empty startup queue, retry only on a later startup/terminal run, and no browser-triggered assessments. Retain approval/payment, decline, referral, sign-off, the exact $1,000 boundary, blocked/duplicate payment and recovery coverage.
 - [x] A terminal integration test rebuilds a temporary database, drains its queue with stubs, verifies every printed decision and summary count against stored results, then proves a repeat drain processes zero claims.
 - [x] Rebuilding that temporary database again restores all permitted claims to Waiting and clears prior results. Rebuilding while its backend runs is rejected without modifying the database.
-- [x] Repeat the automatic handler journey in Playwright MCP: queue -> activity -> decision -> sign-off when required -> simulated payment, with no Run agent action and no unexpected console errors.
-- [x] `npm run check` exits 0: Ruff, Pyright, pytest, Prettier, ESLint, TypeScript, Vitest and Playwright all pass with the existing coverage thresholds and hooks enabled. All automated models are stubs.
+- [ ] Repeat the startup-pass handler journey in Playwright MCP: queue -> activity -> decision -> sign-off when required -> simulated payment, with no Run agent action and no unexpected console errors.
+- [ ] `npm run check` exits 0 after the revision: Ruff, Pyright, pytest, Prettier, ESLint, TypeScript, Vitest and Playwright all pass with the existing coverage thresholds and hooks enabled. All automated models are stubs.
 - [x] Inspect the diff for unrelated changes, secrets, databases, course notebooks, evaluation data and later-day features. No student configuration or working database is reset as part of the build.
-- [x] README and `docs/STATUS.md` describe the implemented commands and their limits accurately. Mark criteria complete only after verification; report check results and remaining limitations.
+- [ ] README and `docs/STATUS.md` describe the implemented startup-pass behavior and retained terminal commands accurately. Mark changed criteria complete only after verification; report check results and remaining limitations.
 
 ## Implementation procedure
 
-All six extension phases are complete. Each phase was tested, documented and committed with the pre-commit hook enabled. The final full check passed with 101 Python tests, 16 component tests and six Playwright tests. Both setup commands and the production dashboard build passed; compatible development dependency updates resolved the advisories found during setup, and `npm audit` reports zero vulnerabilities.
+The earlier six-phase build was tested, documented and committed, with 101 Python tests, 16 component tests and six Playwright tests passing. Its retained features remain the implementation baseline. This startup-pass revision is a planning change only and awaits a separate implementation request.
+
+When authorized, implement the unchecked follow-up criteria in phases 2, 5 and 6. Reuse the completed foundations and terminal commands in phases 1, 3 and 4. Do not rebuild those features or remove their safeguards. Check changed criteria only after verification, update status/run documentation to match the resulting behavior and commit the revision with the pre-commit hook enabled.
 
 Use uv and Windows-compatible commands. Preserve unrelated student changes. Never lower checks, bypass hooks, push commits, create AWS resources or read the evaluation answer key. Run `npm run check` after the final phase and report the result. Live model accuracy remains unmeasured unless a separate evaluation is explicitly requested.
