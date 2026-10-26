@@ -7,7 +7,9 @@ from typing import Annotated, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Money = Annotated[Decimal, Field(ge=0, max_digits=12, decimal_places=2)]
-State = Literal["waiting", "in_progress", "awaiting_sign_off", "decided"]
+State = Literal[
+    "waiting", "in_progress", "awaiting_sign_off", "decided", "handler_review"
+]
 
 
 def cents(amount: Decimal) -> int:

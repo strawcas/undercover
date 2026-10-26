@@ -1,5 +1,9 @@
 # Status
 
+Harness implementation is in progress in `docs/PLAN_HARNESS.md`. Phase 1 is complete: additive SQLite migrations, eight run/attempt APIs, persisted to-dos, distinct-claim caps, replay-safe completion, two-failure handler review and interrupted-run recovery. Both business documents are indexed by section. The existing startup/terminal agent is still the pilot runner until phase 3; reference tools, the queue agent and dashboard changes follow in later phases.
+
+Phase 1 passes `npm run check:python`: Ruff, Pyright and 152 pytest tests with 98.59% coverage. Tests verify concurrency, reset, migrations, API schemas and frozen handover records on temporary databases. The student's working database and `.env` are unchanged.
+
 The startup-pass revision in `docs/PLAN.md` is implemented and verified. Each backend start processes one snapshot of waiting claims, then leaves the app available for handlers. The agent supports switching between OpenRouter and local Ollama, with a configurable model. Ollama requests now allocate 16,384 context tokens by default, with an override for larger policy/tool histories and clearer failure messages. Both execution modes use the same provider settings, claim tools and payment safeguards.
 
 ## Run locally
@@ -80,7 +84,7 @@ uv run -m backend.reset_db
 
 This rebuilds the configured database from the permitted source files in `data/`, returning every claim in `data/claims.json` to Waiting in source-file order. It clears previous decisions, sign-offs, simulated payments, thread IDs and activity, then prints the database path and restored claim count. It starts no agent runs; claims remain waiting until processing starts.
 
-A missing database is created. Invalid or incomplete source records leave an existing database intact. Evaluation data, security claims and the claims manual are never imported. Changing source files takes effect on a fresh database or a rebuild; ordinary startup preserves saved work.
+A missing database is created. Invalid or incomplete source records leave an existing database intact. Evaluation data and security claims are never imported. The harness migration now indexes the claims manual alongside the wording; the pilot agent has not yet switched to its section tools. Changing source claim files takes effect on a fresh database or a rebuild; ordinary startup preserves saved work.
 
 ## Process every waiting claim from the terminal
 

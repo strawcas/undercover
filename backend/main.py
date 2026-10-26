@@ -12,6 +12,7 @@ from backend.claims import ClaimError, Claims
 from backend.config import backend_url, database_path
 from backend.ownership import DatabaseOwner
 from backend.routes import router
+from backend.run_routes import router as run_router
 from backend.storage import Store
 from backend.worker import QueueWorker, Runner, api_ready, default_runner
 
@@ -66,6 +67,7 @@ def create_app(
         return JSONResponse(status_code=exc.status, content={"detail": exc.message})
 
     app.include_router(router)
+    app.include_router(run_router)
     return app
 
 

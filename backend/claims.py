@@ -2,43 +2,14 @@
 
 import json
 import sqlite3
-from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
-from uuid import uuid4
 
+from backend.claim_records import append_event, claim_row, now, start_claim
+from backend.errors import ClaimError
 from backend.models import DecisionInput, EventInput, cents, dollars
+from backend.runs import Runs
 from backend.storage import Store
-
-
-class ClaimError(Exception):
-    """An invalid operation on a claim."""
-
-    def __init__(self, status: int, message: str):
-        self.status = status
-        self.message = message
-        super().__init__(message)
-
-
-def now() -> str:
-    return datetime.now(UTC).isoformat()
-
-
-def claim_row(connection: sqlite3.Connection, claim_id: str) -> sqlite3.Row:
-    row = connection.execute(
-        "SELECT * FROM claims WHERE id = ?", (claim_id,)
-    ).fetchone()
-    if row is None:
-        raise ClaimError(404, "Claim not found.")
-    return row
-
-
-def append_event(connection: sqlite3.Connection, claim_id: str, event: EventInput):
-    connection.execute(
-        "INSERT INTO events (claim_id, thread_id, action, status, detail, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (claim_id, event.thread_id, event.action, event.status, event.detail, now()),
-    )
 
 
 class Claims:
@@ -58,6 +29,9 @@ class Claims:
             "status": row["state"],
             "thread_id": row["thread_id"],
             "run_active": bool(row["active"]),
+            "run_id": row["run_id"],
+            "failed_attempts": row["failed_attempts"],
+            "review_reason": row["review_reason"],
             "policy": policy,
             "customer": self.store.record("customer", claim["customer_id"]),
             "plan": next(p for p in plans["plans"] if p["plan"] == policy["plan"]),
@@ -82,6 +56,8 @@ class Claims:
                     "summary",
                     "amount_claimed",
                     "status",
+                    "failed_attempts",
+                    "review_reason",
                 )
             }
             rows.append(
@@ -108,7 +84,7 @@ class Claims:
     def start(self, claim_id: str) -> str:
         with self.store.transaction() as connection:
             row = claim_row(connection, claim_id)
-            if row["active"] or row["decision"]:
+            if row["active"] or row["decision"] or row["state"] == "handler_review":
                 raise ClaimError(409, "This claim is already running or decided.")
             if connection.execute("SELECT 1 FROM claims WHERE active=1").fetchone():
                 raise ClaimError(409, "Another claim is already running.")
@@ -134,23 +110,10 @@ class Claims:
         return None
 
     @staticmethod
-    def _start(connection: sqlite3.Connection, claim_id: str) -> str:
-        thread_id = str(uuid4())
-        connection.execute(
-            "UPDATE claims SET state='in_progress', active=1, thread_id=? WHERE id=?",
-            (thread_id, claim_id),
-        )
-        append_event(
-            connection,
-            claim_id,
-            EventInput(
-                thread_id=thread_id,
-                action="Run agent",
-                status="started",
-                detail="Reading the claim and policy evidence.",
-            ),
-        )
-        return thread_id
+    def _start(
+        connection: sqlite3.Connection, claim_id: str, thread_id: str = ""
+    ) -> str:
+        return start_claim(connection, claim_id, thread_id)
 
     def decide(self, claim_id: str, decision: DecisionInput) -> dict[str, Any]:
         company = self.store.record("settings", "company")
@@ -302,6 +265,7 @@ class Claims:
             )
 
     def recover_interrupted(self) -> None:
+        Runs(self.store).recover()
         with self.store.connect() as connection:
             rows = connection.execute(
                 "SELECT id, thread_id FROM claims WHERE active=1"

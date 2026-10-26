@@ -59,7 +59,10 @@ def test_only_allowlisted_source_files_are_read(tmp_path, monkeypatch):
     reads = []
 
     def checked_read(path, **kwargs):
-        assert path.parent == ROOT / "data" or path == ROOT / "backend/instructions.md"
+        assert path.parent == ROOT / "data" or path in {
+            ROOT / "backend/instructions.md",
+            ROOT / "backend/queue_instructions.md",
+        }
         if path.parent == ROOT / "data":
             assert path.name in SEED_FILES
             reads.append(path.name)

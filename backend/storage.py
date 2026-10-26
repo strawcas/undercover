@@ -7,7 +7,9 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from backend.harness_storage import migrate
 from backend.models import Claim, Company, Customer, Handler, Policy
+from backend.reference_index import install
 
 ROOT = Path(__file__).resolve().parents[1]
 SEED_FILES = (
@@ -18,6 +20,7 @@ SEED_FILES = (
     "handlers.json",
     "company.json",
     "policy_wording.md",
+    "claims_manual.md",
 )
 
 
@@ -88,9 +91,36 @@ class Store:
                 "created_at TEXT NOT NULL)"
             )
             self._migrate_positions(connection)
-            if connection.execute("SELECT 1 FROM records LIMIT 1").fetchone():
-                return
-            self._seed(connection, data_dir)
+            migrate(connection)
+            if not connection.execute("SELECT 1 FROM records LIMIT 1").fetchone():
+                self._seed(connection, data_dir)
+            self._harness_documents(connection, data_dir)
+
+    def _harness_documents(
+        self, connection: sqlite3.Connection, data_dir: Path
+    ) -> None:
+        for key, path in (
+            ("instructions", ROOT / "backend/instructions.md"),
+            ("queue_instructions", ROOT / "backend/queue_instructions.md"),
+        ):
+            connection.execute(
+                "INSERT OR REPLACE INTO records VALUES ('settings', ?, ?)",
+                (key, json.dumps(path.read_text(encoding="utf-8"))),
+            )
+        if not connection.execute(
+            "SELECT 1 FROM records WHERE kind='settings' AND id='manual'"
+        ).fetchone():
+            self._insert(
+                connection,
+                "settings",
+                "manual",
+                (data_dir / "claims_manual.md").read_text(encoding="utf-8"),
+            )
+        for source, key in (("policy_wording", "wording"), ("claims_manual", "manual")):
+            body = connection.execute(
+                "SELECT body FROM records WHERE kind='settings' AND id=?", (key,)
+            ).fetchone()["body"]
+            install(connection, source, json.loads(body))
 
     @staticmethod
     def _migrate_positions(connection: sqlite3.Connection) -> None:
@@ -163,6 +193,7 @@ class Store:
         self._insert(connection, "settings", "plans", sources["plans.json"])
         self._insert(connection, "settings", "handlers", sources["handlers.json"])
         self._insert(connection, "settings", "wording", sources["policy_wording.md"])
+        self._insert(connection, "settings", "manual", sources["claims_manual.md"])
         self._insert(
             connection,
             "settings",
