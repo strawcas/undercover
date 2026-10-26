@@ -1,106 +1,140 @@
-"""Work the waiting queue once and print each decision and final totals."""
+"""Start one scoped queue agent and report persisted results from the terminal."""
 
+import argparse
+import signal
 import sqlite3
 import sys
-from collections import Counter
+from collections.abc import Sequence
+from contextlib import contextmanager
 from decimal import Decimal
-from typing import Any
 
-from agent.main import validate_model_config
-from backend.claims import Claims
-from backend.config import backend_url, database_path
+import httpx
+
+from agent.execution import Execution, Record, Runner
+from agent.main import AgentRunError
+from agent.queue import run_queue
+from backend.config import backend_url, database_path, run_scope
+from backend.harness_models import Counts
 from backend.local import local_backend
 from backend.storage import Store
-from backend.worker import QueueWorker, Runner, default_runner
+from backend.worker import default_runner, reconcile_execution
 
 TOTALS = (
-    "Attempted",
-    "Decided",
-    "Approved",
-    "Declined",
-    "Referred",
-    "Failed runs",
-    "Awaiting sign-off",
+    ("Attempted", "worked"),
+    ("Decided", "decided"),
+    ("Approved", "approved"),
+    ("Declined", "declined"),
+    ("Referred", "referred"),
+    ("Failed runs", "failed_assessments"),
+    ("Awaiting sign-off", "awaiting_sign_off"),
+    ("Assessment attempts", "assessment_attempts"),
+    ("Handler review", "handler_review"),
+    ("Unpaid approvals", "unpaid_approvals"),
+    ("Waiting", "waiting_remaining"),
 )
 
 
+class RunParser(argparse.ArgumentParser):
+    def error(self, message: str):
+        raise ValueError(message)
+
+
+def arguments(argv: Sequence[str]) -> argparse.Namespace:
+    parser = RunParser(description="Work a finite UnderCover claims queue.")
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument(
+        "--max-claims", type=int, help="Maximum distinct claims for this run."
+    )
+    scope.add_argument("--claim-id", help="Work only this eligible claim.")
+    return parser.parse_args(argv)
+
+
 class Report:
-    """Print persisted results rather than interpreting model text."""
+    """Print each attempt's stored outcome and final backend-derived totals."""
 
-    def __init__(self):
-        self.counts: Counter[str] = Counter()
-        self.reported: set[str] = set()
-
-    def record(self, claims: Claims, detail: dict[str, Any]) -> None:
-        claim_id = detail["claim_id"]
-        self.reported.add(claim_id)
-        self.counts["Attempted"] += 1
-        last = claims.events(claim_id)[-1]
-        if detail["decision"]:
+    def record(self, result: Record) -> None:
+        entry, detail = result["attempt"], result["claim"]
+        decision = detail["decision"]
+        if decision:
             self._decision(detail)
         else:
-            print(f"{claim_id} FAILED - No decision recorded", flush=True)
-        if last["status"] == "failed":
-            self.counts["Failed runs"] += 1
-            print(f"Error: {last['detail']}", flush=True)
+            print(f"{detail['claim_id']} FAILED - No decision recorded", flush=True)
+        if entry["error"]:
+            print(f"Error: {entry['error']}", flush=True)
 
-    def _decision(self, detail: dict[str, Any]) -> None:
+    @staticmethod
+    def _decision(detail: Record) -> None:
         decision = detail["decision"]
-        self.counts["Decided"] += 1
-        category = {"approve": "Approved", "decline": "Declined", "refer": "Referred"}
-        self.counts[category[decision["outcome"]]] += 1
-        state = "No payment recorded"
+        payment = "No payment recorded"
         if detail["status"] == "awaiting_sign_off":
-            self.counts["Awaiting sign-off"] += 1
-            state = "Waiting for sign-off"
+            payment = "Waiting for sign-off"
         elif detail["payment"]:
-            state = "Simulated payment recorded"
+            payment = "Simulated payment recorded"
         print(
             f"{detail['claim_id']} {decision['outcome'].upper()} "
-            f"${Decimal(decision['payout']):,.2f} - {state}",
+            f"${Decimal(decision['payout']):,.2f} - {payment}",
             flush=True,
         )
         print(f"Explanation: {decision['explanation']}", flush=True)
         print(f"Policy sections: {', '.join(decision['policy_sections'])}", flush=True)
+        print(f"Manual sections: {', '.join(decision['manual_sections'])}", flush=True)
 
-    def summary(self) -> None:
-        print(" | ".join(f"{name}: {self.counts[name]}" for name in TOTALS), flush=True)
+    @staticmethod
+    def summary(result: Record | None) -> None:
+        counts = dict(result["counts"]) if result else Counts().model_dump()
+        counts["decided"] = counts["approved"] + counts["declined"] + counts["referred"]
+        print(
+            " | ".join(f"{label}: {counts[key]}" for label, key in TOTALS), flush=True
+        )
 
 
-def drain(claims: Claims, runner: Runner, report: Report) -> None:
-    """Work the initial waiting queue once, preserving results on interruption."""
-    pending = {row["claim_id"] for row in claims.queue() if row["status"] == "waiting"}
-    if pending and runner is default_runner:
-        validate_model_config()
-    worker = QueueWorker(claims, runner, lambda: True, lambda: None)
+@contextmanager
+def interruptible(context: Execution):
+    def interrupt(_signal, _frame):
+        context.stopping.set()
+        context.cancel_active.set()
+        raise KeyboardInterrupt
+
+    previous = signal.signal(signal.SIGINT, interrupt)
     try:
-        while (detail := worker.step(pending)) is not None:
-            report.record(claims, detail)
+        yield
     finally:
-        for row in claims.queue():
-            claim_id = row["claim_id"]
-            if claim_id in worker.attempted - report.reported:
-                report.record(claims, claims.detail(claim_id))
+        signal.signal(signal.SIGINT, previous)
 
 
-def main(runner: Runner = default_runner) -> int:
-    """Run a finite queue session with the configured model and local HTTP tools."""
+def main(runner: Runner = default_runner, argv: Sequence[str] = ()) -> int:
+    """Work a full, capped or named scope using the same queue agent as startup."""
     report = Report()
+    context = Execution(on_result=report.record)
     code = 0
     try:
+        parsed = arguments(argv)
+        scope = run_scope(parsed.max_claims, parsed.claim_id)
         with local_backend(Store(database_path()), runner, backend_url()) as claims:
-            drain(claims, runner, report)
-        if report.counts["Failed runs"]:
+            try:
+                with interruptible(context):
+                    result = run_queue(scope, runner, execution=context)
+            finally:
+                reconcile_execution(claims, context)
+        if (
+            result["status"] != "completed"
+            or result["counts"]["handler_review"]
+            or result["counts"]["unpaid_approvals"]
+        ):
             code = 1
     except KeyboardInterrupt:
-        print(
-            "Interrupted. Undecided work can be retried in a new session.",
-            file=sys.stderr,
-        )
+        print("Interrupted. Undecided work remains recoverable.", file=sys.stderr)
         code = 130
-    except (OSError, ValueError, RuntimeError, sqlite3.Error) as error:
+    except (
+        OSError,
+        ValueError,
+        RuntimeError,
+        sqlite3.Error,
+        httpx.HTTPError,
+        AgentRunError,
+    ) as error:
         print(f"Queue processing failed: {error}", file=sys.stderr)
         code = 1
     finally:
-        report.summary()
+        report.summary(context.result)
     return code

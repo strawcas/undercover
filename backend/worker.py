@@ -1,17 +1,43 @@
-"""Sequential local queue processing shared by the API and terminal modes."""
+"""Run one queue agent after HTTP readiness, retaining database ownership."""
 
 from collections.abc import Callable
-from threading import Event, Thread
-from uuid import uuid4
+from http import HTTPStatus
+from threading import Thread
 
 import httpx
+from langchain_core.language_models import BaseChatModel
 
+from agent.execution import Execution, Runner
 from agent.main import AgentRunError, run
+from agent.queue import run_queue
 from backend.claims import Claims
-from backend.harness_models import AttemptInput, RunFinishInput, RunInput, TodosInput
+from backend.config import run_scope
+from backend.errors import ClaimError
+from backend.harness_models import RunFinishInput
 from backend.runs import Runs
 
-Runner = Callable[[str, str], str]
+
+def reconcile_execution(claims: Claims, execution: Execution) -> None:
+    """Close our registered run even if its HTTP service became unavailable."""
+    if execution.run_id is None or execution.result is not None:
+        return
+    runs = Runs(claims.store)
+    try:
+        current = runs.get(execution.run_id)
+    except ClaimError as error:
+        if error.status != HTTPStatus.NOT_FOUND:
+            raise
+        return
+    if current["status"] == "running":
+        status = "interrupted" if execution.stopping.is_set() else "failed"
+        current = runs.finish(
+            execution.run_id,
+            RunFinishInput(
+                status=status,
+                detail="Queue execution ended before HTTP cleanup completed.",
+            ),
+        )
+    execution.result = current
 
 
 def default_runner(claim_id: str, thread_id: str) -> str:
@@ -19,6 +45,7 @@ def default_runner(claim_id: str, thread_id: str) -> str:
 
 
 def execute(claims: Claims, claim_id: str, thread_id: str, runner: Runner) -> None:
+    """Finalize a directly invoked claim helper without interpreting its prose."""
     try:
         runner(claim_id, thread_id)
     except AgentRunError as error:
@@ -52,7 +79,7 @@ def api_ready(url: str, instance_id: str) -> bool:
 
 
 class QueueWorker:
-    """Process one queue snapshot, shared by startup and terminal runs."""
+    """Own one background queue-agent invocation, never a claim selection loop."""
 
     def __init__(
         self,
@@ -60,102 +87,40 @@ class QueueWorker:
         runner: Runner,
         ready: Callable[[], bool],
         release: Callable[[], None],
+        queue_model: BaseChatModel | None = None,
     ):
         self.claims = claims
         self.runner = runner
         self.ready = ready
         self.release = release
-        self.attempted: set[str] = set()
-        self.stopping = Event()
+        self.queue_model = queue_model
+        self.execution = Execution()
+        self.stopping = self.execution.stopping
         self.thread = Thread()
-        self.run_id: str | None = None
-        self.finished = False
+        self.scope: dict = {}
+        self.result: dict | None = None
+        self.error = ""
 
-    def step(self, eligible: set[str] | None = None) -> dict | None:
-        """Run the next claim and return its saved result, or idle."""
-        if self.stopping.is_set() or self.finished:
-            return None
-        waiting = [
-            row["claim_id"]
-            for row in self.claims.queue()
-            if row["status"] == "waiting"
-            and row["claim_id"] not in self.attempted
-            and (eligible is None or row["claim_id"] in eligible)
-        ]
-        if not waiting:
-            self._finish_run()
-            return None
-        runs = Runs(self.claims.store)
-        if self.run_id is None:
-            scope = (
-                {"mode": "claim", "claim_id": waiting[0]}
-                if eligible is not None and len(eligible) == 1
-                else {"mode": "all"}
-            )
-            data, _ = runs.create(
-                RunInput.model_validate({"run_id": str(uuid4()), "scope": scope})
-            )
-            self.run_id = str(data["run_id"])
-        claim_id = waiting[0]
-        data = runs.get(self.run_id)
-        items = [
-            {key: item[key] for key in ("id", "claim_id", "text", "status")}
-            for item in data["todos"]
-        ]
-        items.append(
-            dict(
-                id=f"claim:{claim_id}",
-                claim_id=claim_id,
-                text=f"Assess {claim_id}",
-                status="to_do",
-            )
-        )
-        runs.todos(self.run_id, TodosInput.model_validate({"items": items}))
-        entry, _ = runs.start(
-            self.run_id, AttemptInput(claim_id=claim_id, thread_id=uuid4())
-        )
-        thread_id = entry["thread_id"]
-        self.attempted.add(claim_id)
-        execute(self.claims, claim_id, thread_id, self.runner)
-        return self.claims.detail(claim_id)
-
-    def _finish_run(self) -> None:
-        if self.run_id is not None and not self.finished:
-            runs = Runs(self.claims.store)
-            complete = runs.check(self.run_id)["complete"]
-            status = "completed" if complete else "failed"
-            detail = "" if complete else "Queue pass ended with undecided work."
-            if self.stopping.is_set() and not complete:
-                status, detail = "interrupted", "Queue processing was interrupted."
-            runs.finish(
-                self.run_id,
-                RunFinishInput.model_validate({"status": status, "detail": detail}),
-            )
-            self.finished = True
-
-    def run_once(self, eligible: set[str]) -> None:
+    def run_once(self) -> None:
         try:
-            if not eligible:
-                return
             while not self.stopping.is_set() and not self.ready():
                 self.stopping.wait(0.1)
-            while not self.stopping.is_set():
-                if self.step(eligible) is None:
-                    break
+            if not self.stopping.is_set():
+                self.result = run_queue(
+                    self.scope, self.runner, self.queue_model, self.execution
+                )
+        except (AgentRunError, ValueError, httpx.HTTPError) as error:
+            self.error = str(error)
+        except KeyboardInterrupt:
+            self.error = "Queue processing was interrupted."
         finally:
-            self._finish_run()
+            reconcile_execution(self.claims, self.execution)
+            self.result = self.execution.result
             self.release()
 
     def start(self) -> None:
-        eligible = {
-            row["claim_id"] for row in self.claims.queue() if row["status"] == "waiting"
-        }
-        self.thread = Thread(
-            target=self.run_once,
-            args=(eligible,),
-            name="claims-startup",
-            daemon=True,
-        )
+        self.scope = run_scope()
+        self.thread = Thread(target=self.run_once, name="claims-startup", daemon=True)
         self.thread.start()
 
     def stop(self) -> bool:
@@ -163,4 +128,6 @@ class QueueWorker:
         if self.thread.ident is None:
             return True
         self.thread.join(timeout=5)
+        if self.thread.is_alive():
+            self.execution.cancel_active.set()
         return not self.thread.is_alive()

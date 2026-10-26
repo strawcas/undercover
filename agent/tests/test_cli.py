@@ -111,9 +111,9 @@ def test_failures_before_and_after_saved_decisions(terminal, capsys):
     assert "CLM-1002 DECLINE" in output
     assert "CLM-1003 APPROVE" in output
     assert "Attempted: 3 | Decided: 2" in output
-    assert "Failed runs: 2" in output
+    assert "Failed runs: 3" in output
     assert "Sensitive" not in output
-    assert Claims(terminal).detail("CLM-1001")["status"] == "waiting"
+    assert Claims(terminal).detail("CLM-1001")["status"] == "handler_review"
 
 
 def test_ctrl_c_prints_partial_totals_and_retries_next_session(terminal, capsys):
@@ -156,7 +156,7 @@ def test_interruption_after_decision_is_counted_and_preserved(terminal, capsys):
 def test_package_entry_point_uses_queue_command(terminal, monkeypatch, capsys):
     limit_queue(terminal, 1)
     original = batch.main
-    monkeypatch.setattr(batch, "main", lambda: original(scripted_runner))
+    monkeypatch.setattr(batch, "main", lambda **_kwargs: original(scripted_runner))
     with pytest.raises(SystemExit) as ended:
         runpy.run_module("agent", run_name="__main__")
     assert ended.value.code == 0
@@ -262,3 +262,37 @@ def test_failed_server_start_is_reported(terminal):
     thread.join()
     with pytest.raises(RuntimeError, match="could not start"):
         wait_started(server, thread)
+
+
+def test_terminal_distinct_cap_and_named_claim(terminal, monkeypatch, capsys):
+    monkeypatch.setenv("UNDERCOVER_MAX_CLAIMS", "1")
+    assert batch.main(scripted_runner, argv=["--max-claims", "5"]) == 0
+    output = capsys.readouterr().out
+    assert "Attempted: 5 | Decided: 5" in output
+    assert "Assessment attempts: 5" in output
+    assert sum(row["status"] == "waiting" for row in Claims(terminal).queue()) == 20
+    monkeypatch.setenv("UNDERCOVER_MAX_CLAIMS", "invalid")
+    assert batch.main(scripted_runner, argv=["--claim-id", "CLM-1010"]) == 0
+    assert "Attempted: 1 | Decided: 1" in capsys.readouterr().out
+    assert sum(row["status"] == "waiting" for row in Claims(terminal).queue()) == 19
+    assert batch.main(scripted_runner, argv=["--claim-id", "CLM-1010"]) == 1
+    assert "not eligible" in capsys.readouterr().err
+    assert batch.main(scripted_runner, argv=["--claim-id", "missing"]) == 1
+    assert "Claim not found" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--max-claims", "0"],
+        ["--max-claims", "-1"],
+        ["--max-claims", "1.5"],
+        ["--max-claims", "five"],
+        ["--claim-id", ""],
+        ["--max-claims", "5", "--claim-id", "CLM-1001"],
+    ],
+)
+def test_invalid_terminal_scope_never_attempts_a_claim(terminal, capsys, argv):
+    assert batch.main(scripted_runner, argv=argv) == 1
+    assert "Attempted: 0" in capsys.readouterr().out
+    assert Claims(terminal).events("CLM-1001") == []

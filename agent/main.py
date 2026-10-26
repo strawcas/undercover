@@ -12,6 +12,9 @@ from langchain_openai import ChatOpenAI
 from ollama import ResponseError
 from pydantic import SecretStr
 
+from agent.execution import AgentRunError, default_budget
+from agent.http import request
+from agent.middleware import claim_middleware
 from agent.tools import ClaimTools
 
 load_dotenv()
@@ -20,10 +23,6 @@ BACKEND_URL = "http://localhost:8000"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash"
 DEFAULT_OLLAMA_NUM_CTX = 16384
-
-
-class AgentRunError(Exception):
-    """An actionable run failure safe to show in claim activity."""
 
 
 def ollama_context_length() -> int:
@@ -71,6 +70,7 @@ def model() -> BaseChatModel:
             base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
             temperature=0,
             num_ctx=ollama_context_length(),
+            client_kwargs={"timeout": 120},
         )
     name = os.getenv("MODEL_NAME")
     return ChatOpenAI(
@@ -85,15 +85,18 @@ def model() -> BaseChatModel:
 
 def run(claim_id: str, thread_id: str, llm: BaseChatModel | None = None) -> str:
     """Run the agent on one claim and return its final reply."""
-    with backend() as client:
-        response = client.get("/api/agent-instructions")
+    with default_budget(), backend() as client:
+        response = request(client, "GET", "/api/agent-instructions")
         response.raise_for_status()
         tools = ClaimTools(client, claim_id, thread_id)
         tools.event(
             "Read agent instructions", "completed", "Loaded backend instructions."
         )
         agent = create_agent(
-            llm or model(), tools=tools.tools(), system_prompt=response.json()["text"]
+            llm or model(),
+            tools=tools.tools(),
+            system_prompt=response.json()["text"],
+            middleware=claim_middleware(tools.model_retry),
         )
         try:
             result = agent.invoke(
@@ -104,7 +107,7 @@ def run(claim_id: str, thread_id: str, llm: BaseChatModel | None = None) -> str:
                 },
                 config={
                     "configurable": {"thread_id": thread_id},
-                    "recursion_limit": 40,
+                    "recursion_limit": 400,
                 },
             )
         except ResponseError as error:

@@ -1,11 +1,18 @@
 """Claim-bound tools that use only the backend's HTTP API."""
 
 from http import HTTPStatus
+from threading import Lock
 from typing import Literal
 
 import httpx
 from langchain_core.tools import BaseTool, tool
 from pydantic import BaseModel, ConfigDict
+
+from agent.execution import AgentRunError, check_attempt
+from agent.financial import write
+from agent.http import request
+
+MAX_TOOL_CALLS = 80
 
 
 class DecisionFields(BaseModel):
@@ -25,8 +32,11 @@ class ClaimTools:
         self.client = client
         self.path = f"/api/claims/{claim_id}"
         self.thread_id = thread_id
+        self.calls = 0
+        self.lock = Lock()
 
     def event(self, action: str, status: str, detail: str) -> None:
+        check_attempt()
         response = self.client.post(
             f"{self.path}/events",
             json={
@@ -38,9 +48,28 @@ class ClaimTools:
         )
         response.raise_for_status()
 
+    def model_retry(self, attempt: int) -> None:
+        self.event("Retry model request", "started", f"Transport retry {attempt} of 2.")
+
     def call(self, action: str, method: str, path: str, body: dict | None = None):
+        check_attempt()
+        with self.lock:
+            if self.calls >= MAX_TOOL_CALLS:
+                raise AgentRunError("Assessment tool-call limit exceeded.")
+            self.calls += 1
         self.event(action, "started", "Requesting backend operation.")
-        response = self.client.request(method, path, json=body)
+        if path.endswith(("/decision", "/agent-pay")) and body is not None:
+            response = write(self.client, self.path, path, body)
+        else:
+            response = request(
+                self.client,
+                method,
+                path,
+                body,
+                lambda attempt: self.event(
+                    action, "started", f"Transport retry {attempt} of 2."
+                ),
+            )
         if response.is_error:
             status = (
                 "blocked" if response.status_code == HTTPStatus.CONFLICT else "failed"

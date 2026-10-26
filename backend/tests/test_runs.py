@@ -1,6 +1,10 @@
+from decimal import Decimal
+
 import pytest
 from fastapi.testclient import TestClient
 
+from agent import queue as queue_agent
+from agent.tests.stubs import api_client
 from backend import worker
 from backend.claims import Claims
 from backend.main import create_app
@@ -8,7 +12,7 @@ from backend.models import DecisionInput
 from backend.tests.conftest import decide_fixture, decision_payload
 
 
-def test_start_run_and_completion(repository):
+def test_start_run_and_completion(repository, client, monkeypatch):
     claims = Claims(repository)
 
     def runner(claim_id, thread_id):
@@ -19,34 +23,32 @@ def test_start_run_and_completion(repository):
             claim_id,
             DecisionInput.model_validate(decision_payload(thread_id, payout="420")),
         )
+        claims.pay(claim_id, Decimal("420"))
         return "Complete"
 
-    queue = worker.QueueWorker(claims, runner, lambda: True, lambda: None)
-    detail = queue.step({"CLM-1001"})
-    assert detail is not None
+    monkeypatch.setattr(queue_agent, "backend", lambda: api_client(client))
+    result = queue_agent.run_queue({"mode": "claim", "claim_id": "CLM-1001"}, runner)
+    detail = claims.detail("CLM-1001")
     assert detail["status"] == "decided"
     assert detail["run_active"] is False
-    assert queue.step({"CLM-1001"}) is None
+    assert result["counts"]["worked"] == result["counts"]["simulated_payments"] == 1
 
 
-def test_failed_run_retry_and_redacted_error(repository):
+def test_failed_run_retry_and_redacted_error(repository, client, monkeypatch):
     def failing(_claim_id, _thread_id):
         raise RuntimeError("secret provider details")
 
     claims = Claims(repository)
-    queue = worker.QueueWorker(claims, failing, lambda: True, lambda: None)
-    first = queue.step({"CLM-1001"})
-    assert first is not None
-    assert first["status"] == "waiting"
-    assert first["decision"] is None
+    monkeypatch.setattr(queue_agent, "backend", lambda: api_client(client))
+    result = queue_agent.run_queue({"mode": "claim", "claim_id": "CLM-1001"}, failing)
+    assert claims.detail("CLM-1001")["status"] == "handler_review"
+    assert claims.detail("CLM-1001")["decision"] is None
     events = claims.events("CLM-1001")
     assert events[-1]["status"] == "failed"
     assert "secret" not in str(events)
-    assert queue.step({"CLM-1001"}) is None
-    retry = worker.QueueWorker(claims, failing, lambda: True, lambda: None)
-    second = retry.step({"CLM-1001"})
-    assert second is not None
-    assert first["thread_id"] != second["thread_id"]
+    assert result["counts"]["worked"] == 1
+    assert result["counts"]["assessment_attempts"] == 2
+    assert len({entry["thread_id"] for entry in result["attempts"]}) == 2
 
 
 def test_finished_without_decision(repository):

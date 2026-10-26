@@ -1,13 +1,31 @@
 """Scripted tool-calling models and HTTP transport for automated tests."""
 
+from typing import Any
+
 import httpx
+from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.outputs import ChatResult
+from pydantic import Field
 
 
 class StubModel(GenericFakeChatModel):
+    first_messages: list[BaseMessage] = Field(default_factory=list)
+
     def bind_tools(self, tools, **kwargs):
         return self
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        if not self.first_messages:
+            self.first_messages = list(messages)
+        return super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
 
 
 def scripted_model(
@@ -82,14 +100,18 @@ def scripted_model(
     return StubModel(messages=iter(replies))
 
 
-def api_client(client):
+def api_client(client, seen=None, after_response=None):
     def forward(request):
+        if seen is not None:
+            seen.append((request.method, request.url.path))
         response = client.request(
             request.method,
             request.url.path,
             content=request.content,
             headers=request.headers,
         )
+        if after_response is not None:
+            after_response(request, response)
         return httpx.Response(
             response.status_code,
             content=response.content,

@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from langchain_core.language_models import BaseChatModel
 
 from backend.claims import ClaimError, Claims
 from backend.config import backend_url, database_path
@@ -24,6 +25,7 @@ def create_app(
     *,
     auto_run: bool = True,
     worker_ready: Callable[[], bool] | None = None,
+    queue_model: BaseChatModel | None = None,
 ) -> FastAPI:
     """Create the API with isolated storage available to tests."""
     repository = store or Store(database_path())
@@ -50,6 +52,7 @@ def create_app(
                     runner,
                     worker_ready or (lambda: api_ready(url, instance_id)),
                     release_after_shutdown,
+                    queue_model=queue_model,
                 )
                 _app.state.worker = worker
                 worker.start()

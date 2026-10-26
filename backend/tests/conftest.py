@@ -3,6 +3,8 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
+from agent import queue
+from agent.tests.queue_stubs import ScriptedQueueModel
 from backend.harness_models import AllScope, AttemptInput, RunInput, TodosInput
 from backend.main import create_app
 from backend.models import DecisionInput
@@ -17,6 +19,15 @@ def repository(tmp_path):
     store = Store(tmp_path / "claims.db")
     store.initialize()
     return store
+
+
+@pytest.fixture(autouse=True)
+def stub_queue(monkeypatch):
+    monkeypatch.setattr(queue, "model", ScriptedQueueModel)
+    monkeypatch.setenv("MODEL_PROVIDER", "openrouter")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv("MODEL_NAME", "")
+    monkeypatch.delenv("UNDERCOVER_MAX_CLAIMS", raising=False)
 
 
 @pytest.fixture

@@ -8,6 +8,7 @@ from tempfile import TemporaryDirectory
 import uvicorn
 
 from agent.main import run
+from agent.tests.queue_stubs import ScriptedQueueModel
 from agent.tests.stubs import scripted_model
 from backend.main import create_app
 from backend.storage import Store
@@ -15,6 +16,10 @@ from backend.worker import api_ready
 
 PORT = int(os.getenv("UNDERCOVER_TEST_PORT", "8011"))
 os.environ["UNDERCOVER_BACKEND_URL"] = f"http://127.0.0.1:{PORT}"
+os.environ["MODEL_PROVIDER"] = "openrouter"
+os.environ["MODEL_NAME"] = ""
+os.environ["OPENROUTER_API_KEY"] = "stub-models-only"
+os.environ.pop("UNDERCOVER_MAX_CLAIMS", None)
 attempts: dict[str, int] = {}
 
 
@@ -45,7 +50,10 @@ if __name__ == "__main__":
             )
 
         app = create_app(
-            Store(Path(directory) / "claims.db"), scripted_runner, worker_ready=ready
+            Store(Path(directory) / "claims.db"),
+            scripted_runner,
+            worker_ready=ready,
+            queue_model=ScriptedQueueModel(),
         )
         uvicorn.run(
             app,

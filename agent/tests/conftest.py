@@ -1,8 +1,8 @@
 import pytest
 
-from backend.tests.conftest import client, repository
+from backend.tests.conftest import client, repository, stub_queue
 
-__all__ = ["client", "repository"]
+__all__ = ["client", "repository", "stub_queue"]
 
 
 @pytest.fixture(autouse=True)
