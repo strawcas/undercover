@@ -311,14 +311,14 @@ Add queue tools and an entry point, then adapt `backend/worker.py`, `backend/bat
 
 Success criteria:
 
-- [ ] A scripted queue model lists eligible work, writes its plan, selects claims in its own non-source order, delegates them and updates the plan before producing a short summary. Startup and terminal modes exercise the same coordinator through HTTP tools.
-- [ ] Agent integration tests capture the actual HTTP sequence: register run -> read queue/completion state -> write to-dos -> reserve requested claim -> invoke isolated helper -> finish attempt -> check completion -> finish run. Creating/reserving through the API alone makes zero model calls; the delegation wrapper invokes a helper once after reconciling a lost reservation response.
-- [ ] Recorded helper inputs prove each claim and retry starts with a clean message history and new thread. The queue receives only concise persisted outcomes/errors, while each claim retains its full activity and evidence. Parallel delegation requests cannot create overlapping assessments.
-- [ ] CLI tests cover uncapped, `--max-claims 5`, `--claim-id`, CLI/environment precedence, invalid/zero/negative caps, incompatible flags and unknown/ineligible named claims. Startup honors `UNDERCOVER_MAX_CLAIMS` before any assessment starts.
-- [ ] With at least six synthetic waiting claims, a capped run admits exactly five distinct claims; attempts on the remaining claims are rejected and those claims remain Waiting. Retries do not change that distinct count. Fewer available claims complete normally.
-- [ ] A scripted agent deliberately overlooks a claim and tries to finish early. The completion guard identifies the omission and continues work. Cap-excluded claims are correctly reported as waiting, and unresolved admitted work prevents a success report.
-- [ ] An empty queue finishes with zero totals and no model calls. Later arrivals remain waiting; refreshes and navigation do not start runs. A second run skips decided, awaiting-sign-off and Handler review claims.
-- [ ] Terminal output and stored summaries match database counts, distinguish distinct claims from attempts, preserve outcome/payment detail and follow the documented exit codes. `npm run check:python` passes.
+- [x] A scripted queue model lists eligible work, writes its plan, selects claims in its own non-source order, delegates them and updates the plan before producing a short summary. Startup and terminal modes exercise the same coordinator through HTTP tools.
+- [x] Agent integration tests capture the actual HTTP sequence: register run -> read queue/completion state -> write to-dos -> reserve requested claim -> invoke isolated helper -> finish attempt -> check completion -> finish run. Creating/reserving through the API alone makes zero model calls; the delegation wrapper invokes a helper once after reconciling a lost reservation response.
+- [x] Recorded helper inputs prove each claim and retry starts with a clean message history and new thread. The queue receives only concise persisted outcomes/errors, while each claim retains its full activity and evidence. Parallel delegation requests cannot create overlapping assessments.
+- [x] CLI tests cover uncapped, `--max-claims 5`, `--claim-id`, CLI/environment precedence, invalid/zero/negative caps, incompatible flags and unknown/ineligible named claims. Startup honors `UNDERCOVER_MAX_CLAIMS` before any assessment starts.
+- [x] With at least six synthetic waiting claims, a capped run admits exactly five distinct claims; attempts on the remaining claims are rejected and those claims remain Waiting. Retries do not change that distinct count. Fewer available claims complete normally.
+- [x] A scripted agent deliberately overlooks a claim and tries to finish early. The completion guard identifies the omission and continues work. Cap-excluded claims are correctly reported as waiting, and unresolved admitted work prevents a success report.
+- [x] An empty queue finishes with zero totals and no model calls. Later arrivals remain waiting; refreshes and navigation do not start runs. A second run skips decided, awaiting-sign-off and Handler review claims.
+- [x] Terminal output and stored summaries match database counts, distinguish distinct claims from attempts, preserve outcome/payment detail and follow the documented exit codes. `npm run check:python` passes.
 
 ## Phase 4: Recover automatically without duplicating decisions or payments
 
@@ -326,14 +326,14 @@ Add the retry, timeout, error-reporting and completion middleware around queue a
 
 Success criteria:
 
-- [ ] Stub providers/read tools fail transiently and then succeed within the configured transport retry limit. Tests use fake delays/clocks and prove backoff is bounded, SDK retries do not multiply the budget, and validation/payment conflicts are not automatically replayed.
-- [ ] A helper failure before a decision returns its claim to Waiting, records an observable retry and allows another claim to finish. The queue retries the failed claim successfully in the same run without exceeding its cap.
-- [ ] A second failed assessment leaves the claim for a handler with both failures visible, and processing continues. Subsequent startup/terminal runs cannot silently attempt it a third time. No technical failure is converted into an insurance referral.
-- [ ] Missing-decision replies, model/tool limits, timeout, exhausted provider retries and coordinator failures all leave explicit run/claim states. An early-final guard cannot loop indefinitely, and incomplete runs retain accurate partial summaries.
-- [ ] Deadline/interruption tests fence the old thread before another attempt starts. Late decision, evidence, payment and finish requests from that thread cannot affect newer work. Shutdown and restart leave no abandoned In progress claim or active to-do spinner.
-- [ ] API recovery tests repeat reservation, section read, attempt finish and run finish after simulated lost HTTP responses and assert the documented replay response and unchanged counts. Conflicting payloads return 409. Exact closed-attempt finish replay returns its saved result; all other stale helper mutations are rejected.
-- [ ] Simulated lost responses after decision/payment commits are reconciled from storage. The decision is recorded once; each exact approved payment is recorded at most once. Saved outcomes survive subsequent exceptions, restarts and retries.
-- [ ] Regression tests retain the $1,000 boundary, blocked payment above it, authorized handler sign-off, wrong-amount/duplicate-payment rejection and continued queue work while sign-off is pending. `npm run check:python` passes without relaxed rules.
+- [x] Stub providers/read tools fail transiently and then succeed within the configured transport retry limit. Tests use fake delays/clocks and prove backoff is bounded, SDK retries do not multiply the budget, and validation/payment conflicts are not automatically replayed.
+- [x] A helper failure before a decision returns its claim to Waiting, records an observable retry and allows another claim to finish. The queue retries the failed claim successfully in the same run without exceeding its cap.
+- [x] A second failed assessment leaves the claim for a handler with both failures visible, and processing continues. Subsequent startup/terminal runs cannot silently attempt it a third time. No technical failure is converted into an insurance referral.
+- [x] Missing-decision replies, model/tool limits, timeout, exhausted provider retries and coordinator failures all leave explicit run/claim states. An early-final guard cannot loop indefinitely, and incomplete runs retain accurate partial summaries.
+- [x] Deadline/interruption tests fence the old thread before another attempt starts. Late decision, evidence, payment and finish requests from that thread cannot affect newer work. Shutdown and restart leave no abandoned In progress claim or active to-do spinner.
+- [x] API recovery tests repeat reservation, section read, attempt finish and run finish after simulated lost HTTP responses and assert the documented replay response and unchanged counts. Conflicting payloads return 409. Exact closed-attempt finish replay returns its saved result; all other stale helper mutations are rejected.
+- [x] Simulated lost responses after decision/payment commits are reconciled from storage. The decision is recorded once; each exact approved payment is recorded at most once. Saved outcomes survive subsequent exceptions, restarts and retries.
+- [x] Regression tests retain the $1,000 boundary, blocked payment above it, authorized handler sign-off, wrong-amount/duplicate-payment rejection and continued queue work while sign-off is pending. `npm run check:python` passes without relaxed rules.
 
 ## Phase 5: Show the run plan, evidence and both instruction sets
 
