@@ -398,10 +398,11 @@ An explicit command attaches through HTTP to an already-running local app servin
 
 Success criteria:
 
-- [ ] Default backend startup, restart, polling and navigation leave Waiting claims untouched and create no run or model call, including with missing provider credentials or an obsolete environment cap.
-- [ ] CLI integration covers full, `--cap 5`, alias and named scopes, invalid caps and conflicting flags. A capped run leaves the remaining claims Waiting; retries keep their distinct-claim slot.
-- [ ] The CLI attaches to the matching running backend, leaves its server/ownership intact and rejects unrelated services/databases. Ctrl+C preserves recoverable state and permits a later explicit run.
-- [ ] Adapt the existing lifecycle tests individually to explicit execution, retaining later-arrival, retry, payment, shutdown, stale-write and restart checks. Backend shutdown fences active work before releasing ownership.
-- [ ] Full-stack tests first prove that the idle app stays idle across refresh, then explicitly invoke the stubbed CLI and follow its plan, decisions, retries, handoffs, evidence and handler actions. No production HTTP operation launches an agent.
-- [ ] Dashboard waiting/empty text, `.env.example`, README, specification, stack and status explain explicit launch and `--cap`; the historical pilot plan and user configuration are preserved. No real agent run is launched for this revision.
-- [ ] `npm run check`, the production build and pre-commit hooks pass without relaxed rules. Record the final results and commit the revision.
+- [x] Default backend startup, restart, polling and navigation leave Waiting claims untouched and create no run or model call, including with missing provider credentials or an obsolete environment cap.
+- [x] CLI integration covers full, `--cap 5`, alias and named scopes, invalid caps and conflicting flags. A capped run leaves the remaining claims Waiting; retries keep their distinct-claim slot.
+- [x] The CLI attaches to the matching running backend, leaves its server/ownership intact and rejects unrelated services/databases. Ctrl+C preserves recoverable state and permits a later explicit run.
+- [x] Adapt the existing lifecycle tests individually to explicit execution, retaining later-arrival, retry, payment, shutdown, stale-write and restart checks. Backend shutdown fences active work before releasing ownership.
+- [x] Full-stack tests first prove that the idle app stays idle across refresh, then explicitly invoke the stubbed CLI and follow its plan, decisions, retries, handoffs, evidence and handler actions. No production HTTP operation launches an agent.
+- [x] Dashboard waiting/empty text, `.env.example`, README, specification, stack and status explain explicit launch and `--cap`; the historical pilot plan and user configuration are preserved. No real agent run is launched for this revision.
+- [x] `npm run check`, the production build and pre-commit hooks pass without relaxed rules. Record the final results and commit the revision.
+Revision verified October 27, 2026. `npm run check` passes, including eight Playwright journeys. Final pre-commit checks pass 204 Python tests (97.90% coverage) and 21 component tests (99.33% statements), with format, lint and type checks clean. The production build passes. Playwright MCP confirmed that starting, refreshing and navigating the isolated app preserved all 25 claims in Waiting and returned `{"run":null}` before and after. All assessments in verification used stub models. No real agent run or working-database reset was performed. The historical pilot plan and user configuration remain unchanged.

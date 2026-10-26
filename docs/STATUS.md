@@ -1,6 +1,6 @@
 # Status
 
-The harness in `docs/HARNESS.md` is implemented. Verification is tracked in `docs/PLAN_HARNESS.md`; `docs/PLAN.md` remains the completed pilot plan.
+The harness in `docs/HARNESS.md` is implemented with explicit command-only launch. Verification is tracked in `docs/PLAN_HARNESS.md`; `docs/PLAN.md` remains the completed pilot plan.
 
 ## What is built
 
@@ -49,7 +49,7 @@ OLLAMA_BASE_URL=http://localhost:11434
 # OLLAMA_NUM_CTX=32768
 ```
 
-Ollama uses its native API address without `/v1`, temperature zero and no OpenRouter key. Choose model/context sizes that fit local memory. A missing model tag, invalid provider/context setting or missing required key fails before any claim is reserved. An empty run needs no model configuration. Ollama connection, missing-model, tool-support and truncation failures produce actionable messages; there is no automatic provider fallback. Stop UnderCover before changing settings, then restart it. Provider changes affect future attempts; saved decisions remain unchanged.
+Ollama uses its native API address without `/v1`, temperature zero and no OpenRouter key. Choose model/context sizes that fit local memory. A missing model tag, invalid provider/context setting or missing required key fails before any claim is reserved. An empty run needs no model configuration. Ollama connection, missing-model, tool-support and truncation failures produce actionable messages; there is no automatic provider fallback. Each explicit command reads its model settings. Database/backend address settings must match the running app; restart the app when changing those settings. Provider changes affect future attempts; saved decisions remain unchanged.
 
 ## Full, capped and named terminal runs
 
@@ -103,8 +103,8 @@ Reseed before every live trial and keep the cap at five. To watch the trial in t
 
 ## Verification
 
-`npm run check` passes: Ruff, Pyright, 195 Python tests with 97.82% coverage, Prettier, ESLint, TypeScript, 21 component tests with 99.33% statement / 92.72% branch coverage, and eight Playwright tests. The production dashboard build also passes. The synthetic API acceptance sequence verifies five distinct claims, seven attempts, three failures, one technical handoff, one pending sign-off and one cap-excluded Waiting claim. The CLI integration rebuilds, works five claims, processes only the eligible remainder, confirms an empty repeat run and rebuilds again.
+`npm run check` passes for the explicit-launch revision: Ruff, Pyright, 204 Python tests with 97.90% coverage, Prettier, ESLint, TypeScript, 21 component tests with 99.33% statement / 92.72% branch coverage, and eight Playwright tests. The production dashboard build also passes. The synthetic API acceptance sequence verifies five distinct claims, seven attempts, three failures, one technical handoff, one pending sign-off and one cap-excluded Waiting claim. CLI integration verifies standalone and attached commands, full/capped/named scopes, cross-database rejection, interruption, rebuilding and preserved outcomes.
 
-Playwright MCP verified retries, technical handoff, full evidence, both prompts, handler sign-off/payment and frozen summaries, with keyboard access and no overflow/browser errors at desktop and 390 pixels in light/dark modes. Automated checks use stub models and temporary databases. Coverage thresholds and hooks remain enabled.
+Playwright MCP verified that the app starts idle and stays idle across refresh and navigation: all 25 isolated test claims remained Waiting, with `{"run":null}` before and after, and no console errors. Full-stack tests then explicitly invoke the stubbed CLI to follow plan progress, outcomes, retries, handoff, evidence and handler actions. Earlier harness browser checks cover full evidence, both prompts, frozen summaries, keyboard access and desktop/390-pixel layouts in light/dark modes. Automated checks use stub models and temporary databases. Coverage thresholds and hooks remain enabled. No real agent run was launched for the explicit-command revision.
 
-The October 26 live trial used a freshly seeded separate database and the specified default model. It completed five distinct claims in five attempts: five approvals, four simulated payments, one awaiting sign-off, zero failed assessments/technical handoffs/unpaid approvals, and twenty claims left Waiting. All five claims retained wording and manual evidence. Health, live plan updates, full reads, exact read-only prompts, final totals and refresh persistence were checked in Playwright MCP. This verifies operation and observability, not accuracy against the held-out answer key. The trial servers are stopped and results remain in ignored `undercover-harness-trial.db`; the student's `.env` and working `undercover.db` were preserved.
+The historical October 26 live trial, before the explicit-launch revision, used a freshly seeded separate database and the specified default model. It completed five distinct claims in five attempts: five approvals, four simulated payments, one awaiting sign-off, zero failed assessments/technical handoffs/unpaid approvals, and twenty claims left Waiting. All five claims retained wording and manual evidence. Health, live plan updates, full reads, exact read-only prompts, final totals and refresh persistence were checked in Playwright MCP. This verifies operation and observability, not accuracy against the held-out answer key. The trial servers are stopped and results remain in ignored `undercover-harness-trial.db`; the student's `.env` and working `undercover.db` were preserved.
