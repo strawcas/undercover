@@ -341,14 +341,14 @@ Extend the queue page with a compact current/latest-run panel and to-do list. Ex
 
 Success criteria:
 
-- [ ] Component tests show a to-do list filling in and changing through all four statuses while claims progress. Run identity, cap, partial/final summary and the distinction between sign-off, referral and technical handoff are visible.
-- [ ] The queue shows a useful empty state before a run, active progress during it and the latest result after it ends. Refresh and navigation restore stored progress; polling cleans up on unmount and recovers visibly from request failures.
-- [ ] Dashboard API fixtures match `Run`, `Todo`, `Counts`, `Evidence` and the extended claim/instruction schemas exactly. Handler review appears as the fifth queue state. Finished run summaries are labeled as completion-time snapshots and stay unchanged when a handler later signs off/pays a claim.
-- [ ] Claim details show searches/reads/retries in activity and readable full evidence with source, version, title and attempt. Policy and manual references in decisions are distinct, and older decisions remain readable.
-- [ ] Instructions display the exact backend queue and claim prompts read only. Both roles' instructions are accessible by keyboard and require no editing controls.
-- [ ] Existing claim details, automatic refresh, handler sign-off and simulated-payment controls remain usable during and after the queue run. New waiting/review messages describe actual retry and handoff behavior.
-- [ ] In Playwright MCP, inspect the queue plan, one retry, a handler handoff, section reads and instructions at desktop and 390-pixel widths in light/dark modes. There is no horizontal overflow, inaccessible status-only color, unexpected console error or browser-triggered assessment.
-- [ ] `npm run check:ts` passes with strict TypeScript, no `any` and the existing Vitest coverage thresholds.
+- [x] Component tests show a to-do list filling in and changing through all four statuses while claims progress. Run identity, cap, partial/final summary and the distinction between sign-off, referral and technical handoff are visible.
+- [x] The queue shows a useful empty state before a run, active progress during it and the latest result after it ends. Refresh and navigation restore stored progress; polling cleans up on unmount and recovers visibly from request failures.
+- [x] Dashboard API fixtures match `Run`, `Todo`, `Counts`, `Evidence` and the extended claim/instruction schemas exactly. Handler review appears as the fifth queue state. Finished run summaries are labeled as completion-time snapshots and stay unchanged when a handler later signs off/pays a claim.
+- [x] Claim details show searches/reads/retries in activity and readable full evidence with source, version, title and attempt. Policy and manual references in decisions are distinct, and older decisions remain readable.
+- [x] Instructions display the exact backend queue and claim prompts read only. Both roles' instructions are accessible by keyboard and require no editing controls.
+- [x] Existing claim details, automatic refresh, handler sign-off and simulated-payment controls remain usable during and after the queue run. New waiting/review messages describe actual retry and handoff behavior.
+- [x] In Playwright MCP, inspect the queue plan, one retry, a handler handoff, section reads and instructions at desktop and 390-pixel widths in light/dark modes. There is no horizontal overflow, inaccessible status-only color, unexpected console error or browser-triggered assessment.
+- [x] `npm run check:ts` passes with strict TypeScript, no `any` and the existing Vitest coverage thresholds.
 
 ## Phase 6: Verify the complete harness and document the handover
 
