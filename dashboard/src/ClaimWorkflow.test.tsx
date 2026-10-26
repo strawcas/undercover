@@ -9,7 +9,7 @@ import {
 import { afterEach, expect, it, vi } from "vitest";
 import type { ClaimDetail, ClaimEvent } from "./api";
 import { ClaimReader } from "./ClaimWorkflow";
-import { claim, decision } from "./testData";
+import { claim, decision, evidence } from "./testData";
 
 afterEach(() => {
   cleanup();
@@ -21,6 +21,8 @@ function api(initial: ClaimDetail) {
   let current = initial;
   let events: ClaimEvent[] = [];
   const fetcher = vi.fn((path: string, options?: RequestInit) => {
+    if (path.endsWith("/evidence"))
+      return Promise.resolve(new Response(JSON.stringify(evidence)));
     if (path.endsWith("/handlers"))
       return Promise.resolve(
         new Response(
@@ -88,6 +90,7 @@ it("follows a startup or terminal assessment from waiting through completion", a
   backend.update({ ...claim, decision, status: "decided" }, [
     {
       id: 1,
+      claim_id: "CLM-1001",
       thread_id: "thread",
       action: "Read policy",
       status: "completed",
@@ -170,6 +173,7 @@ it("explains how to retry a failed pass without offering a manual start", async 
   backend.update(claim, [
     {
       id: 1,
+      claim_id: "CLM-1001",
       thread_id: "thread",
       action: "Run agent",
       status: "failed",
@@ -178,10 +182,27 @@ it("explains how to retry a failed pass without offering a manual start", async 
     },
   ]);
   render(<ClaimReader claimId="CLM-1001" />);
-  expect(await screen.findByText("Assessment paused")).toBeDefined();
-  expect(screen.getByText(/Start another queue run to retry it/)).toBeDefined();
+  expect(await screen.findByText("Assessment will be retried")).toBeDefined();
+  expect(screen.getByText(/The queue can retry it once/)).toBeDefined();
   expect(screen.getByText(/Agent run failed/)).toBeDefined();
   expect(screen.queryByRole("button", { name: "Run agent" })).toBeNull();
+});
+
+it("shows a technical handoff without inventing a referral and preserves full evidence", async () => {
+  api({
+    ...claim,
+    status: "handler_review",
+    failed_attempts: 2,
+    review_reason: "two_failed_assessments",
+  });
+  render(<ClaimReader claimId="CLM-1001" />);
+  expect(await screen.findByText("Handler review required")).toBeDefined();
+  expect(
+    screen.getByText(/No insurance decision or payout was recorded/),
+  ).toBeDefined();
+  expect(screen.getByText(evidence.reads[0].text)).toBeDefined();
+  expect(screen.getByText(`Attempt ${decision.thread_id}`)).toBeDefined();
+  expect(screen.queryByRole("region", { name: "Agent decision" })).toBeNull();
 });
 
 it("keeps a later arrival waiting without starting processing while polling", async () => {

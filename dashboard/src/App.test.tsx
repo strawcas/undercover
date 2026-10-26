@@ -14,11 +14,18 @@ import { errorMessage, money, request } from "./api";
 import { claim, decision, rows } from "./testData";
 
 function respond(path: string) {
+  if (path.endsWith("/evidence"))
+    return new Response(JSON.stringify({ claim_id: "CLM-1001", reads: [] }));
+  if (path === "/api/agent-runs/current")
+    return new Response(JSON.stringify({ run: null }));
   if (path.endsWith("/events")) return new Response("[]");
   if (path === "/api/claims") return new Response(JSON.stringify(rows));
   if (path === "/api/agent-instructions")
     return new Response(
-      JSON.stringify({ text: "Use policy wording to decide each claim." }),
+      JSON.stringify({
+        text: "Use policy wording to decide each claim.",
+        queue_text: "Choose the queue order and check completion.",
+      }),
     );
   return new Response(
     JSON.stringify({ ...claim, claim_id: path.split("/").at(-1) }),
@@ -77,7 +84,7 @@ it("renders the queue, all states and the complete claim", async () => {
   expect(
     await screen.findByRole("heading", { name: claim.summary }),
   ).toBeDefined();
-  expect(screen.getAllByRole("button", { name: /^Open CLM-/ })).toHaveLength(4);
+  expect(screen.getAllByRole("button", { name: /^Open CLM-/ })).toHaveLength(5);
   expect(screen.getAllByText("Waiting for sign-off").length).toBeGreaterThan(0);
   expect(screen.getByText(claim.story)).toBeDefined();
   expect(screen.getByText("Airport hotel")).toBeDefined();
@@ -101,6 +108,9 @@ it("shows read-only instructions and returns to the queue", async () => {
     await screen.findByText("Use policy wording to decide each claim."),
   ).toBeDefined();
   expect(screen.queryByRole("textbox")).toBeNull();
+  expect(
+    screen.getByText("Choose the queue order and check completion."),
+  ).toBeDefined();
   fireEvent.click(screen.getByRole("button", { name: "Claims queue" }));
   expect(
     await screen.findByRole("heading", { name: "Claims queue" }),
@@ -113,7 +123,7 @@ it("recovers after queue and instructions failures", async () => {
     vi.fn().mockRejectedValue(new Error("Backend offline")),
   );
   render(<App />);
-  expect(await screen.findByRole("alert")).toHaveProperty(
+  expect((await screen.findAllByRole("alert"))[0]).toHaveProperty(
     "textContent",
     expect.stringContaining("Backend offline"),
   );
@@ -136,7 +146,14 @@ it("recovers after queue and instructions failures", async () => {
 });
 
 it("shows an empty queue", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("[]")));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((path: string) =>
+      Promise.resolve(
+        path === "/api/claims" ? new Response("[]") : respond(path),
+      ),
+    ),
+  );
   render(<App />);
   expect(await screen.findByText("No claims in the queue.")).toBeDefined();
   expect(screen.getByText("Your queue is clear.")).toBeDefined();

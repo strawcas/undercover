@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   type QueueRow,
   type ClaimState,
+  type InstructionsResponse,
   money,
   label,
   stateLabels,
@@ -9,12 +10,14 @@ import {
 } from "./api";
 import { ClaimReader } from "./ClaimWorkflow";
 import { useResource } from "./useResource";
+import { RunProgress } from "./RunProgress";
 
 const states: ClaimState[] = [
   "waiting",
   "in_progress",
   "awaiting_sign_off",
   "decided",
+  "handler_review",
 ];
 
 function watchQueue() {
@@ -22,7 +25,7 @@ function watchQueue() {
 }
 
 function Instructions() {
-  const { data, error, refresh } = useResource<{ text: string }>(
+  const { data, error, refresh } = useResource<InstructionsResponse>(
     "/api/agent-instructions",
   );
   return (
@@ -30,7 +33,8 @@ function Instructions() {
       <p className="eyebrow">UnderCover Agent</p>
       <h2>Agent instructions</h2>
       <p className="muted">
-        Read only · The instructions used for every new claim assessment.
+        Read only · The instructions used for queue planning and claim
+        assessment.
       </p>
       {error && (
         <p role="alert">
@@ -38,7 +42,12 @@ function Instructions() {
         </p>
       )}
       {data ? (
-        <pre>{data.text}</pre>
+        <>
+          <h3>Running the queue</h3>
+          <pre>{data.queue_text}</pre>
+          <h3>Working a claim</h3>
+          <pre>{data.text}</pre>
+        </>
       ) : (
         !error && <p role="status">Loading instructions…</p>
       )}
@@ -182,6 +191,7 @@ export function App() {
           <Instructions />
         ) : (
           <>
+            <RunProgress onSelect={setSelected} />
             {error && (
               <div className="panel" role="alert">
                 <h2>Unable to load the queue</h2>

@@ -215,7 +215,7 @@ p {
 }
 .stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 14px;
   margin-bottom: 28px;
 }
@@ -252,6 +252,86 @@ p {
 .stat-3 {
   background: #2563eb;
   color: #fff;
+}
+.stat-4 {
+  background: #e11d48;
+  color: #fff;
+}
+.badge.handler_review {
+  background: #ffe7ee;
+  color: #881033;
+}
+.run-progress {
+  margin-bottom: 22px;
+}
+.run-identity {
+  overflow-wrap: anywhere;
+}
+.run-summary {
+  background: var(--subtle);
+  padding: 14px;
+  border-radius: 10px;
+  margin: 14px 0;
+}
+.todo-list {
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 9px;
+  margin: 18px 0 0;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.todo-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  background: var(--subtle);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.todo-list button {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  text-align: left;
+  padding: 3px 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.todo-list small {
+  width: 100%;
+  color: var(--muted);
+  font-size: 11px;
+}
+.todo-status {
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: auto;
+}
+.todo-status.left_for_handler {
+  color: #a11542;
+}
+.evidence pre {
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-top: 14px;
+}
+.instructions h3 {
+  margin-top: 24px;
+}
+@media (prefers-color-scheme: dark) {
+  .badge.handler_review {
+    background: #4d2336;
+    color: #ffd9e4;
+  }
+  .todo-status.left_for_handler {
+    color: #ffacc4;
+  }
 }
 .panel {
   background: var(--panel);

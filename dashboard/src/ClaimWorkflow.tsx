@@ -3,25 +3,29 @@ import {
   type ClaimDetail,
   type ClaimEvent,
   type Handler,
+  type EvidenceResponse,
   errorMessage,
   label,
   request,
 } from "./api";
 import { ClaimView } from "./ClaimDetail";
+import { EvidencePanel } from "./EvidencePanel";
 import { useResource } from "./useResource";
 
 type Action = (operation: string, body?: Record<string, string>) => void;
 interface Bundle {
   claim: ClaimDetail;
   events: ClaimEvent[];
+  evidence: EvidenceResponse;
 }
 
 async function loadClaim(path: string): Promise<Bundle> {
-  const [claim, events] = await Promise.all([
+  const [claim, events, evidence] = await Promise.all([
     request<ClaimDetail>(path),
     request<ClaimEvent[]>(`${path}/events`),
+    request<EvidenceResponse>(`${path}/evidence`),
   ]);
-  return { claim, events };
+  return { claim, events, evidence };
 }
 
 function isRunning(bundle: Bundle) {
@@ -81,6 +85,31 @@ function SignOffControls({
   );
 }
 
+function Waiting({
+  claim,
+  failed,
+}: Readonly<{ claim: ClaimDetail; failed: boolean }>) {
+  let heading = "Waiting for assessment";
+  let detail = "Claims are assessed during startup or a terminal queue run.";
+  if (claim.status === "handler_review") {
+    heading = "Handler review required";
+    detail =
+      "Two assessments failed. No insurance decision or payout was recorded. A handler must review this claim; automatic processing has stopped.";
+  } else if (failed) {
+    heading = "Assessment will be retried";
+    detail =
+      "The last attempt failed. The queue can retry it once. If the run has ended, another startup or terminal run can pick it up.";
+  }
+  return (
+    <section className="panel action-panel">
+      <div>
+        <h3>{heading}</h3>
+        <p>{detail}</p>
+      </div>
+    </section>
+  );
+}
+
 function Actions({
   claim,
   action,
@@ -102,19 +131,7 @@ function Actions({
         </div>
       </section>
     );
-  if (!claim.decision)
-    return (
-      <section className="panel action-panel">
-        <div>
-          <h3>{failed ? "Assessment paused" : "Waiting for assessment"}</h3>
-          <p>
-            {failed
-              ? "The last attempt failed. Start another queue run to retry it."
-              : "Claims are assessed during startup or a terminal queue run."}
-          </p>
-        </div>
-      </section>
-    );
+  if (!claim.decision) return <Waiting claim={claim} failed={failed} />;
   if (claim.status === "awaiting_sign_off")
     return (
       <section className="panel">
@@ -248,6 +265,7 @@ export function ClaimReader({
         failed={data.events.at(-1)?.status === "failed"}
       />
       <Activity events={data.events} />
+      <EvidencePanel evidence={data.evidence} />
     </ClaimView>
   );
 }

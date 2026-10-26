@@ -78,6 +78,21 @@ export function DecisionPanel({ claim }: Readonly<{ claim: Detail }>) {
           </span>
         ))}
       </div>
+      <p className="muted">
+        Policy wording version:{" "}
+        {decision.policy_wording_version ?? "Not recorded"}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {decision.manual_sections.map((section) => (
+          <span className="policy-chip" key={section}>
+            Manual section {section}
+          </span>
+        ))}
+      </div>
+      <p className="muted">
+        Claims manual version:{" "}
+        {decision.claims_manual_version ?? "Not recorded"}
+      </p>
       {claim.status === "awaiting_sign_off" && (
         <p className="notice">Payment is held until a handler signs off.</p>
       )}
