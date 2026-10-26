@@ -11,8 +11,14 @@ test("the dashboard loads the real pilot queue and read-only instructions", asyn
     page.getByRole("heading", { name: "Claims desk." }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Agent instructions" }).click();
-  await expect(page.locator(".instructions pre")).toContainText(
-    "You are the UnderCover Agent",
+  await expect(
+    page.getByRole("heading", { name: "Running the queue" }),
+  ).toBeVisible();
+  await expect(page.locator(".instructions pre").first()).toContainText(
+    "You are the UnderCover queue agent",
+  );
+  await expect(page.locator(".instructions pre").last()).toContainText(
+    "You are the UnderCover claim agent",
   );
   await expect(page.getByRole("textbox")).toHaveCount(0);
 });

@@ -31,6 +31,8 @@ def scripted_runner(claim_id: str, thread_id: str) -> str:
         store.add_claim(store.record("claim", claim_id) | {"claim_id": "TEST-LATER"})
     if claim_id == "CLM-1005" and attempts[claim_id] == 1:
         raise RuntimeError("Synthetic provider failure")
+    if claim_id == "CLM-1006":
+        raise RuntimeError("Synthetic repeated provider failure")
     outcomes = {
         "CLM-1002": ("decline", "0"),
         "CLM-1003": ("approve", "1250.00"),

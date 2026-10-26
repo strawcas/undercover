@@ -72,18 +72,24 @@ def test_terminal_drains_in_order_and_repeat_is_empty(terminal, capsys):
     assert claims.events("CLM-1001") == events
 
 
-def test_full_rebuild_drain_repeat_and_rebuild(terminal, capsys):
+def test_rebuild_capped_run_remaining_work_repeat_and_rebuild(terminal, capsys):
     count = rebuild(terminal.path)
     claims = Claims(terminal)
     ordered = [row["claim_id"] for row in claims.queue()]
-    assert batch.main(scripted_runner) == 0
+    assert batch.main(scripted_runner, ["--max-claims", "5"]) == 0
     output = capsys.readouterr().out
     printed = [
         line.split()[0] for line in output.splitlines() if line.startswith("CLM-")
     ]
-    assert printed == ordered
-    assert f"Attempted: {count} | Decided: {count}" in output
+    assert printed == ordered[:5]
+    assert "Attempted: 5 | Decided: 5" in output
     assert "Failed runs: 0 | Awaiting sign-off: 1" in output
+    assert sum(row["status"] == "waiting" for row in claims.queue()) == count - 5
+    preserved = claims.events(ordered[0])
+    assert batch.main(scripted_runner) == 0
+    output = capsys.readouterr().out
+    assert f"Attempted: {count - 5} | Decided: {count - 5}" in output
+    assert claims.events(ordered[0]) == preserved
     assert all(row["outcome"] is not None for row in claims.queue())
     assert sum(row["payment_status"] == "paid" for row in claims.queue()) == count - 3
     assert batch.main(scripted_runner) == 0

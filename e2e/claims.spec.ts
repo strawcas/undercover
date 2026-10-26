@@ -17,6 +17,19 @@ test("approves, shows live activity and records an eligible payment", async ({
   await expect(
     page.getByText("Policy section 3", { exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Queue run progress" }),
+  ).toContainText("assessment attempts");
+  await expect(
+    page.getByRole("list", { name: "Run to-do list" }),
+  ).toContainText("CLM-1001");
+  await page
+    .getByRole("region", { name: "Sections read" })
+    .getByText(/Claims manual · 6/)
+    .click();
+  await expect(
+    page.getByRole("region", { name: "Sections read" }),
+  ).toContainText("Version 2026.2");
   await page.reload();
   await expect(page.getByText(/Simulated payment recorded/)).toBeVisible();
   const repeat = await request.post("/api/claims/CLM-1001/pay", {
@@ -72,25 +85,49 @@ for (const [id, outcome] of [
   });
 }
 
-test("shows a failed attempt while the startup pass continues", async ({
+test("retries a failed claim while other claims continue", async ({
   page,
   request,
 }) => {
+  test.setTimeout(45000);
   await page.goto("/");
   await page.getByRole("button", { name: "Open CLM-1005" }).click();
   await expect(page.getByText(/Agent run failed/)).toBeVisible({
     timeout: 10000,
   });
-  await expect(page.getByText("Assessment paused")).toBeVisible();
   await expect(page.getByRole("button", { name: "Run agent" })).toHaveCount(0);
   await expect
     .poll(async () => {
-      const next = await request.get("/api/claims/CLM-1006");
+      const next = await request.get("/api/claims/CLM-1007");
       const detail = (await next.json()) as { status: string };
       return detail.status;
     })
     .toBe("decided");
   await expect(page.getByText(/Agent run failed/)).toBeVisible();
+  await expect(page.getByText(/Simulated payment recorded/)).toBeVisible({
+    timeout: 35000,
+  });
+  const detail = await request.get("/api/claims/CLM-1005");
+  expect(
+    ((await detail.json()) as { failed_attempts: number }).failed_attempts,
+  ).toBe(1);
+});
+
+test("hands two failed assessments to a handler without an insurance decision", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open CLM-1006" }).click();
+  await expect(page.getByText("Handler review required")).toBeVisible({
+    timeout: 10000,
+  });
+  await expect(
+    page.getByRole("region", { name: "Agent decision" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("region", { name: "Queue run progress" }),
+  ).toContainText("Two failed assessments; no decision recorded");
+  await expect(page.getByText(/Completion-time snapshot/)).toBeVisible();
 });
 
 test("leaves later arrivals waiting after the startup pass and browser refresh", async ({

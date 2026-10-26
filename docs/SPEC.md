@@ -10,7 +10,7 @@ UnderCover sells travel insurance on three plans: Economy, Premium and First. Ou
 
 We want an AI agent, the UnderCover Agent, to work the queue the way a handler does. For each claim it should:
 
-- read the claim, the customer's policy and claim history, and the policy wording
+- read the claim, the customer's policy and claim history, and the relevant policy wording and claims manual sections
 - approve, decline or refer the claim
 - work out the payout when it approves
 - explain the decision in two or three sentences, along with the relevant section of the policy
@@ -23,6 +23,17 @@ Our goal is to handle claims straight through, as accurately as our handlers do.
 - Each claim in full, with the agent's decision and its reasons.
 - What the agent is doing on a claim while it works, step by step.
 - The agent's instructions, read only.
+- The current or latest run's claim-linked to-do list and factual summary.
+- The full wording/manual sections returned to the agent, with their versions and assessment attempt.
+- Handler review for a claim with two failed assessments, distinct from an insurance referral.
+
+## The harness
+
+One queue agent chooses the order within a finite snapshot of eligible waiting claims, plans its work and delegates each claim to a fresh helper. Startup and terminal modes use the same harness. Runs may cover the whole snapshot, a positive cap on distinct claims or one named eligible claim. Later arrivals and cap-excluded claims remain waiting for another run; dashboard polling never starts work.
+
+An undecided failed assessment returns to Waiting for one automatic retry, including during the same run. Two failures leave the claim for a handler without inventing a decision or payout. Failure counts survive restarts. Committed decisions and payments are preserved, and the backend fences stale attempts and reconciles ambiguous write responses. The queue checks for missed work before finishing.
+
+The claims manual supplements the policy wording with handling and interpretation rules; the wording remains the contract. Instructions and evidence come from the permitted business sources, never the held-out handler decisions. Each claim helper selects and reads sections through the backend API. Both roles' effective instructions are visible read only.
 
 ## Rules
 
@@ -37,7 +48,6 @@ Everything is in `data/`, described in `data/README.md`: the claims queue, the p
 
 ## Not for now
 
-- The claims manual. For the pilot, the agent works from the policy wording alone.
 - No sign-in. Everyone who uses the screens sees everything.
 - No real payments.
 - No messages to customers.

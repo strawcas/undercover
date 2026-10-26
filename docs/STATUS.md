@@ -1,12 +1,14 @@
 # Status
 
-Harness implementation is in progress in `docs/PLAN_HARNESS.md`. Phases 1–5 are complete. One planning queue agent chooses claim order, maintains persisted to-dos and delegates isolated helpers through HTTP. Startup and CLI support full, capped and named scopes. The backend enforces distinct-claim caps, two-failure handler review, replay-safe completion, attempt deadlines, audited evidence and financial safeguards. Both agents use the shared provider configuration. The dashboard shows the run plan, exact evidence, technical handoffs and both instruction sets. Final acceptance verification is in progress.
+The harness in `docs/HARNESS.md` is implemented. Verification is tracked in `docs/PLAN_HARNESS.md`; `docs/PLAN.md` remains the completed pilot plan.
 
-Phases 3–4 pass the pre-commit Python checks: Ruff, Pyright and 194 pytest tests with 97.77% coverage. Fault-injection tests verify bounded retries, lost-response reconciliation, shutdown cleanup and bounded queue history. Tests use stub models and temporary databases; they do not score live reasoning accuracy. The student's working database and `.env` are unchanged.
+## What is built
 
-Phase 5 passes the pre-commit TypeScript checks with 21 component tests, 99.33% statement and 92.72% branch coverage. Playwright MCP verified a successful retry, technical handoff, full evidence, both prompts and separate handler sign-off/payment. Completed run totals remain frozen after handler actions. Desktop and 390-pixel layouts work in light/dark mode without horizontal overflow or browser errors; evidence is keyboard accessible.
+One queue agent chooses the order within a finite snapshot, writes a claim-linked to-do list and delegates each claim to a fresh helper. Helpers read the complete claim and selected policy/manual sections through HTTP, record a decision and make an eligible simulated payment. The queue receives concise results; full activity and exact versioned section text remain on each claim. The dashboard shows the current/latest plan, all five claim states, evidence and both roles' read-only instructions.
 
-The startup-pass revision in `docs/PLAN.md` is implemented and verified. Each backend start processes one snapshot of waiting claims, then leaves the app available for handlers. The agent supports switching between OpenRouter and local Ollama, with a configurable model. Ollama requests now allocate 16,384 context tokens by default, with an override for larger policy/tool histories and clearer failure messages. Both execution modes use the same provider settings, claim tools and payment safeguards.
+FastAPI/SQLite exposes 25 typed API operations: the existing 12 plus eight run/attempt and five reference/evidence/agent-payment operations. Run creation records a scope and never launches a model. The runtime performs delegation. The backend enforces atomic reservations, distinct-claim caps, stable truthful to-dos, completion checks, stale-attempt fencing, exact money, duplicate prevention and handler sign-off above $1,000. Neither agent has a sign-off tool. Existing databases migrate without reseeding saved work; legacy decisions retain their original references without invented manual provenance.
+
+There is one run at backend startup, after HTTP readiness. No continuous watcher or dashboard start button is present. Claims added after the snapshot, and cap-excluded claims, wait for another startup or terminal run. Polling and refresh only read progress. A run's finished summary is a completion-time snapshot and does not change after later handler actions.
 
 ## Run locally
 
@@ -18,120 +20,92 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173 for the dashboard. The backend is at http://localhost:8000, with API documentation at `/docs` and health at `/api/health`.
+Open http://localhost:5173. The backend is at http://localhost:8000, API documentation at `/docs`, and health at `/api/health`. Configure the existing root `.env`; never commit it. Environment variables in the terminal take precedence. Normal startup preserves saved claims, decisions, sign-offs, payments, activity, evidence and failure counts.
 
-Configure the model provider in the existing root `.env` as described below. OpenRouter remains the default when `MODEL_PROVIDER` is absent, so existing OpenRouter settings continue to work. Never commit `.env`.
+## Model configuration
 
-At each backend startup, the app snapshots waiting claims, processes them one at a time once its HTTP API is ready, then ends the processing task. There is no continuous queue watcher. An empty startup queue finishes without model calls. Claims arriving during or after that pass wait for another backend start or explicit terminal run. Dashboard refreshes and navigation do not trigger processing. Select a claim to follow its activity and decision; there is no Run agent button.
-
-## Choose the model provider
-
-Stop UnderCover with Ctrl+C before changing provider settings. Edit the root `.env`, then restart `npm run dev` or run `uv run -m agent` with the app stopped. Both commands read the same settings. Environment variables already set in your terminal take precedence over `.env`; update or remove any conflicting values there as well.
-
-### OpenRouter
+OpenRouter is the default provider. It requires `OPENROUTER_API_KEY` and uses `deepseek/deepseek-v4.1-flash` with low reasoning effort. Selecting that same model explicitly also uses low effort. `MODEL_NAME` overrides the model; other names are not forced to accept its reasoning setting.
 
 ```dotenv
 MODEL_PROVIDER=openrouter
 OPENROUTER_API_KEY=your-openrouter-key
-# Optional model override:
+# Optional override:
 # MODEL_NAME=openrouter/free
+# Optional cap on distinct claims per startup/terminal run:
+# UNDERCOVER_MAX_CLAIMS=5
 ```
 
-The default model is `deepseek/deepseek-v4.1-flash` with low reasoning effort, including when that exact name is set explicitly. Set `MODEL_NAME` to another OpenRouter model to override it. When switching back from Ollama, replace the Ollama model name with an OpenRouter model, or remove/comment out `MODEL_NAME` to use the default. An OpenRouter API key is required only for this provider.
+For local Ollama, install and keep the Ollama server running, download a tool-calling model and configure its exact installed tag:
 
-### Ollama locally
+```powershell
+ollama pull qwen3:8b
+ollama list
+Invoke-RestMethod http://localhost:11434/api/tags
+```
 
-1. Install [Ollama for Windows](https://docs.ollama.com/windows) and keep it running. The Windows app normally serves its API in the background. If you use the standalone CLI instead, start `ollama serve` in a separate terminal when no Ollama server is already running.
-2. Download a model that supports tool calling. For example, [Qwen3 8B](https://ollama.com/library/qwen3:8b) supports tools. In PowerShell:
+```dotenv
+MODEL_PROVIDER=ollama
+MODEL_NAME=qwen3:8b
+OLLAMA_BASE_URL=http://localhost:11434
+# Optional positive context-token override; default 16384:
+# OLLAMA_NUM_CTX=32768
+```
 
-   ```powershell
-   ollama pull qwen3:8b
-   ollama list
-   Invoke-RestMethod http://localhost:11434/api/tags
-   ```
+Ollama uses its native API address without `/v1`, temperature zero and no OpenRouter key. Choose model/context sizes that fit local memory. A missing model tag, invalid provider/context setting or missing required key fails before any claim is reserved. An empty run needs no model configuration. Ollama connection, missing-model, tool-support and truncation failures produce actionable messages; there is no automatic provider fallback. Stop UnderCover before changing settings, then restart it. Provider changes affect future attempts; saved decisions remain unchanged.
 
-3. Add or update these values in the root `.env`:
+## Full, capped and named terminal runs
 
-   ```dotenv
-   MODEL_PROVIDER=ollama
-   MODEL_NAME=qwen3:8b
-   OLLAMA_BASE_URL=http://localhost:11434
-   # Optional context-token override; the default is 16384:
-   # OLLAMA_NUM_CTX=32768
-   ```
+Stop the app with Ctrl+C first. Run one of:
 
-   `MODEL_NAME` is required for Ollama. To choose a different local LLM, pull that model and use its exact tag from `ollama list`. The selected model must support tool calling so the agent can read context and save decisions. `OLLAMA_BASE_URL` is optional and defaults to the address above; it uses Ollama's native API, so do not append `/v1`. No OpenRouter key or Ollama sign-in is needed for downloaded local models.
-4. From the repository root, install the project dependencies and start the app:
+```powershell
+uv run -m agent
+uv run -m agent --max-claims 5
+uv run -m agent --claim-id CLM-1001
+```
 
-   ```powershell
-   uv sync
-   npm run dev
-   ```
+The command starts its own local HTTP backend, works the registered scope, prints each attempt's saved outcome, payout, explanation, policy/manual references and payment/sign-off state, then prints backend-derived totals and exits. No dashboard or separately running backend is needed. The queue agent chooses the order; database queue order remains stable for display.
 
-   Alternatively, with UnderCover stopped, run `uv run -m agent` for a terminal pass. Keep Ollama running for either mode. The integration uses LangChain's [ChatOllama](https://docs.langchain.com/oss/python/integrations/chat/ollama); installing the Python dependency does not install Ollama or download models.
+A positive `UNDERCOVER_MAX_CLAIMS` applies to startup and the CLI default. Unset means the full eligible snapshot. An explicit CLI cap overrides it. Named mode ignores it and accepts only one existing eligible claim. Do not combine the flags. Unknown, decided, active or Handler review claims are rejected without reassessment. A cap counts distinct admitted claims, including failures; retries consume the same slot. Claims outside the snapshot cannot enter that run.
 
-The full policy wording and tool history need sufficient context. UnderCover explicitly requests 16,384 tokens through `ChatOllama`'s `num_ctx`, avoiding Ollama's 4,096-token default on smaller GPUs. Set `OLLAMA_NUM_CTX` to a positive integer in the root `.env` to change that budget, then restart UnderCover. This per-request setting applies to both execution modes; it does not change the Ollama app's global settings. Check [Ollama's context settings](https://docs.ollama.com/context-length) for memory considerations: larger contexts and models require more RAM/GPU memory. Choose a model size and context that fit your machine.
+Exit codes are 0 for completed work, including business referrals and pending sign-offs; 1 for setup/incomplete execution, technical handoffs or unresolved unpaid approvals; and 130 for Ctrl+C. A recovered transient failure alone does not cause exit 1. Totals distinguish distinct claims from assessment attempts and count recorded outcomes and payments, pending sign-offs, technical handoffs and claims left waiting. A failure after a saved decision remains visible without erasing that decision.
 
-If a connection fails, check the API command above and `OLLAMA_BASE_URL`. HTTP 404 failures now direct you to check the exact installed model tag and native API address; HTTP 400 failures direct you to tool support and the Ollama server log. Provider response bodies are not exposed in claim activity. When Ollama reports a response stopped for length, activity identifies the context/generation limit and suggests increasing `OLLAMA_NUM_CTX`, rather than reporting only that no decision was recorded. An ordinary final reply without a saved decision still fails; the app never turns model prose into a decision. Local model speed and decision accuracy depend on the model and hardware; live accuracy has not been evaluated.
+## Recovery and limits
 
-Switching providers affects future attempts. Existing saved decisions remain unchanged. Failed undecided claims return to Waiting and can be retried on the next backend start or terminal pass. The system does not fall back to OpenRouter when Ollama fails.
+A failed assessment without a decision returns to Waiting. The queue retries it during the same run while continuing other work. Two undecided failures place it in Handler review with no invented referral or payout. Failure counts persist across runs/restarts, so restarting cannot silently give it a third attempt. There is no manual review-resolution/reset-failure workflow in this build.
 
-## Rebuild the database
+Provider and replay-safe HTTP operations retry transient connection/timeout, 429 and selected 5xx errors at most twice after the initial request, with 0.25/0.5-second backoff. OpenRouter SDK retries are disabled. Validation errors, business conflicts and financial POSTs are not blindly replayed. A lost decision/payment response triggers stored-state read-back; a second financial write is allowed only if the first did not commit and the same attempt remains active. Unrecoverable unpaid approvals visibly require handler attention.
 
-Stop `npm run dev` with Ctrl+C first. From the repository root:
+Each claim assessment has a ten-minute overall deadline, forty model calls and eighty tool calls. Model requests time out after 120 seconds. The coordinator has a workload-scaled call budget and checks for missed/retryable work before accepting a final answer. Its old queue snapshots are discarded to bound conversation growth. Detailed claim evidence never enters the parent conversation.
+
+Shutdown stops new admissions and allows active work five seconds to settle, then cancels the attempt. The owning runtime closes active run/to-do state before releasing database ownership, including when HTTP cleanup fails. Server-side attempt IDs and deadlines reject late helper decisions, evidence, events and payments. Restart closes abandoned runs once and starts fresh conversations for eligible work; it does not resume model execution. Saved decisions, sign-offs and payments survive recovery.
+
+## Rebuild and ownership
+
+Use one backend/terminal/reset process per database. The backend keeps ownership while serving handler APIs even after its queue task finishes. All commands honor `UNDERCOVER_DB_PATH`, defaulting to the root `undercover.db`, and reject competing owners. `UNDERCOVER_BACKEND_URL` defaults to `http://localhost:8000`; a custom backend's listening address must match it. The terminal command accepts local HTTP addresses and rejects occupied ports.
+
+Stop UnderCover before rebuilding:
 
 ```powershell
 uv run -m backend.reset_db
 ```
 
-This rebuilds the configured database from the permitted source files in `data/`, returning every claim in `data/claims.json` to Waiting in source-file order. It clears previous decisions, sign-offs, simulated payments, thread IDs and activity, then prints the database path and restored claim count. It starts no agent runs; claims remain waiting until processing starts.
+This validates the permitted seed files and replaces only the configured database. It restores all source claims in source order and clears decisions, sign-offs, simulated payments, events, failure counts, runs, attempts, to-dos and evidence. Invalid input leaves an existing database intact. It starts no agent; evaluation/security claims are never imported. Ordinary startup updates the section index/current instructions without resetting claims.
 
-A missing database is created. Invalid or incomplete source records leave an existing database intact. Evaluation data and security claims are never imported. The harness indexes the claims manual alongside the wording, and claim helpers select and read individual sections. Changing source claim files takes effect on a fresh database or a rebuild; ordinary startup preserves saved work.
-
-## Process every waiting claim from the terminal
-
-Stop `npm run dev` with Ctrl+C first, then run:
+For a low-cost live trial, use a dedicated PowerShell terminal and a separate database:
 
 ```powershell
-uv run -m agent
+$env:UNDERCOVER_DB_PATH = Join-Path (Get-Location) 'undercover-harness-trial.db'
+$env:MODEL_PROVIDER = 'openrouter'
+$env:MODEL_NAME = 'deepseek/deepseek-v4.1-flash'
+$env:UNDERCOVER_MAX_CLAIMS = '5'
+uv run -m backend.reset_db
+npm run dev
 ```
 
-This starts its own local HTTP backend, processes the waiting queue present at invocation in persisted order, then shuts down and exits. No dashboard or separately running backend is needed. It uses the same configured model, instructions, tools and payment checks as the app's startup pass.
-
-After each attempt, it prints the claim ID, recorded outcome, USD payout, explanation, policy references and payment/sign-off state. Failures are printed and processing continues with later claims. The final line reports attempted and decided counts, approved/declined/referred counts, failed runs and approvals awaiting sign-off. A failure after a saved decision contributes to both the decided and failed-run counts.
-
-Decided claims and approvals awaiting sign-off are skipped. An empty queue prints zero totals without calling a model. Exit codes are 0 for a successful pass, 1 for a setup error or any failed run, and 130 for Ctrl+C. Interruption prints partial totals and leaves undecided work recoverable.
-
-## Database ownership and retries
-
-Use one backend process or terminal command per database. All three execution modes honor `UNDERCOVER_DB_PATH`, defaulting to the root `undercover.db`, and reject competing owners. The terminal agent also refuses an occupied HTTP address. Lock files are ignored by Git and do not block reuse after the owning process exits.
-
-Finishing the startup pass ends its processing task, but the backend retains ownership while it serves claim, sign-off and payment APIs. Stop the backend before rebuilding or running the standalone terminal agent, even after its startup pass has finished.
-
-`UNDERCOVER_BACKEND_URL` defaults to `http://localhost:8000`. The standalone agent binds this local HTTP address. When starting the normal backend at a custom address, its listening host/port must match the URL used by agent tools.
-
-Each startup or terminal pass attempts a claim once. Failed attempts without a decision return to Waiting and are not retried by the same pass. Restart the backend, or stop it and run the terminal agent, to retry them. Shutdown stops new reservations and allows the active run five seconds to finish. If it takes longer, the database remains owned until that run finishes or its process exits. Restart retries abandoned undecided work from the beginning and preserves saved decisions, sign-offs and payments; it does not resume model execution.
-
-## What is built
-
-- SQLite stores the source claims and their linked policies and customers, plans, add-ons, handlers, company settings and policy wording. A persisted queue position controls both dashboard display and worker selection. Existing databases migrate without clearing work.
-- The LangChain agent supports OpenRouter and local Ollama with a shared `MODEL_NAME` setting. Ollama uses `ChatOllama` with temperature zero and a configurable native API address. Invalid providers, a missing Ollama model name and a missing OpenRouter key are rejected; terminal configuration errors leave the queue unattempted. The agent reads instructions and claim context and records activity, decisions and payments through backend HTTP tools. Startup processing atomically reserves one claim at a time from a fixed snapshot, then terminates while the API remains available.
-- The dashboard refreshes waiting and active claims, including later stored arrivals, without starting assessments. It shows complete records, decisions, calculations, references, errors, read-only instructions and timestamped activity. Waiting and failure messages explain that another queue run is needed; polling cleans up on navigation.
-- Approval, decline and referral remain distinct from payment state. Approvals up to and including $1,000 can be paid automatically. Larger approvals require handler sign-off before the separate payment operation can succeed; the pass continues with its other claims while sign-off is pending.
-- Handler sign-off and eligible simulated payment remain available in the dashboard. The backend enforces exact approved amounts, sign-off and duplicate-payment checks in transactions.
-- Terminal commands share configuration, database ownership, source validation and queue execution with the backend. There is no reset HTTP endpoint or per-claim start-run endpoint.
+Reseed before every live trial and keep the cap at five. Stop the app afterward and close that terminal to discard its overrides. Do not run another live startup against the same trial results expecting the original cap to cover both runs; each invocation has its own cap.
 
 ## Verification
 
-- `uv sync`, `npm install`, development startup and the production dashboard build succeed on Windows. Both terminal entry points were also run against separate test databases.
-- `npm run check` passes: Ruff, Pyright, 129 pytest tests with 99.63% Python coverage, Prettier, ESLint, strict TypeScript, 17 Vitest tests with 99.18% statement coverage, and seven Playwright tests. Existing coverage thresholds and pre-commit hooks remain enabled. Previously applied compatible dependency updates are retained.
-- Provider tests cover OpenRouter defaults and overrides, Ollama model selection and custom API addresses, required settings, invalid providers, assessments through the existing HTTP tools, and terminal processing with Ollama and no OpenRouter key. Model factories return scripted models for assessment tests. No live Ollama inference or model accuracy evaluation was performed for this addition.
-- Ollama regressions cover the default and overridden context budget, invalid context configuration before terminal reservations, truncated replies before and after saved decisions/payments, and redacted HTTP 400/404/500 errors. Local Ollama logs confirmed the reported 2:33:05 failure hit a 4,096-token context and was truncated; the earlier ResponseError timestamps corresponded to HTTP 404 responses. These diagnostics used existing logs and read-only model metadata, with no new live inference or working-database changes.
-- Automated checks use temporary databases and stub models, including actual local HTTP tool calls, queue migration/order, exclusive ownership and crash recovery, failures before/after decisions, Ctrl+C, rebuild validation, totals, empty queues and repeated drains.
-- A complete terminal integration test rebuilds the temporary source queue, processes all 25 claims in order, verifies the printed results and counts, confirms a repeated drain attempts zero claims, then rebuilds the queue again with all previous results cleared. A running backend blocks rebuilding; a slow stopping worker retains ownership until its active attempt finishes.
-- Playwright MCP checks verified the startup pass, a later arrival remaining Waiting after completion, refresh and navigation, exact read-only instructions, and handler sign-off plus a $1,250 simulated payment after processing ended. The current browser checks have no console errors. Prior desktop/390-pixel light/dark layouts and keyboard checks remain applicable; screenshots are in the ignored `.playwright-mcp` directory.
-- The working database and `.env` have not been reset or changed during this build. Evaluation answer keys remain unopened. No automated test calls a live model.
+The queue/recovery phase passed Ruff, Pyright and 194 Python tests with 97.77% coverage. The dashboard passed Prettier, ESLint, TypeScript and 21 component tests with 99.33% statement / 92.72% branch coverage. Playwright MCP verified retries, technical handoff, full evidence, both prompts, handler sign-off/payment and frozen summaries, with keyboard access and no overflow/browser errors at desktop and 390 pixels in light/dark modes. Final API/full-stack checks are in progress.
 
-## Pilot limits
-
-There is no sign-in; everyone sees the same records, and handler selection records attribution rather than authenticated identity. Payments are simulated. There are no customer messages, customer submission screen, live source-file import, referral-resolution workflow, evaluation scoring, agent swarm, durable model execution or cloud resources. Live-model accuracy has not been measured against the answer key.
+The October 26 live trial used a freshly seeded separate database and the specified default model. It completed five distinct claims in five attempts: five approvals, four simulated payments, one awaiting sign-off, zero failed assessments/technical handoffs/unpaid approvals, and twenty claims left Waiting. This verifies operation and observability, not accuracy against the held-out answer key. The student's `.env` and working `undercover.db` were preserved.

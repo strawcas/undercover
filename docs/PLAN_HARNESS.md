@@ -272,7 +272,7 @@ Retain the existing payment error details for wrong amounts, absent sign-off and
 6. Finish the run; expect 200 with `worked:5`, `assessment_attempts:7`, `failed_assessments:3`, `approved:2`, `declined:1`, `referred:1`, `simulated_payments:1`, `awaiting_sign_off:1`, `handler_review:1`, `unpaid_approvals:0` and `waiting_remaining:1`. TEST-006 remains Waiting. The run is completed with a technical handoff, so the CLI exits 1. Repeating the same finish leaves all counts unchanged.
 7. Send stale decision/event/read/payment/finish requests after an attempt expires or is superseded; expect 409 except exact closed-attempt finish replays, which return the saved result without mutation. Verify a new thread's records do not change. Sign off/pay TEST-003 through the handler routes; its claim updates, while the finished run's handover summary stays unchanged.
 
-Add these contracts to OpenAPI during implementation and cover them with temporary-database HTTP tests using stub models. No harness endpoints exist yet; this section defines what the implementation must deliver.
+These contracts are implemented in OpenAPI and covered by temporary-database HTTP tests using stub models. The seven-step acceptance sequence is in `backend/tests/test_harness_acceptance.py`.
 
 ## Phase 1: Store runs, attempts, plans and section evidence
 
