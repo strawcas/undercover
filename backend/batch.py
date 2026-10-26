@@ -7,6 +7,7 @@ import sys
 from collections.abc import Sequence
 from contextlib import contextmanager
 from decimal import Decimal
+from threading import current_thread, main_thread
 
 import httpx
 
@@ -15,7 +16,7 @@ from agent.main import AgentRunError
 from agent.queue import run_queue
 from backend.config import backend_url, database_path, run_scope
 from backend.harness_models import Counts
-from backend.local import local_backend
+from backend.local import agent_backend
 from backend.storage import Store
 from backend.worker import default_runner, reconcile_execution
 
@@ -43,7 +44,11 @@ def arguments(argv: Sequence[str]) -> argparse.Namespace:
     parser = RunParser(description="Work a finite UnderCover claims queue.")
     scope = parser.add_mutually_exclusive_group()
     scope.add_argument(
-        "--max-claims", type=int, help="Maximum distinct claims for this run."
+        "--cap",
+        "--max-claims",
+        dest="max_claims",
+        type=int,
+        help="Maximum distinct claims for this run.",
     )
     scope.add_argument("--claim-id", help="Work only this eligible claim.")
     return parser.parse_args(argv)
@@ -90,6 +95,10 @@ class Report:
 
 @contextmanager
 def interruptible(context: Execution):
+    if current_thread() is not main_thread():
+        yield
+        return
+
     def interrupt(_signal, _frame):
         context.stopping.set()
         context.cancel_active.set()
@@ -103,19 +112,20 @@ def interruptible(context: Execution):
 
 
 def main(runner: Runner = default_runner, argv: Sequence[str] = ()) -> int:
-    """Work a full, capped or named scope using the same queue agent as startup."""
+    """Explicitly work a full, capped or named claims queue."""
     report = Report()
     context = Execution(on_result=report.record)
     code = 0
     try:
         parsed = arguments(argv)
         scope = run_scope(parsed.max_claims, parsed.claim_id)
-        with local_backend(Store(database_path()), runner, backend_url()) as claims:
+        with agent_backend(Store(database_path()), runner, backend_url()) as claims:
             try:
                 with interruptible(context):
                     result = run_queue(scope, runner, execution=context)
             finally:
-                reconcile_execution(claims, context)
+                if claims is not None:
+                    reconcile_execution(claims, context)
         if (
             result["status"] != "completed"
             or result["counts"]["handler_review"]

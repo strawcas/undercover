@@ -1,4 +1,12 @@
 import { defineConfig } from "@playwright/test";
+import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+process.env.UNDERCOVER_TEST_GATE ??= join(
+  tmpdir(),
+  `undercover-command-${randomUUID()}`,
+);
 
 export default defineConfig({
   testDir: "e2e",
@@ -11,6 +19,7 @@ export default defineConfig({
       command: "uv run -m backend.tests.serve",
       url: "http://127.0.0.1:8011/api/health",
       reuseExistingServer: false,
+      env: { UNDERCOVER_TEST_GATE: process.env.UNDERCOVER_TEST_GATE },
     },
     {
       command:

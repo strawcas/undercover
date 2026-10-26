@@ -1,14 +1,22 @@
 import { expect, test } from "@playwright/test";
+import { ok } from "node:assert";
+import { writeFile } from "node:fs/promises";
 
 test("approves, shows live activity and records an eligible payment", async ({
   page,
   request,
 }) => {
   await page.goto("/");
+  await expect(page.getByText(/No run yet/)).toBeVisible();
+  await page.reload();
+  await expect(page.getByText(/No run yet/)).toBeVisible();
+  const gate = process.env.UNDERCOVER_TEST_GATE;
+  ok(gate, "The explicit test command gate is missing.");
+  await writeFile(gate, "uv run -m agent");
   await expect(page.getByRole("button", { name: "Run agent" })).toHaveCount(0);
   await expect(
     page.getByRole("list", { name: "Claim activity" }),
-  ).toContainText("Run agent");
+  ).toContainText("Run agent", { timeout: 10000 });
   const duplicate = await request.post("/api/claims/CLM-1001/runs");
   expect(duplicate.status()).toBe(404);
   await expect(page.getByText(/Simulated payment recorded/)).toBeVisible({
@@ -130,7 +138,7 @@ test("hands two failed assessments to a handler without an insurance decision", 
   await expect(page.getByText(/Completion-time snapshot/)).toBeVisible();
 });
 
-test("leaves later arrivals waiting after the startup pass and browser refresh", async ({
+test("leaves later arrivals waiting after the explicit command and browser refresh", async ({
   page,
   request,
 }) => {

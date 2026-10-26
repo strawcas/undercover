@@ -78,7 +78,7 @@ def test_restart_recovers_interrupted_work(repository, committed):
         decide_fixture(
             claims, "CLM-1001", DecisionInput.model_validate(decision_payload(thread))
         )
-    with TestClient(create_app(repository, auto_run=False)):
+    with TestClient(create_app(repository)):
         detail = claims.detail("CLM-1001")
         assert detail["run_active"] is False
         assert detail["status"] == ("awaiting_sign_off" if committed else "waiting")

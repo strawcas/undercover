@@ -29,7 +29,7 @@ Our goal is to handle claims straight through, as accurately as our handlers do.
 
 ## The harness
 
-One queue agent chooses the order within a finite snapshot of eligible waiting claims, plans its work and delegates each claim to a fresh helper. Startup and terminal modes use the same harness. Runs may cover the whole snapshot, a positive cap on distinct claims or one named eligible claim. Later arrivals and cap-excluded claims remain waiting for another run; dashboard polling never starts work.
+The agent runs only when explicitly invoked from the terminal. Starting or restarting the backend/dashboard never starts a run. `uv run -m agent` works the whole eligible waiting snapshot; `uv run -m agent --cap 5` works up to five distinct claims. One queue agent chooses the order, plans its work and delegates each claim to a fresh helper. Named-claim mode remains available. Later arrivals and cap-excluded claims wait for another explicit command; dashboard polling never starts work.
 
 An undecided failed assessment returns to Waiting for one automatic retry, including during the same run. Two failures leave the claim for a handler without inventing a decision or payout. Failure counts survive restarts. Committed decisions and payments are preserved, and the backend fences stale attempts and reconciles ambiguous write responses. The queue checks for missed work before finishing.
 

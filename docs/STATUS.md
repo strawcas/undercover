@@ -8,7 +8,7 @@ One queue agent chooses the order within a finite snapshot, writes a claim-linke
 
 FastAPI/SQLite exposes 25 typed API operations: the existing 12 plus eight run/attempt and five reference/evidence/agent-payment operations. Run creation records a scope and never launches a model. The runtime performs delegation. The backend enforces atomic reservations, distinct-claim caps, stable truthful to-dos, completion checks, stale-attempt fencing, exact money, duplicate prevention and handler sign-off above $1,000. Neither agent has a sign-off tool. Existing databases migrate without reseeding saved work; legacy decisions retain their original references without invented manual provenance.
 
-There is one run at backend startup, after HTTP readiness. No continuous watcher or dashboard start button is present. Claims added after the snapshot, and cap-excluded claims, wait for another startup or terminal run. Polling and refresh only read progress. A run's finished summary is a completion-time snapshot and does not change after later handler actions.
+The agent runs only from an explicit terminal command. Backend startup/restart initializes storage, recovers interrupted state and serves APIs without creating a worker, run or model call. Claims added after a run's snapshot, and cap-excluded claims, wait for another explicit command. Polling and refresh only read progress. A run's finished summary is a completion-time snapshot and does not change after later handler actions.
 
 ## Run locally
 
@@ -31,8 +31,6 @@ MODEL_PROVIDER=openrouter
 OPENROUTER_API_KEY=your-openrouter-key
 # Optional override:
 # MODEL_NAME=openrouter/free
-# Optional cap on distinct claims per startup/terminal run:
-# UNDERCOVER_MAX_CLAIMS=5
 ```
 
 For local Ollama, install and keep the Ollama server running, download a tool-calling model and configure its exact installed tag:
@@ -55,17 +53,17 @@ Ollama uses its native API address without `/v1`, temperature zero and no OpenRo
 
 ## Full, capped and named terminal runs
 
-Stop the app with Ctrl+C first. Run one of:
+Leave `npm run dev` running to watch assessments in the dashboard. In another terminal with the same database/backend settings, run one of:
 
 ```powershell
 uv run -m agent
-uv run -m agent --max-claims 5
+uv run -m agent --cap 5
 uv run -m agent --claim-id CLM-1001
 ```
 
-The command starts its own local HTTP backend, works the registered scope, prints each attempt's saved outcome, payout, explanation, policy/manual references and payment/sign-off state, then prints backend-derived totals and exits. No dashboard or separately running backend is needed. The queue agent chooses the order; database queue order remains stable for display.
+The command uses the existing local backend if it serves the same configured database. When the app is stopped, it starts its own temporary backend. It works the registered scope, prints each attempt's saved outcome, payout, explanation, policy/manual references and payment/sign-off state, then prints backend-derived totals and exits. An attached app stays running. The queue agent chooses the order; database queue order remains stable for display.
 
-A positive `UNDERCOVER_MAX_CLAIMS` applies to startup and the CLI default. Unset means the full eligible snapshot. An explicit CLI cap overrides it. Named mode ignores it and accepts only one existing eligible claim. Do not combine the flags. Unknown, decided, active or Handler review claims are rejected without reassessment. A cap counts distinct admitted claims, including failures; retries consume the same slot. Claims outside the snapshot cannot enter that run.
+Without flags, the command works the full eligible waiting snapshot. `--cap 5` admits up to five distinct claims and leaves the rest Waiting; `--max-claims` remains a compatibility alias. The old `UNDERCOVER_MAX_CLAIMS` environment setting is ignored. Named mode accepts only one existing eligible claim. Do not combine cap and named mode. Unknown, decided, active or Handler review claims are rejected without reassessment. Retries consume the same slot. Claims outside the snapshot cannot enter that run.
 
 Exit codes are 0 for completed work, including business referrals and pending sign-offs; 1 for setup/incomplete execution, technical handoffs or unresolved unpaid approvals; and 130 for Ctrl+C. A recovered transient failure alone does not cause exit 1. Totals distinguish distinct claims from assessment attempts and count recorded outcomes and payments, pending sign-offs, technical handoffs and claims left waiting. A failure after a saved decision remains visible without erasing that decision.
 
@@ -77,11 +75,11 @@ Provider and replay-safe HTTP operations retry transient connection/timeout, 429
 
 Each claim assessment has a ten-minute overall deadline, forty model calls and eighty tool calls. Model requests time out after 120 seconds. The coordinator has a workload-scaled call budget and checks for missed/retryable work before accepting a final answer. Its old queue snapshots are discarded to bound conversation growth. Detailed claim evidence never enters the parent conversation.
 
-Shutdown stops new admissions and allows active work five seconds to settle, then cancels the attempt. The owning runtime closes active run/to-do state before releasing database ownership, including when HTTP cleanup fails. Server-side attempt IDs and deadlines reject late helper decisions, evidence, events and payments. Restart closes abandoned runs once and starts fresh conversations for eligible work; it does not resume model execution. Saved decisions, sign-offs and payments survive recovery.
+Ctrl+C stops new admissions and cancels the CLI's active work, closing its run/to-do state. The standalone command shuts down its temporary backend; an attached app stays available. Backend shutdown also fences any active explicit run before releasing database ownership. Server-side attempt IDs and deadlines reject late helper decisions, evidence, events and payments. Restart closes abandoned runs once and leaves eligible work Waiting until another explicit command; it does not resume model execution. Saved decisions, sign-offs and payments survive recovery.
 
 ## Rebuild and ownership
 
-Use one backend/terminal/reset process per database. The backend keeps ownership while serving handler APIs even after its queue task finishes. All commands honor `UNDERCOVER_DB_PATH`, defaulting to the root `undercover.db`, and reject competing owners. `UNDERCOVER_BACKEND_URL` defaults to `http://localhost:8000`; a custom backend's listening address must match it. The terminal command accepts local HTTP addresses and rejects occupied ports.
+Use one backend owner per database. The explicit CLI attaches through HTTP and the backend rejects overlapping agent runs. A standalone command owns its temporary backend for the run. Reset still requires stopping the app. All commands honor `UNDERCOVER_DB_PATH`, defaulting to the root `undercover.db`. `UNDERCOVER_BACKEND_URL` defaults to `http://localhost:8000`; a custom backend's listening address must match it. The CLI accepts only local HTTP addresses and verifies the configured database identity using health headers before attaching; an unrelated service/database is rejected without assessment.
 
 Stop UnderCover before rebuilding:
 
@@ -97,12 +95,11 @@ For a low-cost live trial, use a dedicated PowerShell terminal and a separate da
 $env:UNDERCOVER_DB_PATH = Join-Path (Get-Location) 'undercover-harness-trial.db'
 $env:MODEL_PROVIDER = 'openrouter'
 $env:MODEL_NAME = 'deepseek/deepseek-v4.1-flash'
-$env:UNDERCOVER_MAX_CLAIMS = '5'
 uv run -m backend.reset_db
-npm run dev
+uv run -m agent --cap 5
 ```
 
-Reseed before every live trial and keep the cap at five. Stop the app afterward and close that terminal to discard its overrides. Do not run another live startup against the same trial results expecting the original cap to cover both runs; each invocation has its own cap.
+Reseed before every live trial and keep the cap at five. To watch the trial in the dashboard, start `npm run dev` first in a separate terminal with the same database setting, then execute the agent command from the terminal above. Stop the app before reseeding. Each explicit invocation has its own cap; starting the app alone consumes no model calls. Close the dedicated terminals afterward to discard their environment overrides.
 
 ## Verification
 

@@ -20,11 +20,13 @@ npm run dev
 
 Open [the claims dashboard](http://localhost:5173). The backend is at [localhost:8000](http://localhost:8000/docs). Add `OPENROUTER_API_KEY` to your existing `.env` for agent runs; `.env.example` lists the supported settings. Set `MODEL_NAME=openrouter/free` to use the free model option, or leave it unset for the default model.
 
-Each backend start runs one queue agent against a snapshot of eligible waiting claims. It chooses the order, maintains a visible to-do list and delegates fresh claim helpers, one at a time. Helpers look up the policy wording and claims manual by section; each claim shows the exact versioned evidence read. Failed undecided claims retry once; two failures require Handler review without inventing an insurance referral. Later arrivals and cap-excluded claims wait for another run. Browser refreshes only read progress.
+`npm run dev` serves the backend and dashboard and leaves the agent idle. Start assessments explicitly from another terminal with `uv run -m agent`, or `uv run -m agent --cap 5` for up to five distinct claims. The command uses the running backend, so you can watch the to-do list and claim evidence in the dashboard. It also works standalone by starting its own temporary backend when the app is stopped.
 
-The default model is `deepseek/deepseek-v4.1-flash` with low reasoning effort. Set `UNDERCOVER_MAX_CLAIMS=5` for a startup trial; unset means the whole eligible snapshot. Approved payouts up to $1,000 can be paid automatically. Above $1,000, select a reviewing handler and **Sign off payout**, then **Record simulated payment**. Everyone shares the local workspace without sign-in. All payments are simulated.
+The queue agent chooses the order within the eligible snapshot and delegates fresh claim helpers one at a time. Helpers look up the policy wording and claims manual by section; each claim shows the exact versioned evidence read. Failed undecided claims retry once; two failures require Handler review. Later arrivals and cap-excluded claims wait for another explicit command. Backend restarts and browser refreshes never start assessments.
 
-Stop `npm run dev` with Ctrl+C before using either terminal command below. Rebuild the database from `data/`, clearing previous decisions, sign-offs, payments and activity and putting every source claim back in Waiting:
+The default model is `deepseek/deepseek-v4.1-flash` with low reasoning effort. Approved payouts up to $1,000 can be paid automatically during an explicit run. Above $1,000, select a reviewing handler and **Sign off payout**, then **Record simulated payment**. Everyone shares the local workspace without sign-in. All payments are simulated.
+
+Stop the app before rebuilding the database from `data/`, which clears previous decisions, sign-offs, payments and activity and puts every source claim back in Waiting:
 
 ```powershell
 uv run -m backend.reset_db
@@ -34,11 +36,11 @@ Work a full, capped or named scope, printing each attempt and final stored total
 
 ```powershell
 uv run -m agent
-uv run -m agent --max-claims 5
+uv run -m agent --cap 5
 uv run -m agent --claim-id CLM-1001
 ```
 
-The agent command starts its own local backend and exits after one run; no dashboard is needed. The cap counts distinct claims, including failures; retries use the same slot. An explicit CLI cap overrides the environment setting, and named mode ignores it. Decided, awaiting-sign-off and Handler review claims are skipped. Both terminal commands honor `UNDERCOVER_DB_PATH`, otherwise `undercover.db`, and reject a database already owned by another process. The app keeps ownership while serving handler APIs, so stop it first.
+The agent exits after one explicitly requested run and leaves an existing app running. The cap counts distinct claims, including failures; retries use the same slot. Without a cap, the full eligible snapshot is worked; `UNDERCOVER_MAX_CLAIMS` no longer changes that behavior. `--max-claims` remains a compatibility alias. Decided, awaiting-sign-off and Handler review claims are skipped. Commands honor `UNDERCOVER_DB_PATH`, otherwise `undercover.db`. An attached CLI requires the same database setting as the app; competing agent runs and unrelated backends are rejected.
 
 `npm run check` uses stub models and temporary databases, including CLI and Playwright integration tests. Normal startup preserves saved work; source claim changes load on a fresh database or explicit rebuild. Before a live trial, reseed a separate database and cap the run at five. See [the product status](docs/STATUS.md) for the exact Windows trial commands, providers, APIs, output/exit codes and recovery limits.
 

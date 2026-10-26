@@ -1,18 +1,18 @@
-from threading import Event
+from threading import Event, Thread
 
-import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from agent import queue as queue_agent
 from agent.tests.stubs import api_client
 from backend.claims import Claims
+from backend.config import database_identity
 from backend.errors import ClaimError
 from backend.main import create_app
 from backend.models import DecisionInput
 from backend.ownership import DatabaseOwner
 from backend.tests.conftest import decide_fixture, decision_payload
-from backend.worker import api_ready, execute
+from backend.worker import execute
 
 
 def connected_client(app, monkeypatch):
@@ -21,9 +21,10 @@ def connected_client(app, monkeypatch):
     return api
 
 
-def test_startup_snapshot_finishes_and_later_arrivals_wait(repository, monkeypatch):
+def test_explicit_snapshot_finishes_and_backend_restarts_stay_idle(
+    repository, monkeypatch
+):
     claims = Claims(repository)
-    gate = Event()
     initial_ids = [row["claim_id"] for row in claims.queue()]
     original = repository.record("claim", "CLM-1001")
     started = []
@@ -40,7 +41,7 @@ def test_startup_snapshot_finishes_and_later_arrivals_wait(repository, monkeypat
         )
         return "Complete"
 
-    app = create_app(repository, decide, worker_ready=gate.is_set)
+    app = create_app(repository)
     with connected_client(app, monkeypatch) as client:
         assert not started
         assert client.get("/api/health").headers["X-UnderCover-Instance"]
@@ -50,9 +51,8 @@ def test_startup_snapshot_finishes_and_later_arrivals_wait(repository, monkeypat
             not in client.get("/openapi.json").json()["paths"]
         )
         repository.add_claim(original | {"claim_id": "CLM-0000"})
-        gate.set()
-        app.state.worker.thread.join(timeout=30)
-        assert not app.state.worker.thread.is_alive()
+        assert client.get("/api/agent-runs/current").json() == {"run": None}
+        queue_agent.run_queue({"mode": "all"}, decide)
         assert started == initial_ids + ["CLM-0000"]
         repository.add_claim(original | {"claim_id": "CLM-0002"})
         for claim_id in ("CLM-0001", "CLM-0002"):
@@ -77,33 +77,31 @@ def test_startup_snapshot_finishes_and_later_arrivals_wait(repository, monkeypat
             DatabaseOwner(repository.path),
         ):
             pass
-    assert not app.state.worker.thread.is_alive()
     original_events = claims.events("CLM-1001")
-    restarted = create_app(repository, decide, worker_ready=lambda: True)
+    restarted = create_app(repository)
     with connected_client(restarted, monkeypatch):
-        restarted.state.worker.thread.join(timeout=30)
-        assert not restarted.state.worker.thread.is_alive()
+        assert started == initial_ids + ["CLM-0000"]
+        queue_agent.run_queue({"mode": "all"}, decide)
     assert started == initial_ids + ["CLM-0000", "CLM-0001", "CLM-0002"]
     assert claims.events("CLM-1001") == original_events
     with DatabaseOwner(repository.path):
         pass
 
 
-def test_empty_startup_queue_records_zero_work_and_later_arrivals_wait(
+def test_explicit_empty_queue_records_zero_work_and_later_arrivals_wait(
     repository,
     monkeypatch,
 ):
     with repository.transaction() as connection:
         connection.execute("UPDATE claims SET state='decided', decision='{}'")
     attempted = []
-    app = create_app(
-        repository,
-        lambda c, _t: attempted.append(c) or "Complete",
-        worker_ready=lambda: True,
-    )
-    with connected_client(app, monkeypatch):
-        app.state.worker.thread.join(timeout=5)
-        assert not app.state.worker.thread.is_alive()
+    app = create_app(repository)
+    with connected_client(app, monkeypatch) as api:
+        assert api.get("/api/agent-runs/current").json() == {"run": None}
+        result = queue_agent.run_queue(
+            {"mode": "all"}, lambda c, _t: attempted.append(c) or "Complete"
+        )
+        assert result["counts"]["worked"] == 0
         repository.add_claim(
             repository.record("claim", "CLM-1001") | {"claim_id": "TEST-LATER"}
         )
@@ -111,7 +109,7 @@ def test_empty_startup_queue_records_zero_work_and_later_arrivals_wait(
         assert Claims(repository).detail("TEST-LATER")["status"] == "waiting"
 
 
-def test_startup_failure_is_retried_within_the_same_run(repository, monkeypatch):
+def test_explicit_failure_is_retried_within_the_same_run(repository, monkeypatch):
     with repository.transaction() as connection:
         connection.execute(
             "UPDATE claims SET state='decided', decision='{}' WHERE queue_position > 2"
@@ -128,31 +126,34 @@ def test_startup_failure_is_retried_within_the_same_run(repository, monkeypatch)
         )
         return "Complete"
 
-    app = create_app(repository, decide, worker_ready=lambda: True)
+    app = create_app(repository)
     with connected_client(app, monkeypatch):
-        app.state.worker.thread.join(timeout=10)
-        assert not app.state.worker.thread.is_alive()
+        queue_agent.run_queue({"mode": "all"}, decide)
         assert attempted == ["CLM-1001", "CLM-1002", "CLM-1001"]
         assert claims.detail("CLM-1001")["status"] == "awaiting_sign_off"
-    restarted = create_app(repository, decide, worker_ready=lambda: True)
+    restarted = create_app(repository)
     with connected_client(restarted, monkeypatch):
-        restarted.state.worker.thread.join(timeout=10)
-        assert not restarted.state.worker.thread.is_alive()
+        queue_agent.run_queue({"mode": "all"}, decide)
         assert attempted == ["CLM-1001", "CLM-1002", "CLM-1001"]
         assert claims.detail("CLM-1001")["decision"] is not None
 
 
-def test_shutdown_before_readiness_starts_nothing(repository, monkeypatch):
+def test_backend_startup_and_refresh_start_nothing(repository, monkeypatch):
     started = []
-    app = create_app(
-        repository,
-        lambda c, _t: started.append(c) or "Complete",
-        worker_ready=lambda: False,
-    )
-    with connected_client(app, monkeypatch):
-        pass
+    monkeypatch.setattr(queue_agent, "model", lambda: started.append("model"))
+    monkeypatch.setenv("OPENROUTER_API_KEY", "")
+    monkeypatch.setenv("UNDERCOVER_MAX_CLAIMS", "invalid")
+    for _ in range(2):
+        app = create_app(repository)
+        with connected_client(app, monkeypatch) as api:
+            assert not hasattr(app.state, "worker")
+            assert api.get("/api/health").json() == {"status": "ok"}
+            assert api.get("/api/agent-runs/current").json() == {"run": None}
+            assert {row["status"] for row in api.get("/api/claims").json()} == {
+                "waiting"
+            }
+            assert api.get("/api/claims/CLM-1001/events").json() == []
     assert not started
-    assert not app.state.worker.thread.is_alive()
 
 
 def test_slow_shutdown_fences_the_attempt_before_releasing_ownership(
@@ -175,17 +176,24 @@ def test_slow_shutdown_fences_the_attempt_before_releasing_ownership(
         late.set()
         return "Complete"
 
-    app = create_app(repository, slow_runner, worker_ready=lambda: True)
+    app = create_app(repository)
+    results = []
+    command = Thread(
+        target=lambda: results.append(
+            queue_agent.run_queue({"mode": "limited", "max_claims": 1}, slow_runner)
+        )
+    )
     try:
         with connected_client(app, monkeypatch):
+            command.start()
             assert entered.wait(5)
-        app.state.worker.thread.join(timeout=5)
-        assert not app.state.worker.thread.is_alive()
         assert claims.detail("CLM-1001")["run_active"] is False
     finally:
         finish.set()
         assert late.wait(5)
-    assert not app.state.worker.thread.is_alive()
+        command.join(timeout=5)
+    assert not command.is_alive()
+    assert results[0]["status"] == "interrupted"
     assert claims.detail("CLM-1001")["decision"] is None
     assert claims.events("CLM-1002") == []
     with DatabaseOwner(repository.path):
@@ -227,26 +235,18 @@ def test_keyboard_interrupt_records_a_recoverable_failure(repository):
     assert claims.events("CLM-1001")[-1]["status"] == "failed"
 
 
-def test_readiness_uses_the_exact_backend_instance(monkeypatch):
-    def unavailable(*_args, **_kwargs):
-        raise httpx.ConnectError("Not listening")
-
-    monkeypatch.setattr(httpx, "get", unavailable)
-    assert not api_ready("http://localhost:8000", "expected")
-    monkeypatch.setattr(httpx, "get", lambda *_a, **_kw: httpx.Response(503))
-    assert not api_ready("http://localhost:8000", "expected")
-    monkeypatch.setattr(
-        httpx,
-        "get",
-        lambda *_a, **_kw: httpx.Response(
-            200, headers={"X-UnderCover-Instance": "expected"}
-        ),
+def test_health_identifies_the_exact_backend_database(repository, client, tmp_path):
+    response = client.get("/api/health")
+    assert response.headers["X-UnderCover-Instance"]
+    assert response.headers["X-UnderCover-Database"] == database_identity(
+        repository.path
     )
-    assert api_ready("http://localhost:8000", "expected")
-    assert not api_ready("http://localhost:8000", "another")
+    assert response.headers["X-UnderCover-Database"] != database_identity(
+        tmp_path / "another.db"
+    )
 
 
-def test_startup_cap_is_enforced_before_claim_admission(repository, monkeypatch):
+def test_only_an_explicit_capped_run_admits_claims(repository, monkeypatch):
     monkeypatch.setenv("UNDERCOVER_MAX_CLAIMS", "5")
     claims = Claims(repository)
     started = []
@@ -258,10 +258,11 @@ def test_startup_cap_is_enforced_before_claim_admission(repository, monkeypatch)
         )
         return "Complete"
 
-    app = create_app(repository, decide, worker_ready=lambda: True)
+    app = create_app(repository)
     with connected_client(app, monkeypatch) as api:
-        app.state.worker.thread.join(timeout=30)
-        assert not app.state.worker.thread.is_alive()
+        assert not started
+        assert api.get("/api/agent-runs/current").json() == {"run": None}
+        queue_agent.run_queue({"mode": "limited", "max_claims": 5}, decide)
         assert len(set(started)) == len(started) == 5
         run = api.get("/api/agent-runs/current").json()["run"]
         assert run["scope"] == {"mode": "limited", "max_claims": 5}

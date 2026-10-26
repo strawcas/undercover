@@ -156,7 +156,8 @@ def run_queue(
             )
             raise AgentRunError(detail) from failure
         finally:
-            context.result = tools.request(
-                "POST", f"{tools.path}/finish", {"status": status, "detail": detail}
-            )
+            if context.result is None:
+                context.result = tools.request(
+                    "POST", f"{tools.path}/finish", {"status": status, "detail": detail}
+                )
     return context.result

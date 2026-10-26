@@ -32,7 +32,7 @@ def stub_queue(monkeypatch):
 
 @pytest.fixture
 def client(repository):
-    with TestClient(create_app(repository, auto_run=False)) as api:
+    with TestClient(create_app(repository)) as api:
         yield api
 
 

@@ -12,12 +12,13 @@ from agent.main import run
 from agent.tests.stubs import scripted_model
 from backend import batch
 from backend.claims import Claims
-from backend.local import local_address, wait_started
+from backend.local import local_address, local_backend, wait_started
 from backend.main import create_app
 from backend.models import DecisionInput
 from backend.ownership import DatabaseOwner
 from backend.reset_db import rebuild
-from backend.tests.conftest import decide_fixture, decision_payload
+from backend.runs import Runs
+from backend.tests.conftest import begin_claim, decide_fixture, decision_payload
 
 
 @pytest.fixture
@@ -76,7 +77,7 @@ def test_rebuild_capped_run_remaining_work_repeat_and_rebuild(terminal, capsys):
     count = rebuild(terminal.path)
     claims = Claims(terminal)
     ordered = [row["claim_id"] for row in claims.queue()]
-    assert batch.main(scripted_runner, ["--max-claims", "5"]) == 0
+    assert batch.main(scripted_runner, ["--cap", "5"]) == 0
     output = capsys.readouterr().out
     printed = [
         line.split()[0] for line in output.splitlines() if line.startswith("CLM-")
@@ -262,7 +263,7 @@ def test_only_local_backend_addresses_are_accepted(url):
 
 
 def test_failed_server_start_is_reported(terminal):
-    server = uvicorn.Server(uvicorn.Config(create_app(terminal, auto_run=False)))
+    server = uvicorn.Server(uvicorn.Config(create_app(terminal)))
     thread = Thread(target=lambda: None)
     thread.start()
     thread.join()
@@ -271,8 +272,9 @@ def test_failed_server_start_is_reported(terminal):
 
 
 def test_terminal_distinct_cap_and_named_claim(terminal, monkeypatch, capsys):
+    assert batch.arguments(["--max-claims", "5"]).max_claims == 5
     monkeypatch.setenv("UNDERCOVER_MAX_CLAIMS", "1")
-    assert batch.main(scripted_runner, argv=["--max-claims", "5"]) == 0
+    assert batch.main(scripted_runner, argv=["--cap", "5"]) == 0
     output = capsys.readouterr().out
     assert "Attempted: 5 | Decided: 5" in output
     assert "Assessment attempts: 5" in output
@@ -287,9 +289,67 @@ def test_terminal_distinct_cap_and_named_claim(terminal, monkeypatch, capsys):
     assert "Claim not found" in capsys.readouterr().err
 
 
+def test_explicit_cli_attaches_to_the_app_and_uncapped_command_ignores_old_env_cap(
+    terminal, monkeypatch, capsys
+):
+    monkeypatch.setenv("UNDERCOVER_MAX_CLAIMS", "1")
+    with local_backend(terminal, scripted_runner, batch.backend_url()) as claims:
+        assert claims.queue()[0]["status"] == "waiting"
+        assert batch.main(scripted_runner, ["--cap", "5"]) == 0
+        assert "Attempted: 5 | Decided: 5" in capsys.readouterr().out
+        first = claims.events("CLM-1001")
+        assert sum(row["status"] == "waiting" for row in claims.queue()) == 20
+        with (
+            pytest.raises(RuntimeError, match="already in use"),
+            DatabaseOwner(terminal.path),
+        ):
+            pass
+        assert batch.main(scripted_runner) == 0
+        assert "Attempted: 20 | Decided: 20" in capsys.readouterr().out
+        assert claims.events("CLM-1001") == first
+
+
+def test_cli_does_not_attach_to_another_database(
+    terminal, repository, tmp_path, capsys
+):
+    other = type(repository)(tmp_path / "other.db")
+    with local_backend(other, scripted_runner, batch.backend_url()):
+        assert batch.main(scripted_runner, ["--cap", "5"]) == 1
+    assert "another service or database" in capsys.readouterr().err
+    assert Claims(terminal).events("CLM-1001") == []
+
+
+def test_cli_interruption_preserves_the_running_backend(terminal, capsys):
+    limit_queue(terminal, 1)
+
+    def interrupt(_claim, _thread):
+        raise KeyboardInterrupt
+
+    with local_backend(terminal, scripted_runner, batch.backend_url()) as claims:
+        assert batch.main(interrupt, ["--cap", "1"]) == 130
+        assert "Interrupted" in capsys.readouterr().err
+        assert claims.detail("CLM-1001")["run_active"] is False
+        assert batch.main(scripted_runner, ["--cap", "1"]) == 0
+        assert "Attempted: 1 | Decided: 1" in capsys.readouterr().out
+
+
+def test_cli_rejects_an_overlapping_run_without_changing_it(terminal, capsys):
+    with local_backend(terminal, scripted_runner, batch.backend_url()):
+        begin_claim(terminal)
+        before = Runs(terminal).current()
+        assert batch.main(scripted_runner, ["--cap", "5"]) == 1
+        assert "Another agent run is active" in capsys.readouterr().err
+        assert Runs(terminal).current() == before
+
+
 @pytest.mark.parametrize(
     "argv",
     [
+        ["--cap", "0"],
+        ["--cap", "-1"],
+        ["--cap", "1.5"],
+        ["--cap", "five"],
+        ["--cap", "5", "--claim-id", "CLM-1001"],
         ["--max-claims", "0"],
         ["--max-claims", "-1"],
         ["--max-claims", "1.5"],

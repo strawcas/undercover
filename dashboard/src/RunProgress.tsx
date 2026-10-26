@@ -103,8 +103,8 @@ export function RunProgress({
       <>
         <h2>Queue run</h2>
         <p className="muted">
-          No run yet. Processing starts with the backend or a terminal queue
-          run.
+          No run yet. Start processing with uv run -m agent. Use --cap 5 to work
+          up to five claims.
         </p>
       </>
     );

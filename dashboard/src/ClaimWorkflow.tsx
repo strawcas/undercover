@@ -90,7 +90,8 @@ function Waiting({
   failed,
 }: Readonly<{ claim: ClaimDetail; failed: boolean }>) {
   let heading = "Waiting for assessment";
-  let detail = "Claims are assessed during startup or a terminal queue run.";
+  let detail =
+    "Start an assessment with uv run -m agent, or use uv run -m agent --cap 5 for up to five claims.";
   if (claim.status === "handler_review") {
     heading = "Handler review required";
     detail =
@@ -98,7 +99,7 @@ function Waiting({
   } else if (failed) {
     heading = "Assessment will be retried";
     detail =
-      "The last attempt failed. The queue can retry it once. If the run has ended, another startup or terminal run can pick it up.";
+      "The last attempt failed. The queue can retry it once. If the run has ended, run uv run -m agent to pick it up.";
   }
   return (
     <section className="panel action-panel">

@@ -4,15 +4,17 @@ import os
 import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Thread
 
 import uvicorn
 
+from agent import queue
 from agent.main import run
 from agent.tests.queue_stubs import ScriptedQueueModel
 from agent.tests.stubs import scripted_model
+from backend.batch import main as run_command
 from backend.main import create_app
 from backend.storage import Store
-from backend.worker import api_ready
 
 PORT = int(os.getenv("UNDERCOVER_TEST_PORT", "8011"))
 os.environ["UNDERCOVER_BACKEND_URL"] = f"http://127.0.0.1:{PORT}"
@@ -42,21 +44,22 @@ def scripted_runner(claim_id: str, thread_id: str) -> str:
     return run(claim_id, thread_id, scripted_model(outcome, payout))
 
 
+def wait_for_command(gate: Path) -> None:
+    """Let browser tests explicitly invoke the CLI after checking the idle app."""
+    while not gate.exists():
+        time.sleep(0.1)
+    queue.model = ScriptedQueueModel
+    run_command(scripted_runner)
+
+
 if __name__ == "__main__":
     with TemporaryDirectory(prefix="undercover-e2e-") as directory:
+        store = Store(Path(directory) / "claims.db")
+        os.environ["UNDERCOVER_DB_PATH"] = str(store.path)
+        app = create_app(store)
         gate = os.getenv("UNDERCOVER_TEST_GATE")
-
-        def ready():
-            return (gate is None or Path(gate).exists()) and api_ready(
-                f"http://127.0.0.1:{PORT}", app.state.instance_id
-            )
-
-        app = create_app(
-            Store(Path(directory) / "claims.db"),
-            scripted_runner,
-            worker_ready=ready,
-            queue_model=ScriptedQueueModel(),
-        )
+        if gate:
+            Thread(target=wait_for_command, args=(Path(gate),), daemon=True).start()
         uvicorn.run(
             app,
             host="127.0.0.1",

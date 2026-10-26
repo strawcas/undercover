@@ -10,7 +10,7 @@ In the pilot (`docs/STATUS.md`), our code does much of the organizing. It feeds 
 
 ## What we want
 
-1. **One run works the whole queue.** We start the agent once and it works every waiting claim, choosing the order itself, then finishes with a short summary for the handlers. For trials we need a way to start a run capped at a number of claims, with the rest left waiting, so a trial on five claims costs little. We still need to be able to run it on one named claim.
+1. **One run works the whole queue.** We explicitly start the agent with `uv run -m agent` and it works every eligible waiting claim, choosing the order itself, then finishes with a short summary for the handlers. `uv run -m agent --cap 5` limits a run to five distinct claims, with the rest left waiting. Starting the backend or dashboard must never run the agent automatically. We still need to be able to run it on one named claim.
 
 2. **A to-do list we can watch.** The agent plans its work as a to-do list and keeps it up to date as it goes, with each item to do, in progress, done or left for a handler. The queue page of the dashboard shows the list for the current run, so the team can see what the agent means to do and how far it has got.
 

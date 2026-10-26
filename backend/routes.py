@@ -43,6 +43,7 @@ Service = Annotated[Claims, Depends(service)]
 def health(request: Request, response: Response) -> dict[str, str]:
     """Check that the backend is running."""
     response.headers["X-UnderCover-Instance"] = request.app.state.instance_id
+    response.headers["X-UnderCover-Database"] = request.app.state.database_id
     return {"status": "ok"}
 
 

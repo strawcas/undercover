@@ -317,7 +317,7 @@ class Runs:
             save_run(connection, data)
             return view(connection, data)
 
-    def recover(self) -> None:
+    def recover(self, detail: str = "Backend restarted during this run.") -> None:
         with self.store.connect() as connection:
             ids = [
                 row["id"]
@@ -327,7 +327,5 @@ class Runs:
         for run_id in ids:
             self.finish(
                 run_id,
-                RunFinishInput(
-                    status="interrupted", detail="Backend restarted during this run."
-                ),
+                RunFinishInput(status="interrupted", detail=detail),
             )

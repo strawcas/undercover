@@ -72,7 +72,7 @@ function api(initial: ClaimDetail) {
   };
 }
 
-it("follows a startup or terminal assessment from waiting through completion", async () => {
+it("follows an explicit assessment from waiting through completion", async () => {
   vi.useFakeTimers();
   const backend = api(claim);
   const onChange = vi.fn();
@@ -218,7 +218,7 @@ it("keeps a later arrival waiting without starting processing while polling", as
   expect(screen.getByText("Waiting for assessment")).toBeDefined();
   expect(
     screen.getByText(
-      "Claims are assessed during startup or a terminal queue run.",
+      "Start an assessment with uv run -m agent, or use uv run -m agent --cap 5 for up to five claims.",
     ),
   ).toBeDefined();
   expect(backend.fetcher.mock.calls.length).toBeGreaterThan(2);

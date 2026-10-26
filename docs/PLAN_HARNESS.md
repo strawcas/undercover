@@ -1,5 +1,7 @@
 # Harness implementation plan
 
+The explicit-command launch revision at the end of this document supersedes the earlier automatic-startup and environment-cap behavior. `docs/PLAN.md` remains historical and unchanged.
+
 ## Goal and scope
 
 Implement `docs/HARNESS.md`: one queue agent chooses its work, maintains a visible to-do list, delegates each claim to a fresh claim agent, looks up the policy wording and claims manual by section, recovers from failures and finishes with a short summary. Support the whole waiting queue, a cap on distinct claims and one named claim.
@@ -387,3 +389,19 @@ For a live standalone CLI check, stop the trial app, reseed that same separate d
 After this plan is reviewed and implementation is requested, build phases in order without stopping between them. Add focused tests, verify each phase's criteria, tick them here, update `docs/STATUS.md` and commit with the pre-commit hook enabled. Keep `docs/PLAN.md` unchanged. Use uv and Windows-compatible scripts, retain unrelated student work and never lower checks or bypass hooks. Run the full check suite before the final handover. Planning does not launch a model, reset a database or implement product changes.
 
 Implementation completed October 26, 2026. `npm run check` exits 0: 195 Python tests (97.82% coverage), 21 component tests (99.33% statements) and eight Playwright tests; formatting, lint and type checks pass. The production dashboard build passes. Phase commits retain the pre-commit hooks. The separate reseeded default-model trial completed five claims in five attempts, with four simulated payments, one pending sign-off and twenty claims left Waiting; all five have audited wording/manual reads. Playwright MCP checked live progress, exact prompts, final totals and refresh persistence. Trial servers are stopped and their ignored database is preserved. No decision-accuracy evaluation was performed. The working database, `.env` and historical pilot plan remain unchanged.
+
+## Explicit-command launch revision
+
+The student's updated requirement is that starting the app never starts the agent. Remove the backend's startup worker entirely. Keep storage initialization and interrupted-run recovery, but leave eligible claims Waiting until an explicit command. `uv run -m agent` works all eligible claims; `uv run -m agent --cap 5` works up to five distinct claims. Keep `--max-claims` as a compatibility alias and named mode as a separate scope. Ignore the old environment cap so the unflagged command consistently means all eligible work.
+
+An explicit command attaches through HTTP to an already-running local app serving the same configured database. This lets the handler watch progress without stopping the dashboard. If no backend is running, retain the standalone temporary backend. Check database identity through a health response header before attachment; reject another database/service and overlapping runs. Preserve ownership, interruption, attempt fencing, evidence and exact payment checks. A backend shutdown closes active run state, and a late helper accepts that stored interruption instead of attempting a conflicting completion.
+
+Success criteria:
+
+- [ ] Default backend startup, restart, polling and navigation leave Waiting claims untouched and create no run or model call, including with missing provider credentials or an obsolete environment cap.
+- [ ] CLI integration covers full, `--cap 5`, alias and named scopes, invalid caps and conflicting flags. A capped run leaves the remaining claims Waiting; retries keep their distinct-claim slot.
+- [ ] The CLI attaches to the matching running backend, leaves its server/ownership intact and rejects unrelated services/databases. Ctrl+C preserves recoverable state and permits a later explicit run.
+- [ ] Adapt the existing lifecycle tests individually to explicit execution, retaining later-arrival, retry, payment, shutdown, stale-write and restart checks. Backend shutdown fences active work before releasing ownership.
+- [ ] Full-stack tests first prove that the idle app stays idle across refresh, then explicitly invoke the stubbed CLI and follow its plan, decisions, retries, handoffs, evidence and handler actions. No production HTTP operation launches an agent.
+- [ ] Dashboard waiting/empty text, `.env.example`, README, specification, stack and status explain explicit launch and `--cap`; the historical pilot plan and user configuration are preserved. No real agent run is launched for this revision.
+- [ ] `npm run check`, the production build and pre-commit hooks pass without relaxed rules. Record the final results and commit the revision.

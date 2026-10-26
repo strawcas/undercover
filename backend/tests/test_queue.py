@@ -99,12 +99,12 @@ def test_database_ownership_blocks_backend(repository, tmp_path):
     with DatabaseOwner(repository.path):
         with (
             pytest.raises(RuntimeError, match="already in use"),
-            TestClient(create_app(repository, auto_run=False)),
+            TestClient(create_app(repository)),
         ):
             pass
         with DatabaseOwner(tmp_path / "separate.db"):
             pass
-    with TestClient(create_app(repository, auto_run=False)) as client:
+    with TestClient(create_app(repository)) as client:
         assert client.get("/api/health").status_code == 200
 
 

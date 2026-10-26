@@ -1,5 +1,6 @@
 """Queue tools delegate isolated helpers through backend-owned attempts."""
 
+from http import HTTPStatus
 from threading import Lock
 from typing import Literal
 from uuid import uuid4
@@ -41,6 +42,26 @@ class QueueTools:
 
     def check(self) -> Record:
         return self.request("GET", f"{self.path}/completion-check")
+
+    def finish_attempt(self, thread_id: str, error: str) -> Record:
+        response = api_request(
+            self.client,
+            "POST",
+            f"{self.path}/attempts/{thread_id}/finish",
+            {"error": error},
+        )
+        if response.status_code == HTTPStatus.CONFLICT:
+            current = self.request("GET", self.path)
+            if current["status"] != "running":
+                self.execution.result = current
+                self.execution.stopping.set()
+                return next(
+                    entry
+                    for entry in current["attempts"]
+                    if entry["thread_id"] == thread_id
+                )
+        response.raise_for_status()
+        return response.json()
 
     def waiting(self) -> Record:
         check = self.check()
@@ -89,9 +110,7 @@ class QueueTools:
                 error = "Assessment interrupted. Retry in a new session."
                 raise
             finally:
-                entry = self.request(
-                    "POST", f"{self.path}/attempts/{thread_id}/finish", {"error": error}
-                )
+                entry = self.finish_attempt(thread_id, error)
                 claim = self.request("GET", f"/api/claims/{claim_id}")
                 self.execution.on_result({"attempt": entry, "claim": claim})
             if entry["outcome"]:
