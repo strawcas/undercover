@@ -5,9 +5,11 @@ import sqlite3
 from decimal import Decimal
 from typing import Any
 
+from backend.attempt_guard import require_attempt
 from backend.claim_records import append_event, claim_row, now, start_claim
 from backend.errors import ClaimError
 from backend.models import DecisionInput, EventInput, cents, dollars
+from backend.references import decision_versions
 from backend.runs import Runs
 from backend.storage import Store
 
@@ -38,10 +40,21 @@ class Claims:
             "add_ons": [
                 a for a in plans["add_ons"] if a["add_on"] in policy["add_ons"]
             ],
-            "decision": json.loads(row["decision"]) if row["decision"] else None,
+            "decision": self._decision(row),
             "sign_off": json.loads(row["sign_off"]) if row["sign_off"] else None,
             "payment": json.loads(row["payment"]) if row["payment"] else None,
         }
+
+    @staticmethod
+    def _decision(row: sqlite3.Row) -> dict | None:
+        decision = json.loads(row["decision"]) if row["decision"] else None
+        if not decision:
+            return None
+        return {
+            "manual_sections": [],
+            "policy_wording_version": None,
+            "claims_manual_version": None,
+        } | decision
 
     def queue(self) -> list[dict[str, Any]]:
         rows = []
@@ -127,6 +140,15 @@ class Claims:
                 raise ClaimError(409, "The decision must belong to the active run.")
             if row["decision"]:
                 raise ClaimError(409, "The claim already has a decision.")
+            if row["run_id"]:
+                require_attempt(connection, row, decision.thread_id)
+                result.update(decision_versions(connection, claim_id, decision))
+            else:
+                result.update(
+                    manual_sections=[],
+                    policy_wording_version=None,
+                    claims_manual_version=None,
+                )
             connection.execute(
                 "UPDATE claims SET decision=?, payout_cents=?, state=? WHERE id=?",
                 (json.dumps(result), payout, state, claim_id),
@@ -145,6 +167,10 @@ class Claims:
                 ),
             )
         return result
+
+    def validate_thread(self, claim_id: str, thread_id: str) -> None:
+        with self.store.connect() as connection:
+            require_attempt(connection, claim_row(connection, claim_id), thread_id)
 
     def sign_off(self, claim_id: str, handler_id: str) -> dict[str, Any]:
         handlers = self.store.record("settings", "handlers")
@@ -179,12 +205,16 @@ class Claims:
             )
         return result
 
-    def pay(self, claim_id: str, amount: Decimal) -> dict[str, Any]:
+    def pay(
+        self, claim_id: str, amount: Decimal, thread_id: str = ""
+    ) -> dict[str, Any]:
         limit = cents(
             Decimal(self.store.record("settings", "company")["payout_approval_limit"])
         )
         with self.store.transaction() as connection:
             row = claim_row(connection, claim_id)
+            if thread_id:
+                require_attempt(connection, row, thread_id)
             self._check_payment(row, amount, limit)
             result = {
                 "amount": dollars(cents(amount)),
@@ -192,7 +222,8 @@ class Claims:
                 "simulated": True,
             }
             connection.execute(
-                "UPDATE claims SET payment=? WHERE id=?", (json.dumps(result), claim_id)
+                "UPDATE claims SET payment=?, review_reason=NULL WHERE id=?",
+                (json.dumps(result), claim_id),
             )
             append_event(
                 connection,
@@ -236,9 +267,17 @@ class Claims:
             row = claim_row(connection, claim_id)
             if row["thread_id"] != event.thread_id or not row["active"]:
                 raise ClaimError(409, "The event must belong to the active run.")
+            if row["run_id"]:
+                require_attempt(connection, row, event.thread_id)
             append_event(connection, claim_id, event)
 
     def finish(self, claim_id: str, thread_id: str, error: str = "") -> None:
+        with self.store.connect() as connection:
+            row = claim_row(connection, claim_id)
+        if row["run_id"]:
+            if row["thread_id"] == thread_id and row["active"]:
+                Runs(self.store).finish_attempt(row["run_id"], thread_id, error)
+            return
         with self.store.transaction() as connection:
             row = claim_row(connection, claim_id)
             if row["thread_id"] != thread_id or not row["active"]:

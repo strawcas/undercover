@@ -10,7 +10,12 @@ class StubModel(GenericFakeChatModel):
         return self
 
 
-def scripted_model(outcome="approve", payout="420.00"):
+def scripted_model(
+    outcome="approve",
+    payout="420.00",
+    policy_sections=("3", "10", "11"),
+    manual_sections=("6",),
+):
     decision = {
         "outcome": outcome,
         "payout": payout,
@@ -19,20 +24,48 @@ def scripted_model(outcome="approve", payout="420.00"):
             "The submitted evidence supports this outcome under section 3. "
             "Refer to a handler for missing information if evidence is incomplete."
         ),
-        "policy_sections": ["3", "10", "11"],
+        "policy_sections": list(policy_sections),
+        "manual_sections": list(manual_sections),
     }
     replies = [
         AIMessage(
             content="",
             tool_calls=[
                 {"name": name, "args": {}, "id": name}
-                for name in ("read_claim", "read_policy_wording", "read_company")
+                for name in ("read_claim", "read_company")
             ],
         ),
         AIMessage(
             content="",
             tool_calls=[
                 {"name": "record_decision", "args": decision, "id": "decision"}
+            ],
+        ),
+    ]
+    replies[1:1] = [
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "search_references",
+                    "args": {"source": "claims_manual", "query": "payout"},
+                    "id": "search",
+                },
+            ],
+        ),
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "read_reference_section",
+                    "args": {"source": source, "section_id": key},
+                    "id": f"{source}-{key}",
+                }
+                for source, keys in (
+                    ("policy_wording", policy_sections),
+                    ("claims_manual", manual_sections),
+                )
+                for key in keys
             ],
         ),
     ]

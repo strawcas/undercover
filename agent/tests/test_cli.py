@@ -17,7 +17,7 @@ from backend.main import create_app
 from backend.models import DecisionInput
 from backend.ownership import DatabaseOwner
 from backend.reset_db import rebuild
-from backend.tests.conftest import decision_payload
+from backend.tests.conftest import decide_fixture, decision_payload
 
 
 @pytest.fixture
@@ -141,8 +141,8 @@ def test_interruption_after_decision_is_counted_and_preserved(terminal, capsys):
     claims = Claims(terminal)
 
     def runner(claim_id, thread_id):
-        claims.decide(
-            claim_id, DecisionInput.model_validate(decision_payload(thread_id))
+        decide_fixture(
+            claims, claim_id, DecisionInput.model_validate(decision_payload(thread_id))
         )
         raise KeyboardInterrupt
 

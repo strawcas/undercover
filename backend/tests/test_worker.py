@@ -8,7 +8,7 @@ from backend.claims import Claims
 from backend.main import create_app
 from backend.models import DecisionInput
 from backend.ownership import DatabaseOwner
-from backend.tests.conftest import decision_payload
+from backend.tests.conftest import decide_fixture, decision_payload
 from backend.worker import QueueWorker, api_ready, execute
 
 
@@ -26,8 +26,8 @@ def test_startup_snapshot_finishes_and_later_arrivals_wait(repository):
         assert active[0]["claim_id"] == claim_id
         if claim_id == initial_ids[0]:
             repository.add_claim(original | {"claim_id": "CLM-0001"})
-        claims.decide(
-            claim_id, DecisionInput.model_validate(decision_payload(thread_id))
+        decide_fixture(
+            claims, claim_id, DecisionInput.model_validate(decision_payload(thread_id))
         )
         return "Complete"
 
@@ -114,8 +114,8 @@ def test_startup_failure_is_retried_only_on_a_later_start(repository):
         attempted.append(claim_id)
         if claim_id == "CLM-1001" and attempted.count(claim_id) == 1:
             raise RuntimeError("Synthetic provider failure")
-        claims.decide(
-            claim_id, DecisionInput.model_validate(decision_payload(thread_id))
+        decide_fixture(
+            claims, claim_id, DecisionInput.model_validate(decision_payload(thread_id))
         )
         return "Complete"
 
@@ -154,8 +154,8 @@ def test_slow_shutdown_keeps_ownership_until_the_attempt_finishes(repository):
     def slow_runner(claim_id, thread_id):
         entered.set()
         assert finish.wait(15)
-        claims.decide(
-            claim_id, DecisionInput.model_validate(decision_payload(thread_id))
+        decide_fixture(
+            claims, claim_id, DecisionInput.model_validate(decision_payload(thread_id))
         )
         return "Complete"
 
@@ -187,8 +187,8 @@ def test_failed_claim_does_not_block_the_next(repository):
         started.append(claim_id)
         if claim_id == "CLM-1001":
             raise RuntimeError("Synthetic failure")
-        claims.decide(
-            claim_id, DecisionInput.model_validate(decision_payload(thread_id))
+        decide_fixture(
+            claims, claim_id, DecisionInput.model_validate(decision_payload(thread_id))
         )
         return "Complete"
 

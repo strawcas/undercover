@@ -12,6 +12,7 @@ from agent import main
 from agent.tests.stubs import StubModel, api_client, scripted_model
 from agent.tools import ClaimTools
 from backend.claims import Claims
+from backend.tests.conftest import begin_claim
 from backend.worker import execute
 
 
@@ -22,7 +23,7 @@ from backend.worker import execute
 def test_scripted_run(client, repository, monkeypatch, outcome, payout):
     monkeypatch.setattr(main, "backend", lambda: api_client(client))
     claims = Claims(repository)
-    thread = claims.start("CLM-1001")
+    thread = begin_claim(repository)
     reply = main.run("CLM-1001", thread, scripted_model(outcome, payout))
     claims.finish("CLM-1001", thread)
     assert "complete" in reply
@@ -34,7 +35,7 @@ def test_scripted_run(client, repository, monkeypatch, outcome, payout):
     actions = {event["action"] for event in events}
     assert {
         "Read claim and customer history",
-        "Read policy wording",
+        "Read reference section",
         "Read payout approval limit",
         "Read agent instructions",
     } <= actions
@@ -55,11 +56,15 @@ def test_model_configuration(monkeypatch):
     monkeypatch.delenv("MODEL_NAME", raising=False)
     default = main.model()
     assert isinstance(default, ChatOpenAI)
-    assert default.model_name == "openai/gpt-6-luna"
+    assert default.model_name == "deepseek/deepseek-v4.1-flash"
     assert default.reasoning_effort == "low"
     assert str(default.openai_api_base) == main.OPENROUTER_BASE_URL
     assert isinstance(default.openai_api_key, SecretStr)
     assert default.openai_api_key.get_secret_value() == "test-key"
+    monkeypatch.setenv("MODEL_NAME", main.DEFAULT_MODEL)
+    explicit_default = main.model()
+    assert isinstance(explicit_default, ChatOpenAI)
+    assert explicit_default.reasoning_effort == "low"
     monkeypatch.setenv("MODEL_PROVIDER", "openrouter")
     monkeypatch.setenv("MODEL_NAME", "openrouter/free")
     selected = main.model()
@@ -110,7 +115,7 @@ def test_truncated_response_has_actionable_failure(
     replies.append(AIMessage(content="", response_metadata={"done_reason": "length"}))
     llm = StubModel(messages=iter(replies))
     claims = Claims(repository)
-    thread = claims.start("CLM-1001")
+    thread = begin_claim(repository)
     execute(claims, "CLM-1001", thread, lambda c, t: main.run(c, t, llm))
     detail = claims.detail("CLM-1001")
     assert detail["status"] == ("decided" if saved else "waiting")
@@ -137,7 +142,7 @@ def test_ollama_failure_is_actionable_and_redacted(
 
     monkeypatch.setattr(StubModel, "_generate", failed_generation)
     claims = Claims(repository)
-    thread = claims.start("CLM-1001")
+    thread = begin_claim(repository)
     execute(claims, "CLM-1001", thread, lambda c, t: main.run(c, t, scripted_model()))
     detail = claims.detail("CLM-1001")
     assert detail["status"] == "waiting"
@@ -192,7 +197,7 @@ def test_selected_provider_runs_with_existing_http_tools(
     monkeypatch.setattr(main, factory, configured_model)
     monkeypatch.setattr(main, "backend", lambda: api_client(client))
     claims = Claims(repository)
-    thread = claims.start("CLM-1001")
+    thread = begin_claim(repository)
     assert "complete" in main.run("CLM-1001", thread)
     claims.finish("CLM-1001", thread)
     assert seen[0]["model"] == "test-model"
@@ -215,18 +220,20 @@ def test_backend_instructions_are_used(client, repository, monkeypatch):
         return original(*args, **kwargs)
 
     monkeypatch.setattr(main, "create_agent", create)
-    thread = Claims(repository).start("CLM-1001")
+    thread = begin_claim(repository)
     main.run("CLM-1001", thread, scripted_model())
     assert seen == [client.get("/api/agent-instructions").json()["text"]]
 
 
 def test_tools_use_only_http(client, repository):
-    thread = Claims(repository).start("CLM-1001")
+    thread = begin_claim(repository)
     with api_client(client) as transport:
         tools = ClaimTools(transport, "CLM-1001", thread).tools()
         assert {tool.name for tool in tools} == {
             "read_claim",
-            "read_policy_wording",
+            "list_reference_sections",
+            "search_references",
+            "read_reference_section",
             "read_company",
             "record_decision",
             "pay_claim",
@@ -238,7 +245,7 @@ def test_tools_use_only_http(client, repository):
 
 
 def test_tool_http_error(client, repository):
-    thread = Claims(repository).start("CLM-1001")
+    thread = begin_claim(repository)
     with api_client(client) as transport:
         tools = ClaimTools(transport, "CLM-1001", thread)
         assert tools.call("Missing operation", "GET", "/api/missing")["status"] == 404
@@ -255,3 +262,41 @@ def test_instruction_http_error(monkeypatch):
     monkeypatch.setattr(main, "backend", unavailable)
     with pytest.raises(httpx.HTTPStatusError):
         main.run("CLM-1001", "thread", scripted_model())
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        ("repeat-claim review", "9", "refer", "0"),
+        ("wild-animal interpretation", "7.wild-animals", "approve", "100.00"),
+        ("meals without receipts", "10", "approve", "70.00"),
+    ],
+)
+def test_manual_case_workflows_are_audited(client, repository, monkeypatch, scenario):
+    case, manual, outcome, payout = scenario
+    fixture = repository.record("claim", "CLM-1001") | {
+        "claim_id": "TEST-MANUAL",
+        "summary": case,
+        "story": f"Synthetic workflow fixture for {case}; outcome supplied by a stub.",
+    }
+    repository.add_claim(fixture)
+    monkeypatch.setattr(main, "backend", lambda: api_client(client))
+    thread = begin_claim(repository, "TEST-MANUAL")
+    main.run(
+        "TEST-MANUAL",
+        thread,
+        scripted_model(
+            outcome,
+            payout,
+            manual_sections=(manual, "6"),
+        ),
+    )
+    Claims(repository).finish("TEST-MANUAL", thread)
+    record = client.get("/api/claims/TEST-MANUAL").json()
+    assert record["decision"]["outcome"] == outcome
+    assert record["decision"]["manual_sections"] == [manual, "6"]
+    evidence = client.get("/api/claims/TEST-MANUAL/evidence").json()["reads"]
+    assert any(
+        item["section_id"] == manual and item["source"] == "claims_manual"
+        for item in evidence
+    )

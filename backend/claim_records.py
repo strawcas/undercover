@@ -32,7 +32,8 @@ def start_claim(
 ) -> str:
     thread_id = thread_id or str(uuid4())
     connection.execute(
-        "UPDATE claims SET state='in_progress', active=1, thread_id=? WHERE id=?",
+        "UPDATE claims SET state='in_progress', active=1, thread_id=?, "
+        "run_id=NULL WHERE id=?",
         (thread_id, claim_id),
     )
     append_event(

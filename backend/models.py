@@ -82,6 +82,7 @@ class Company(BaseModel):
 
 
 class DecisionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     thread_id: str = Field(min_length=1)
     outcome: Literal["approve", "decline", "refer"]
     payout: Money
@@ -90,6 +91,7 @@ class DecisionInput(BaseModel):
     policy_sections: list[Annotated[str, Field(pattern=r"^(?:[1-9]|1[0-2])$")]] = Field(
         min_length=1
     )
+    manual_sections: list[Annotated[str, Field(min_length=1)]] = Field(min_length=1)
 
     @model_validator(mode="after")
     def valid_decision(self) -> Self:

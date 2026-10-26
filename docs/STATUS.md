@@ -1,8 +1,8 @@
 # Status
 
-Harness implementation is in progress in `docs/PLAN_HARNESS.md`. Phase 1 is complete: additive SQLite migrations, eight run/attempt APIs, persisted to-dos, distinct-claim caps, replay-safe completion, two-failure handler review and interrupted-run recovery. Both business documents are indexed by section. The existing startup/terminal agent is still the pilot runner until phase 3; reference tools, the queue agent and dashboard changes follow in later phases.
+Harness implementation is in progress in `docs/PLAN_HARNESS.md`. Phases 1 and 2 are complete: additive migrations, run/attempt APIs, persisted to-dos, distinct-claim caps, replay-safe completion, two-failure handler review, interrupted-run recovery, section lookup and audited evidence. Claim helpers use the manual and wording through HTTP section tools, with validated decision references and backend-supplied versions. All 25 API operations have typed responses. The startup/terminal pass now registers attempts for these tools; the planning queue agent and dashboard changes follow in phases 3 and 5.
 
-Phase 1 passes `npm run check:python`: Ruff, Pyright and 152 pytest tests with 98.59% coverage. Tests verify concurrency, reset, migrations, API schemas and frozen handover records on temporary databases. The student's working database and `.env` are unchanged.
+Phase 2 passes `npm run check:python`: Ruff, Pyright and 165 pytest tests with 98.80% coverage. Tests verify concurrency, reset, migration, API contracts, full section evidence, stale attempts, model defaults and manual-case workflows with stub models and temporary databases. They do not score live reasoning accuracy. The student's working database and `.env` are unchanged.
 
 The startup-pass revision in `docs/PLAN.md` is implemented and verified. Each backend start processes one snapshot of waiting claims, then leaves the app available for handlers. The agent supports switching between OpenRouter and local Ollama, with a configurable model. Ollama requests now allocate 16,384 context tokens by default, with an override for larger policy/tool histories and clearer failure messages. Both execution modes use the same provider settings, claim tools and payment safeguards.
 
@@ -35,7 +35,7 @@ OPENROUTER_API_KEY=your-openrouter-key
 # MODEL_NAME=openrouter/free
 ```
 
-The default model is `openai/gpt-6-luna` with low reasoning effort. Set `MODEL_NAME` to another OpenRouter model to override it. When switching back from Ollama, replace the Ollama model name with an OpenRouter model, or remove/comment out `MODEL_NAME` to use the default. An OpenRouter API key is required only for this provider.
+The default model is `deepseek/deepseek-v4.1-flash` with low reasoning effort, including when that exact name is set explicitly. Set `MODEL_NAME` to another OpenRouter model to override it. When switching back from Ollama, replace the Ollama model name with an OpenRouter model, or remove/comment out `MODEL_NAME` to use the default. An OpenRouter API key is required only for this provider.
 
 ### Ollama locally
 
@@ -84,7 +84,7 @@ uv run -m backend.reset_db
 
 This rebuilds the configured database from the permitted source files in `data/`, returning every claim in `data/claims.json` to Waiting in source-file order. It clears previous decisions, sign-offs, simulated payments, thread IDs and activity, then prints the database path and restored claim count. It starts no agent runs; claims remain waiting until processing starts.
 
-A missing database is created. Invalid or incomplete source records leave an existing database intact. Evaluation data and security claims are never imported. The harness migration now indexes the claims manual alongside the wording; the pilot agent has not yet switched to its section tools. Changing source claim files takes effect on a fresh database or a rebuild; ordinary startup preserves saved work.
+A missing database is created. Invalid or incomplete source records leave an existing database intact. Evaluation data and security claims are never imported. The harness indexes the claims manual alongside the wording, and claim helpers select and read individual sections. Changing source claim files takes effect on a fresh database or a rebuild; ordinary startup preserves saved work.
 
 ## Process every waiting claim from the terminal
 

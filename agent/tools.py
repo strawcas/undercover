@@ -5,6 +5,17 @@ from typing import Literal
 
 import httpx
 from langchain_core.tools import BaseTool, tool
+from pydantic import BaseModel, ConfigDict
+
+
+class DecisionFields(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    outcome: Literal["approve", "decline", "refer"]
+    payout: str
+    calculation: str
+    explanation: str
+    policy_sections: list[str]
+    manual_sections: list[str]
 
 
 class ClaimTools:
@@ -46,36 +57,61 @@ class ClaimTools:
             return self.call("Read claim and customer history", "GET", self.path)
 
         @tool
-        def read_policy_wording() -> dict:
-            """Read the full policy wording and version for deciding this claim."""
-            return self.call("Read policy wording", "GET", "/api/policy-wording")
+        def list_reference_sections(
+            source: Literal["policy_wording", "claims_manual"],
+        ) -> dict:
+            """List numbered sections and named notes in one business document."""
+            return self.call(
+                "List reference sections",
+                "GET",
+                f"/api/reference-documents/{source}/sections",
+            )
+
+        @tool
+        def search_references(
+            source: Literal["policy_wording", "claims_manual"], query: str
+        ) -> dict:
+            """Find section IDs using a short query before reading full sections."""
+            return self.call(
+                "Search reference sections",
+                "POST",
+                f"{self.path}/reference-search",
+                {
+                    "thread_id": self.thread_id,
+                    "source": source,
+                    "query": query,
+                },
+            )
+
+        @tool
+        def read_reference_section(
+            source: Literal["policy_wording", "claims_manual"], section_id: str
+        ) -> dict:
+            """Read a selected section in full and preserve its text on this claim."""
+            return self.call(
+                "Read reference section",
+                "POST",
+                f"{self.path}/reference-reads",
+                {
+                    "thread_id": self.thread_id,
+                    "source": source,
+                    "section_id": section_id,
+                },
+            )
 
         @tool
         def read_company() -> dict:
             """Read the USD payout approval limit and company settings."""
             return self.call("Read payout approval limit", "GET", "/api/company")
 
-        @tool
-        def record_decision(
-            outcome: Literal["approve", "decline", "refer"],
-            payout: str,
-            calculation: str,
-            explanation: str,
-            policy_sections: list[str],
-        ) -> dict:
+        @tool(args_schema=DecisionFields)
+        def record_decision(**decision: object) -> dict:
             """Save the outcome, USD payout, calculation, reason and policy sections."""
             return self.call(
                 "Save decision",
                 "POST",
                 f"{self.path}/decision",
-                {
-                    "thread_id": self.thread_id,
-                    "outcome": outcome,
-                    "payout": payout,
-                    "calculation": calculation,
-                    "explanation": explanation,
-                    "policy_sections": policy_sections,
-                },
+                {"thread_id": self.thread_id, **decision},
             )
 
         @tool
@@ -84,13 +120,15 @@ class ClaimTools:
             return self.call(
                 "Request simulated payment",
                 "POST",
-                f"{self.path}/pay",
-                {"amount": amount},
+                f"{self.path}/agent-pay",
+                {"amount": amount, "thread_id": self.thread_id},
             )
 
         return [
             read_claim,
-            read_policy_wording,
+            list_reference_sections,
+            search_references,
+            read_reference_section,
             read_company,
             record_decision,
             pay_claim,

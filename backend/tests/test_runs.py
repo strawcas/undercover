@@ -5,7 +5,7 @@ from backend import worker
 from backend.claims import Claims
 from backend.main import create_app
 from backend.models import DecisionInput
-from backend.tests.conftest import decision_payload
+from backend.tests.conftest import decide_fixture, decision_payload
 
 
 def test_start_run_and_completion(repository):
@@ -14,7 +14,8 @@ def test_start_run_and_completion(repository):
     def runner(claim_id, thread_id):
         assert claims.events(claim_id)[0]["status"] == "started"
         assert claims.detail(claim_id)["run_active"]
-        claims.decide(
+        decide_fixture(
+            claims,
             claim_id,
             DecisionInput.model_validate(decision_payload(thread_id, payout="420")),
         )
@@ -72,8 +73,8 @@ def test_restart_recovers_interrupted_work(repository, committed):
     claims = Claims(repository)
     thread = claims.start("CLM-1001")
     if committed:
-        claims.decide(
-            "CLM-1001", DecisionInput.model_validate(decision_payload(thread))
+        decide_fixture(
+            claims, "CLM-1001", DecisionInput.model_validate(decision_payload(thread))
         )
     with TestClient(create_app(repository, auto_run=False)):
         detail = claims.detail("CLM-1001")
@@ -89,7 +90,7 @@ def test_failure_preserves_payment(repository):
         decision = DecisionInput.model_validate(
             decision_payload(thread_id, payout="420")
         )
-        claims.decide(claim_id, decision)
+        decide_fixture(claims, claim_id, decision)
         claims.pay(claim_id, decision.payout)
         raise RuntimeError("After payment")
 

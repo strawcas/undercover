@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from backend.claims import ClaimError, Claims
 from backend.config import backend_url, database_path
 from backend.ownership import DatabaseOwner
+from backend.reference_routes import router as reference_router
 from backend.routes import router
 from backend.run_routes import router as run_router
 from backend.storage import Store
@@ -68,6 +69,7 @@ def create_app(
 
     app.include_router(router)
     app.include_router(run_router)
+    app.include_router(reference_router)
     return app
 
 

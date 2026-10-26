@@ -18,7 +18,7 @@ load_dotenv()
 
 BACKEND_URL = "http://localhost:8000"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_MODEL = "openai/gpt-6-luna"
+DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash"
 DEFAULT_OLLAMA_NUM_CTX = 16384
 
 
@@ -77,7 +77,9 @@ def model() -> BaseChatModel:
         model=name or DEFAULT_MODEL,
         base_url=OPENROUTER_BASE_URL,
         api_key=SecretStr(os.environ["OPENROUTER_API_KEY"]),
-        reasoning_effort=None if name else "low",
+        reasoning_effort="low" if (name or DEFAULT_MODEL) == DEFAULT_MODEL else None,
+        max_retries=0,
+        timeout=120,
     )
 
 

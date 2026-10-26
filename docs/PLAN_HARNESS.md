@@ -296,14 +296,14 @@ Add a small reference-document service and extend `agent/tools.py` with contents
 
 Success criteria:
 
-- [ ] Reference tests retrieve wording and manual sections, including named interpretation notes; responses contain stable IDs, source, version and complete text. Unknown sections and arbitrary source/path requests fail clearly. Empty searches guide the agent to the contents listing.
-- [ ] Stub-driven claim runs use real local HTTP calls to read claim context and selected sections, then record a decision. No full manual or full wording is injected into the prompt or exposed through the helper's tools.
-- [ ] Evidence tests prove exact returned section text is stored against the correct claim/thread, survives refresh and can exceed the activity-detail limit. Searches and reads are distinguishable; invalid or unread decision references are rejected.
-- [ ] Synthetic fixtures exercise the workflow for repeat-claim referral, wild-animal interpretation and meals without receipts. Instructions and cited evidence follow the source manual, and tests make no claim to measure live reasoning accuracy.
-- [ ] Instruction API tests return the exact queue and claim prompts used, including middleware guidance. Existing decisions render without new provenance fields being fabricated.
-- [ ] `backend/tests/test_references.py` verifies the five reference/evidence/agent-payment routes against their API table, including complete section text, empty matches, repeated reads, wrong/expired threads and exact payment results. Decision/instruction tests verify required `manual_sections`, rejected client-supplied versions, the preserved `text` field, added `queue_text`, and legacy decision null/empty provenance.
-- [ ] Model-factory tests select `deepseek/deepseek-v4.1-flash` with low reasoning effort both by default and when named explicitly, preserve other `MODEL_NAME` overrides, and retain Ollama selection, context settings and no-key local operation. Invalid configuration makes no model calls or reservations.
-- [ ] `npm run check:python` passes using injected stub models only.
+- [x] Reference tests retrieve wording and manual sections, including named interpretation notes; responses contain stable IDs, source, version and complete text. Unknown sections and arbitrary source/path requests fail clearly. Empty searches guide the agent to the contents listing.
+- [x] Stub-driven claim runs use real local HTTP calls to read claim context and selected sections, then record a decision. No full manual or full wording is injected into the prompt or exposed through the helper's tools.
+- [x] Evidence tests prove exact returned section text is stored against the correct claim/thread, survives refresh and can exceed the activity-detail limit. Searches and reads are distinguishable; invalid or unread decision references are rejected.
+- [x] Synthetic fixtures exercise the workflow for repeat-claim referral, wild-animal interpretation and meals without receipts. Instructions and cited evidence follow the source manual, and tests make no claim to measure live reasoning accuracy.
+- [x] Instruction API tests return the exact queue and claim prompts used, including middleware guidance. Existing decisions render without new provenance fields being fabricated.
+- [x] `backend/tests/test_references.py` verifies the five reference/evidence/agent-payment routes against their API table, including complete section text, empty matches, repeated reads, wrong/expired threads and exact payment results. Decision/instruction tests verify required `manual_sections`, rejected client-supplied versions, the preserved `text` field, added `queue_text`, and legacy decision null/empty provenance.
+- [x] Model-factory tests select `deepseek/deepseek-v4.1-flash` with low reasoning effort both by default and when named explicitly, preserve other `MODEL_NAME` overrides, and retain Ollama selection, context settings and no-key local operation. Invalid configuration makes no model calls or reservations.
+- [x] `npm run check:python` passes using injected stub models only.
 
 ## Phase 3: Replace the fixed queue loop with the planning agent
 

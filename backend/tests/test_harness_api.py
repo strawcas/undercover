@@ -10,7 +10,7 @@ from backend.models import DecisionInput
 from backend.reset_db import rebuild
 from backend.runs import Runs
 from backend.storage import ROOT
-from backend.tests.conftest import decision_payload
+from backend.tests.conftest import audit_decision, decision_payload
 
 
 def register(client, scope=None):
@@ -276,6 +276,7 @@ def test_saved_outcomes_and_frozen_handover(
     plan_claims(client, key, ["CLM-1001"])
     entry, _ = reserve(client, key, "CLM-1001")
     payload = decision_payload(entry["thread_id"], outcome, payout)
+    audit_decision(repository, "CLM-1001", DecisionInput.model_validate(payload))
     assert client.post("/api/claims/CLM-1001/decision", json=payload).status_code == 201
     if payout == "420":
         Claims(repository).pay("CLM-1001", Decimal(payout))

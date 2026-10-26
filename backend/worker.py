@@ -2,11 +2,14 @@
 
 from collections.abc import Callable
 from threading import Event, Thread
+from uuid import uuid4
 
 import httpx
 
 from agent.main import AgentRunError, run
 from backend.claims import Claims
+from backend.harness_models import AttemptInput, RunFinishInput, RunInput, TodosInput
+from backend.runs import Runs
 
 Runner = Callable[[str, str], str]
 
@@ -65,18 +68,70 @@ class QueueWorker:
         self.attempted: set[str] = set()
         self.stopping = Event()
         self.thread = Thread()
+        self.run_id: str | None = None
+        self.finished = False
 
     def step(self, eligible: set[str] | None = None) -> dict | None:
         """Run the next claim and return its saved result, or idle."""
-        if self.stopping.is_set():
+        if self.stopping.is_set() or self.finished:
             return None
-        selected = self.claims.start_next(self.attempted, eligible)
-        if selected is None:
+        waiting = [
+            row["claim_id"]
+            for row in self.claims.queue()
+            if row["status"] == "waiting"
+            and row["claim_id"] not in self.attempted
+            and (eligible is None or row["claim_id"] in eligible)
+        ]
+        if not waiting:
+            self._finish_run()
             return None
-        claim_id, thread_id = selected
+        runs = Runs(self.claims.store)
+        if self.run_id is None:
+            scope = (
+                {"mode": "claim", "claim_id": waiting[0]}
+                if eligible is not None and len(eligible) == 1
+                else {"mode": "all"}
+            )
+            data, _ = runs.create(
+                RunInput.model_validate({"run_id": str(uuid4()), "scope": scope})
+            )
+            self.run_id = str(data["run_id"])
+        claim_id = waiting[0]
+        data = runs.get(self.run_id)
+        items = [
+            {key: item[key] for key in ("id", "claim_id", "text", "status")}
+            for item in data["todos"]
+        ]
+        items.append(
+            dict(
+                id=f"claim:{claim_id}",
+                claim_id=claim_id,
+                text=f"Assess {claim_id}",
+                status="to_do",
+            )
+        )
+        runs.todos(self.run_id, TodosInput.model_validate({"items": items}))
+        entry, _ = runs.start(
+            self.run_id, AttemptInput(claim_id=claim_id, thread_id=uuid4())
+        )
+        thread_id = entry["thread_id"]
         self.attempted.add(claim_id)
         execute(self.claims, claim_id, thread_id, self.runner)
         return self.claims.detail(claim_id)
+
+    def _finish_run(self) -> None:
+        if self.run_id is not None and not self.finished:
+            runs = Runs(self.claims.store)
+            complete = runs.check(self.run_id)["complete"]
+            status = "completed" if complete else "failed"
+            detail = "" if complete else "Queue pass ended with undecided work."
+            if self.stopping.is_set() and not complete:
+                status, detail = "interrupted", "Queue processing was interrupted."
+            runs.finish(
+                self.run_id,
+                RunFinishInput.model_validate({"status": status, "detail": detail}),
+            )
+            self.finished = True
 
     def run_once(self, eligible: set[str]) -> None:
         try:
@@ -88,6 +143,7 @@ class QueueWorker:
                 if self.step(eligible) is None:
                     break
         finally:
+            self._finish_run()
             self.release()
 
     def start(self) -> None:
@@ -104,5 +160,7 @@ class QueueWorker:
 
     def stop(self) -> bool:
         self.stopping.set()
+        if self.thread.ident is None:
+            return True
         self.thread.join(timeout=5)
         return not self.thread.is_alive()

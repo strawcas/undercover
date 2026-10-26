@@ -3,8 +3,7 @@ import inspect
 import pytest
 from fastapi.routing import APIRoute
 
-from backend.claims import Claims
-from backend.tests.conftest import decision_payload
+from backend.tests.conftest import begin_decision_claim, decision_payload
 
 
 def test_read_apis(client):
@@ -64,8 +63,7 @@ def test_missing_claim(client, path):
 
 
 def test_decision_and_events(client, repository):
-    claims = Claims(repository)
-    thread = claims.start("CLM-1001")
+    thread = begin_decision_claim(repository)
     event = {
         "thread_id": thread,
         "action": "Read policy",
@@ -101,7 +99,7 @@ def test_decision_and_events(client, repository):
 
 @pytest.mark.parametrize("outcome", ["decline", "refer"])
 def test_non_approval(client, repository, outcome):
-    thread = Claims(repository).start("CLM-1001")
+    thread = begin_decision_claim(repository)
     response = client.post(
         "/api/claims/CLM-1001/decision", json=decision_payload(thread, outcome, "0")
     )
