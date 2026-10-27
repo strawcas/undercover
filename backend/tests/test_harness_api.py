@@ -1,3 +1,4 @@
+import json
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from uuid import uuid4
@@ -478,3 +479,31 @@ def test_rebuild_clears_harness_state(repository):
             connection.execute("SELECT COUNT(*) FROM agent_attempts").fetchone()[0] == 0
         )
         assert connection.execute("SELECT COUNT(*) FROM evidence").fetchone()[0] == 0
+
+
+def test_typed_state_recovers_runs_written_before_the_review(client, repository):
+    run, _ = register(client, {"mode": "claim", "claim_id": "CLM-1001"})
+    key = run["run_id"]
+    plan_claims(client, key, ["CLM-1001"])
+    entry, _ = reserve(client, key, "CLM-1001")
+    before = client.get(f"/api/agent-runs/{key}").json()
+    with repository.transaction() as connection:
+        row = connection.execute(
+            "SELECT body FROM agent_runs WHERE id=?", (key,)
+        ).fetchone()
+        old = json.loads(row["body"])
+        for field in ("counts", "finish_input", "final_check"):
+            old.pop(field)
+        connection.execute(
+            "UPDATE agent_runs SET body=? WHERE id=?", (json.dumps(old), key)
+        )
+    assert client.get(f"/api/agent-runs/{key}").json() == before
+    Runs(repository).recover()
+    recovered = client.get(f"/api/agent-runs/{key}").json()
+    assert recovered["status"] == "interrupted"
+    assert recovered["counts"]["assessment_attempts"] == 1
+    assert recovered["attempts"][0]["thread_id"] == entry["thread_id"]
+    assert recovered["counts"]["failed_assessments"] == 1
+    assert Claims(repository).detail("CLM-1001")["status"] == "waiting"
+    Runs(repository).recover()
+    assert client.get(f"/api/agent-runs/{key}").json() == recovered

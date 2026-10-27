@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from backend.claims import ClaimError, Claims
 from backend.config import database_identity, database_path
+from backend.diagnostics import preserve_primary
 from backend.ownership import DatabaseOwner
 from backend.reference_routes import router as reference_router
 from backend.routes import router
@@ -29,11 +30,13 @@ def create_app(store: Store | None = None) -> FastAPI:
         try:
             repository.initialize()
             claims.recover_interrupted()
-            yield
-        finally:
             try:
-                Runs(repository).recover("Backend stopped during this run.")
+                yield
             finally:
+                with preserve_primary("Recover runs during backend shutdown"):
+                    Runs(repository).recover("Backend stopped during this run.")
+        finally:
+            with preserve_primary("Release database ownership"):
                 owner.release()
 
     app = FastAPI(title="UnderCover", lifespan=lifespan)

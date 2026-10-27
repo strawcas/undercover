@@ -97,7 +97,7 @@ function Waiting({
     detail =
       "Two assessments failed. No insurance decision or payout was recorded. A handler must review this claim; automatic processing has stopped.";
   } else if (failed) {
-    heading = "Assessment will be retried";
+    heading = "Assessment can be retried";
     detail =
       "The last attempt failed. The queue can retry it once. If the run has ended, run uv run -m agent to pick it up.";
   }

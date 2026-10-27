@@ -39,14 +39,14 @@ def limit_queue(repository, count):
         )
 
 
-def scripted_runner(claim_id, thread_id):
+def scripted_runner(claim_id, thread_id, *, budget):
     outcomes = {
         "CLM-1002": ("decline", "0"),
         "CLM-1003": ("approve", "1250.00"),
         "CLM-1004": ("refer", "0"),
     }
     outcome, payout = outcomes.get(claim_id, ("approve", "420.00"))
-    return run(claim_id, thread_id, scripted_model(outcome, payout))
+    return run(claim_id, thread_id, scripted_model(outcome, payout), budget=budget)
 
 
 def test_terminal_drains_in_order_and_repeat_is_empty(terminal, capsys):
@@ -104,10 +104,10 @@ def test_rebuild_capped_run_remaining_work_repeat_and_rebuild(terminal, capsys):
 def test_failures_before_and_after_saved_decisions(terminal, capsys):
     limit_queue(terminal, 3)
 
-    def runner(claim_id, thread_id):
+    def runner(claim_id, thread_id, *, budget):
         if claim_id == "CLM-1001":
             raise RuntimeError("Sensitive provider message")
-        reply = scripted_runner(claim_id, thread_id)
+        reply = scripted_runner(claim_id, thread_id, budget=budget)
         if claim_id == "CLM-1002":
             raise RuntimeError("After decision")
         return reply
@@ -126,10 +126,10 @@ def test_failures_before_and_after_saved_decisions(terminal, capsys):
 def test_ctrl_c_prints_partial_totals_and_retries_next_session(terminal, capsys):
     limit_queue(terminal, 3)
 
-    def runner(claim_id, thread_id):
+    def runner(claim_id, thread_id, *, budget):
         if claim_id == "CLM-1002":
             raise KeyboardInterrupt
-        return scripted_runner(claim_id, thread_id)
+        return scripted_runner(claim_id, thread_id, budget=budget)
 
     assert batch.main(runner) == 130
     captured = capsys.readouterr()
@@ -147,7 +147,7 @@ def test_interruption_after_decision_is_counted_and_preserved(terminal, capsys):
     limit_queue(terminal, 1)
     claims = Claims(terminal)
 
-    def runner(claim_id, thread_id):
+    def runner(claim_id, thread_id, *, budget):
         decide_fixture(
             claims, claim_id, DecisionInput.model_validate(decision_payload(thread_id))
         )
@@ -322,7 +322,7 @@ def test_cli_does_not_attach_to_another_database(
 def test_cli_interruption_preserves_the_running_backend(terminal, capsys):
     limit_queue(terminal, 1)
 
-    def interrupt(_claim, _thread):
+    def interrupt(_claim, _thread, *, budget):
         raise KeyboardInterrupt
 
     with local_backend(terminal, scripted_runner, batch.backend_url()) as claims:

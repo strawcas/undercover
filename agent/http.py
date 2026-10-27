@@ -1,12 +1,11 @@
 """Bounded retries for reads and replay-safe backend state operations."""
 
-from collections.abc import Callable
 from http import HTTPStatus
 from time import sleep
 
 import httpx
 
-from agent.execution import Record, check_attempt
+from agent.execution import AttemptBudget
 
 MAX_RETRIES = 2
 RETRY_STATUSES = {
@@ -22,8 +21,9 @@ def request(
     client: httpx.Client,
     method: str,
     path: str,
-    body: Record | None = None,
-    on_retry: Callable[[int], None] | None = None,
+    body: dict[str, object] | None = None,
+    *,
+    budget: AttemptBudget | None = None,
 ) -> httpx.Response:
     """Retry safe transport operations while leaving financial writes untouched."""
     safe = (
@@ -34,7 +34,8 @@ def request(
     limit = MAX_RETRIES if safe else 0
     attempt = 0
     while True:
-        check_attempt()
+        if budget is not None:
+            budget.check()
         try:
             response = client.request(method, path, json=body)
         except httpx.TransportError:
@@ -43,8 +44,7 @@ def request(
         else:
             transient = response.status_code in RETRY_STATUSES
             if not transient or attempt >= limit:
+                response.extensions["undercover_retries"] = attempt
                 return response
-        if on_retry is not None:
-            on_retry(attempt + 1)
         sleep(0.25 * 2**attempt)
         attempt += 1

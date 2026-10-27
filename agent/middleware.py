@@ -1,23 +1,23 @@
 """Provider retries and per-attempt limits inside LangChain's existing agent."""
 
 from collections.abc import Callable
+from threading import Event
 from typing import Any
 
 import httpx
 from langchain.agents.middleware import (
     AgentMiddleware,
     AgentState,
-    ModelCallLimitMiddleware,
     ModelRequest,
     ModelResponse,
     ModelRetryMiddleware,
 )
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, RemoveMessage, ToolMessage
 from langgraph.runtime import Runtime
 from ollama import ResponseError
 from openai import APIConnectionError, APIStatusError
 
-from agent.execution import check_attempt
+from agent.execution import AgentRunError, AttemptBudget, QueueStopped
 from agent.http import MAX_RETRIES, RETRY_STATUSES
 
 
@@ -35,7 +35,11 @@ def transient_failure(error: Exception) -> bool:
 
 
 class ProviderRetry(ModelRetryMiddleware):
-    def __init__(self, on_retry: Callable[[int], None] | None = None):
+    def __init__(
+        self,
+        on_retry: Callable[[int], None] | None = None,
+        budget: AttemptBudget | None = None,
+    ):
         super().__init__(
             max_retries=MAX_RETRIES,
             retry_on=transient_failure,
@@ -45,6 +49,7 @@ class ProviderRetry(ModelRetryMiddleware):
             jitter=False,
         )
         self.on_retry = on_retry
+        self.budget = budget
 
     def wrap_model_call(
         self, request: ModelRequest, handler: Callable[[ModelRequest], ModelResponse]
@@ -53,7 +58,8 @@ class ProviderRetry(ModelRetryMiddleware):
 
         def observed(current: ModelRequest) -> ModelResponse:
             nonlocal calls
-            check_attempt()
+            if self.budget is not None:
+                self.budget.check()
             if calls and self.on_retry is not None:
                 self.on_retry(calls)
             calls += 1
@@ -62,16 +68,41 @@ class ProviderRetry(ModelRetryMiddleware):
         return super().wrap_model_call(request, observed)
 
 
-class ClaimBudget(AgentMiddleware):
-    def before_model(self, state: AgentState, runtime: Runtime) -> None:
-        check_attempt()
+class QueueContext(AgentMiddleware):
+    """Bound framework history and calls across explicit completion continuations."""
 
+    def __init__(self, stopping: Event, model_calls: int):
+        self.stopping = stopping
+        self.model_calls = model_calls
+        self.calls = 0
 
-def claim_middleware(
-    on_retry: Callable[[int], None],
-) -> list[AgentMiddleware[Any, Any, Any]]:
-    return [
-        ClaimBudget(),
-        ProviderRetry(on_retry),
-        ModelCallLimitMiddleware(run_limit=40, exit_behavior="error"),
-    ]
+    def before_model(
+        self, state: AgentState, runtime: Runtime
+    ) -> dict[str, Any] | None:
+        if self.stopping.is_set():
+            raise QueueStopped
+        if self.calls >= self.model_calls:
+            raise AgentRunError("Queue model-call limit exceeded.")
+        self.calls += 1
+        history = state["messages"]
+        snapshots = [
+            message
+            for message in history
+            if isinstance(message, ToolMessage)
+            and message.name == "list_waiting_claims"
+        ]
+        if len(snapshots) <= 1:
+            return None
+        call_id = snapshots[-1].tool_call_id
+        start = next(
+            index
+            for index, message in enumerate(history)
+            if isinstance(message, AIMessage)
+            and any(call["id"] == call_id for call in message.tool_calls)
+        )
+        removed = [
+            RemoveMessage(id=message.id)
+            for message in history[1:start]
+            if message.id is not None
+        ]
+        return {"messages": removed} if removed else None

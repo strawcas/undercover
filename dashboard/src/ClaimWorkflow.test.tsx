@@ -182,7 +182,7 @@ it("explains how to retry a failed pass without offering a manual start", async 
     },
   ]);
   render(<ClaimReader claimId="CLM-1001" />);
-  expect(await screen.findByText("Assessment will be retried")).toBeDefined();
+  expect(await screen.findByText("Assessment can be retried")).toBeDefined();
   expect(screen.getByText(/The queue can retry it once/)).toBeDefined();
   expect(screen.getByText(/Agent run failed/)).toBeDefined();
   expect(screen.queryByRole("button", { name: "Run agent" })).toBeNull();

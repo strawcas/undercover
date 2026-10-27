@@ -107,7 +107,15 @@ class Counts(BaseModel):
     waiting_remaining: int = Field(default=0, ge=0)
 
 
-class Attempt(BaseModel):
+class ClaimResult(BaseModel):
+    claim_status: State
+    failed_attempts: int
+    outcome: Outcome | None
+    payout: str | None
+    payment_status: PaymentStatus
+
+
+class Attempt(ClaimResult):
     run_id: str
     claim_id: str
     thread_id: str
@@ -117,11 +125,6 @@ class Attempt(BaseModel):
     deadline_at: str
     finished_at: str | None
     error: str | None
-    claim_status: State
-    failed_attempts: int
-    outcome: Outcome | None
-    payout: str | None
-    payment_status: PaymentStatus
 
 
 class CompletionCheck(BaseModel):
@@ -159,3 +162,21 @@ class Run(BaseModel):
 
 class CurrentRun(BaseModel):
     run: Run | None
+
+
+class StoredRun(BaseModel):
+    """Persisted coordinator state, excluding the live claim and attempt views."""
+
+    run_id: str
+    scope: Scope
+    status: RunStatus
+    claim_limit: int
+    snapshot_claim_ids: list[str]
+    admitted_claim_ids: list[str]
+    started_at: str
+    finished_at: str | None
+    todos: list[Todo]
+    summary: Summary | None
+    counts: Counts = Field(default_factory=Counts)
+    final_check: CompletionCheck | None = None
+    finish_input: RunFinishInput | None = None

@@ -29,7 +29,7 @@ def test_explicit_snapshot_finishes_and_backend_restarts_stay_idle(
     original = repository.record("claim", "CLM-1001")
     started = []
 
-    def decide(claim_id, thread_id):
+    def decide(claim_id, thread_id, *, budget):
         started.append(claim_id)
         active = [row for row in claims.queue() if row["run_active"]]
         assert len(active) == 1
@@ -99,9 +99,9 @@ def test_explicit_empty_queue_records_zero_work_and_later_arrivals_wait(
     with connected_client(app, monkeypatch) as api:
         assert api.get("/api/agent-runs/current").json() == {"run": None}
         result = queue_agent.run_queue(
-            {"mode": "all"}, lambda c, _t: attempted.append(c) or "Complete"
+            {"mode": "all"}, lambda c, _t, *, budget: attempted.append(c) or "Complete"
         )
-        assert result["counts"]["worked"] == 0
+        assert result.counts.worked == 0
         repository.add_claim(
             repository.record("claim", "CLM-1001") | {"claim_id": "TEST-LATER"}
         )
@@ -117,7 +117,7 @@ def test_explicit_failure_is_retried_within_the_same_run(repository, monkeypatch
     claims = Claims(repository)
     attempted = []
 
-    def decide(claim_id, thread_id):
+    def decide(claim_id, thread_id, *, budget):
         attempted.append(claim_id)
         if claim_id == "CLM-1001" and attempted.count(claim_id) == 1:
             raise RuntimeError("Synthetic provider failure")
@@ -164,7 +164,7 @@ def test_slow_shutdown_fences_the_attempt_before_releasing_ownership(
     late = Event()
     claims = Claims(repository)
 
-    def slow_runner(claim_id, thread_id):
+    def slow_runner(claim_id, thread_id, *, budget):
         entered.set()
         assert finish.wait(15)
         with pytest.raises(ClaimError, match="no longer active"):
@@ -193,7 +193,7 @@ def test_slow_shutdown_fences_the_attempt_before_releasing_ownership(
         assert late.wait(5)
         command.join(timeout=5)
     assert not command.is_alive()
-    assert results[0]["status"] == "interrupted"
+    assert results[0].status == "interrupted"
     assert claims.detail("CLM-1001")["decision"] is None
     assert claims.events("CLM-1002") == []
     with DatabaseOwner(repository.path):
@@ -204,7 +204,7 @@ def test_failed_claim_does_not_block_the_next(repository, client, monkeypatch):
     claims = Claims(repository)
     started = []
 
-    def decide(claim_id, thread_id):
+    def decide(claim_id, thread_id, *, budget):
         started.append(claim_id)
         if claim_id == "CLM-1001":
             raise RuntimeError("Synthetic failure")
@@ -218,15 +218,15 @@ def test_failed_claim_does_not_block_the_next(repository, client, monkeypatch):
     assert started == ["CLM-1001", "CLM-1002", "CLM-1001"]
     assert claims.detail("CLM-1001")["status"] == "handler_review"
     assert claims.detail("CLM-1002")["status"] == "awaiting_sign_off"
-    assert result["counts"]["worked"] == 2
-    assert result["counts"]["assessment_attempts"] == 3
+    assert result.counts.worked == 2
+    assert result.counts.assessment_attempts == 3
 
 
 def test_keyboard_interrupt_records_a_recoverable_failure(repository):
     claims = Claims(repository)
     thread = claims.start("CLM-1001")
 
-    def interrupt(_claim, _thread):
+    def interrupt(_claim, _thread, *, budget):
         raise KeyboardInterrupt
 
     with pytest.raises(KeyboardInterrupt):
@@ -251,7 +251,7 @@ def test_only_an_explicit_capped_run_admits_claims(repository, monkeypatch):
     claims = Claims(repository)
     started = []
 
-    def decide(claim_id, thread_id):
+    def decide(claim_id, thread_id, *, budget):
         started.append(claim_id)
         decide_fixture(
             claims, claim_id, DecisionInput.model_validate(decision_payload(thread_id))

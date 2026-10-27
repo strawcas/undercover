@@ -2,11 +2,12 @@
 
 from http import HTTPStatus
 
-from agent.execution import Execution, Runner
+from agent.execution import AttemptBudget, Execution, Runner
 from agent.main import AgentRunError, run
 from backend.claims import Claims
+from backend.diagnostics import diagnose, preserve_primary
 from backend.errors import ClaimError
-from backend.harness_models import RunFinishInput
+from backend.harness_models import Run, RunFinishInput
 from backend.runs import Runs
 
 
@@ -30,30 +31,48 @@ def reconcile_execution(claims: Claims, execution: Execution) -> None:
                 detail="Queue execution ended before HTTP cleanup completed.",
             ),
         )
-    execution.result = current
+    execution.result = Run.model_validate(current)
 
 
-def default_runner(claim_id: str, thread_id: str) -> str:
-    return run(claim_id, thread_id)
+def default_runner(
+    claim_id: str, thread_id: str, *, budget: AttemptBudget | None = None
+) -> str:
+    return run(claim_id, thread_id, budget=budget)
 
 
 def execute(claims: Claims, claim_id: str, thread_id: str, runner: Runner) -> None:
     """Finalize a directly invoked claim helper without interpreting its prose."""
     try:
-        runner(claim_id, thread_id)
+        runner(claim_id, thread_id, budget=AttemptBudget())
     except AgentRunError as error:
-        claims.finish(claim_id, thread_id, str(error))
+        finish_failed(claims, claim_id, thread_id, str(error), error)
     except Exception as error:
-        claims.finish(
+        reference = diagnose("Assess claim directly", error)
+        finish_failed(
+            claims,
             claim_id,
             thread_id,
-            f"Agent run failed ({type(error).__name__}). "
-            "Check the model configuration and retry.",
+            f"Agent run failed ({type(error).__name__}). {reference}.",
+            error,
         )
     except KeyboardInterrupt:
-        claims.finish(
-            claim_id, thread_id, "Assessment interrupted. Retry in a new session."
-        )
+        with preserve_primary("Finalize interrupted direct assessment"):
+            claims.finish(
+                claim_id,
+                thread_id,
+                "Assessment interrupted. Retry eligible work with uv run -m agent.",
+            )
         raise
     else:
         claims.finish(claim_id, thread_id)
+
+
+def finish_failed(
+    claims: Claims, claim_id: str, thread_id: str, detail: str, primary: Exception
+) -> None:
+    try:
+        claims.finish(claim_id, thread_id, detail)
+    except Exception as cleanup_error:
+        reference = diagnose("Finalize direct assessment", cleanup_error)
+        primary.add_note(f"Assessment cleanup also failed. {reference}.")
+        raise AgentRunError(detail) from primary

@@ -9,8 +9,7 @@ from ollama import ResponseError
 
 from agent import http as agent_http
 from agent import main, queue
-from agent import tools as claim_tools
-from agent.execution import AgentRunError, Execution, QueueStopped
+from agent.execution import AgentRunError, AttemptBudget, Execution, QueueStopped
 from agent.financial import write
 from agent.invocation import invoke_helper
 from agent.middleware import ProviderRetry
@@ -18,6 +17,8 @@ from agent.tests.queue_stubs import ScriptedQueueModel
 from agent.tests.stubs import api_client, scripted_model
 from agent.tools import ClaimTools
 from backend.claims import Claims
+from backend.harness_models import Attempt
+from backend.runs import Runs
 from backend.tests.conftest import begin_claim, begin_decision_claim, decision_payload
 from backend.worker import reconcile_execution
 
@@ -106,21 +107,24 @@ def test_provider_retry_can_recover(monkeypatch):
     assert len(calls) == 2
 
 
-def test_helper_deadline_and_cancellation_do_not_wait_for_a_hung_provider():
+def test_helper_deadline_and_cancellation_do_not_wait_for_a_hung_provider(repository):
     release = Event()
-    entry = dict(
-        claim_id="TEST",
-        thread_id="thread",
-        deadline_at=(datetime.now(UTC) - timedelta(seconds=1)).isoformat(),
-    )
+    thread = begin_claim(repository)
+    current = Runs(repository).current()
+    assert current is not None
+    entry = Attempt.model_validate(current["attempts"][0])
+    assert entry.thread_id == thread
+    entry.deadline_at = (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
     try:
         with pytest.raises(AgentRunError, match="deadline"):
-            invoke_helper(lambda _c, _t: str(release.wait(2)), entry, Execution())
+            invoke_helper(
+                lambda _c, _t, *, budget: str(release.wait(2)), entry, Execution()
+            )
         context = Execution()
         context.cancel_active.set()
-        entry["deadline_at"] = (datetime.now(UTC) + timedelta(seconds=10)).isoformat()
+        entry.deadline_at = (datetime.now(UTC) + timedelta(seconds=10)).isoformat()
         with pytest.raises(QueueStopped):
-            invoke_helper(lambda _c, _t: "", entry, context)
+            invoke_helper(lambda _c, _t, *, budget: "", entry, context)
     finally:
         release.set()
 
@@ -134,8 +138,8 @@ def test_http_cleanup_failure_is_reconciled_before_ownership_release(
     context.stopping.set()
     reconcile_execution(Claims(repository), context)
     assert context.result is not None
-    assert context.result["status"] == "interrupted"
-    assert context.result["counts"]["failed_assessments"] == 1
+    assert context.result.status == "interrupted"
+    assert context.result.counts.failed_assessments == 1
     assert Claims(repository).detail("CLM-1001")["run_active"] is False
     assert (
         client.post(
@@ -153,9 +157,11 @@ def test_queue_history_is_bounded_over_a_full_workload(client, repository, monke
     monkeypatch.setattr(main, "backend", lambda: api_client(client))
     planner = ScriptedQueueModel()
     result = queue.run_queue(
-        {"mode": "all"}, lambda c, t: main.run(c, t, scripted_model()), planner
+        {"mode": "all"},
+        lambda c, t, *, budget: main.run(c, t, scripted_model(), budget=budget),
+        planner,
     )
-    assert result["counts"]["worked"] == 25
+    assert result.counts.worked == 25
     assert planner.peak_messages < 20
 
 
@@ -185,10 +191,9 @@ def test_financial_write_is_retried_only_after_confirming_no_commit(client, repo
 
 
 def test_tool_limit_is_an_explicit_assessment_failure(client, repository, monkeypatch):
-    monkeypatch.setattr(claim_tools, "MAX_TOOL_CALLS", 1)
     thread = begin_claim(repository)
     with api_client(client) as transport:
-        tools = ClaimTools(transport, "CLM-1001", thread)
+        tools = ClaimTools(transport, "CLM-1001", thread, AttemptBudget(tool_calls=1))
         tools.call("Read", "GET", tools.path)
         with pytest.raises(AgentRunError, match="tool-call limit"):
             tools.call("Read", "GET", tools.path)
@@ -214,12 +219,8 @@ def test_lost_safe_mutation_response_replays_without_duplicate_state(
     )
     result = queue.run_queue(
         {"mode": "claim", "claim_id": "CLM-1001"},
-        lambda c, t: main.run(c, t, scripted_model()),
+        lambda c, t, *, budget: main.run(c, t, scripted_model(), budget=budget),
     )
-    assert (
-        result["counts"]["assessment_attempts"]
-        == result["counts"]["simulated_payments"]
-        == 1
-    )
-    assert result["counts"]["failed_assessments"] == 0
+    assert result.counts.assessment_attempts == result.counts.simulated_payments == 1
+    assert result.counts.failed_assessments == 0
     assert len(client.get("/api/claims/CLM-1001/evidence").json()["reads"]) == 4

@@ -11,11 +11,13 @@ from threading import current_thread, main_thread
 
 import httpx
 
-from agent.execution import Execution, Record, Runner
+from agent.execution import AttemptResult, Execution, Runner
 from agent.main import AgentRunError
 from agent.queue import run_queue
+from backend.claim_models import ClaimDetail
 from backend.config import backend_url, database_path, run_scope
-from backend.harness_models import Counts
+from backend.diagnostics import preserve_primary
+from backend.harness_models import Counts, Run
 from backend.local import agent_backend
 from backend.storage import Store
 from backend.worker import default_runner, reconcile_execution
@@ -57,36 +59,38 @@ def arguments(argv: Sequence[str]) -> argparse.Namespace:
 class Report:
     """Print each attempt's stored outcome and final backend-derived totals."""
 
-    def record(self, result: Record) -> None:
-        entry, detail = result["attempt"], result["claim"]
-        decision = detail["decision"]
+    def record(self, result: AttemptResult) -> None:
+        entry, detail = result.attempt, result.claim
+        decision = detail.decision
         if decision:
             self._decision(detail)
         else:
-            print(f"{detail['claim_id']} FAILED - No decision recorded", flush=True)
-        if entry["error"]:
-            print(f"Error: {entry['error']}", flush=True)
+            print(f"{detail.claim_id} FAILED - No decision recorded", flush=True)
+        if entry.error:
+            print(f"Error: {entry.error}", flush=True)
 
     @staticmethod
-    def _decision(detail: Record) -> None:
-        decision = detail["decision"]
+    def _decision(detail: ClaimDetail) -> None:
+        decision = detail.decision
+        if decision is None:
+            return
         payment = "No payment recorded"
-        if detail["status"] == "awaiting_sign_off":
+        if detail.status == "awaiting_sign_off":
             payment = "Waiting for sign-off"
-        elif detail["payment"]:
+        elif detail.payment:
             payment = "Simulated payment recorded"
         print(
-            f"{detail['claim_id']} {decision['outcome'].upper()} "
-            f"${Decimal(decision['payout']):,.2f} - {payment}",
+            f"{detail.claim_id} {decision.outcome.upper()} "
+            f"${Decimal(decision.payout):,.2f} - {payment}",
             flush=True,
         )
-        print(f"Explanation: {decision['explanation']}", flush=True)
-        print(f"Policy sections: {', '.join(decision['policy_sections'])}", flush=True)
-        print(f"Manual sections: {', '.join(decision['manual_sections'])}", flush=True)
+        print(f"Explanation: {decision.explanation}", flush=True)
+        print(f"Policy sections: {', '.join(decision.policy_sections)}", flush=True)
+        print(f"Manual sections: {', '.join(decision.manual_sections)}", flush=True)
 
     @staticmethod
-    def summary(result: Record | None) -> None:
-        counts = dict(result["counts"]) if result else Counts().model_dump()
+    def summary(result: Run | None) -> None:
+        counts = result.counts.model_dump() if result else Counts().model_dump()
         counts["decided"] = counts["approved"] + counts["declined"] + counts["referred"]
         print(
             " | ".join(f"{label}: {counts[key]}" for label, key in TOTALS), flush=True
@@ -125,11 +129,12 @@ def main(runner: Runner = default_runner, argv: Sequence[str] = ()) -> int:
                     result = run_queue(scope, runner, execution=context)
             finally:
                 if claims is not None:
-                    reconcile_execution(claims, context)
+                    with preserve_primary("Reconcile terminal run"):
+                        reconcile_execution(claims, context)
         if (
-            result["status"] != "completed"
-            or result["counts"]["handler_review"]
-            or result["counts"]["unpaid_approvals"]
+            result.status != "completed"
+            or result.counts.handler_review
+            or result.counts.unpaid_approvals
         ):
             code = 1
     except KeyboardInterrupt:

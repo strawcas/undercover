@@ -15,7 +15,7 @@ from backend.tests.conftest import decide_fixture, decision_payload
 def test_start_run_and_completion(repository, client, monkeypatch):
     claims = Claims(repository)
 
-    def runner(claim_id, thread_id):
+    def runner(claim_id, thread_id, *, budget):
         assert claims.events(claim_id)[0]["status"] == "started"
         assert claims.detail(claim_id)["run_active"]
         decide_fixture(
@@ -31,11 +31,11 @@ def test_start_run_and_completion(repository, client, monkeypatch):
     detail = claims.detail("CLM-1001")
     assert detail["status"] == "decided"
     assert detail["run_active"] is False
-    assert result["counts"]["worked"] == result["counts"]["simulated_payments"] == 1
+    assert result.counts.worked == result.counts.simulated_payments == 1
 
 
 def test_failed_run_retry_and_redacted_error(repository, client, monkeypatch):
-    def failing(_claim_id, _thread_id):
+    def failing(_claim_id, _thread_id, *, budget):
         raise RuntimeError("secret provider details")
 
     claims = Claims(repository)
@@ -46,15 +46,15 @@ def test_failed_run_retry_and_redacted_error(repository, client, monkeypatch):
     events = claims.events("CLM-1001")
     assert events[-1]["status"] == "failed"
     assert "secret" not in str(events)
-    assert result["counts"]["worked"] == 1
-    assert result["counts"]["assessment_attempts"] == 2
-    assert len({entry["thread_id"] for entry in result["attempts"]}) == 2
+    assert result.counts.worked == 1
+    assert result.counts.assessment_attempts == 2
+    assert len({entry.thread_id for entry in result.attempts}) == 2
 
 
 def test_finished_without_decision(repository):
     claims = Claims(repository)
     thread = claims.start("CLM-1001")
-    worker.execute(claims, "CLM-1001", thread, lambda _c, _t: "No decision")
+    worker.execute(claims, "CLM-1001", thread, lambda _c, _t, *, budget: "No decision")
     assert claims.detail("CLM-1001")["status"] == "waiting"
     assert "No decision" in claims.events("CLM-1001")[-1]["detail"]
 
@@ -88,7 +88,7 @@ def test_restart_recovers_interrupted_work(repository, committed):
 def test_failure_preserves_payment(repository):
     claims = Claims(repository)
 
-    def runner(claim_id, thread_id):
+    def runner(claim_id, thread_id, *, budget):
         decision = DecisionInput.model_validate(
             decision_payload(thread_id, payout="420")
         )
@@ -103,5 +103,5 @@ def test_failure_preserves_payment(repository):
 
 
 def test_default_runner(monkeypatch):
-    monkeypatch.setattr(worker, "run", lambda c, t: f"{c}/{t}")
+    monkeypatch.setattr(worker, "run", lambda c, t, **_kwargs: f"{c}/{t}")
     assert worker.default_runner("claim", "thread") == "claim/thread"

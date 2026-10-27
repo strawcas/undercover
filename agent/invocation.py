@@ -7,31 +7,30 @@ from time import monotonic
 
 from agent.execution import (
     AgentRunError,
+    AttemptBudget,
     Execution,
     QueueStopped,
-    Record,
     Runner,
-    attempt_budget,
 )
+from backend.harness_models import Attempt
 
 
-def invoke_helper(runner: Runner, entry: Record, execution: Execution) -> str:
+def invoke_helper(runner: Runner, entry: Attempt, execution: Execution) -> str:
     remaining = (
-        datetime.fromisoformat(entry["deadline_at"]) - datetime.now(UTC)
+        datetime.fromisoformat(entry.deadline_at) - datetime.now(UTC)
     ).total_seconds()
     deadline = monotonic() + max(0, remaining)
+    budget = AttemptBudget(deadline=deadline, cancelled=execution.cancel_active)
+    budget.check()
     future: Future[str] = Future()
 
     def invoke():
-        token = attempt_budget.set((deadline, execution.cancel_active))
         try:
-            future.set_result(runner(entry["claim_id"], entry["thread_id"]))
+            future.set_result(runner(entry.claim_id, entry.thread_id, budget=budget))
         except BaseException as failure:
             future.set_exception(failure)
-        finally:
-            attempt_budget.reset(token)
 
-    Thread(target=invoke, name=f"claim-{entry['claim_id']}", daemon=True).start()
+    Thread(target=invoke, name=f"claim-{entry.claim_id}", daemon=True).start()
     while True:
         if execution.cancel_active.is_set():
             raise QueueStopped

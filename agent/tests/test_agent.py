@@ -116,7 +116,12 @@ def test_truncated_response_has_actionable_failure(
     llm = StubModel(messages=iter(replies))
     claims = Claims(repository)
     thread = begin_claim(repository)
-    execute(claims, "CLM-1001", thread, lambda c, t: main.run(c, t, llm))
+    execute(
+        claims,
+        "CLM-1001",
+        thread,
+        lambda c, t, *, budget: main.run(c, t, llm, budget=budget),
+    )
     detail = claims.detail("CLM-1001")
     assert detail["status"] == ("decided" if saved else "waiting")
     assert detail["run_active"] is False
@@ -126,6 +131,9 @@ def test_truncated_response_has_actionable_failure(
     assert event["status"] == "failed"
     assert "context or generation limit" in event["detail"]
     assert "OLLAMA_NUM_CTX" in event["detail"]
+    assert "uv run -m agent" in event["detail"]
+    assert "Two failed assessments require handler review" in event["detail"]
+    assert "restart the backend" not in event["detail"]
 
 
 @pytest.mark.parametrize(
@@ -143,7 +151,12 @@ def test_ollama_failure_is_actionable_and_redacted(
     monkeypatch.setattr(StubModel, "_generate", failed_generation)
     claims = Claims(repository)
     thread = begin_claim(repository)
-    execute(claims, "CLM-1001", thread, lambda c, t: main.run(c, t, scripted_model()))
+    execute(
+        claims,
+        "CLM-1001",
+        thread,
+        lambda c, t, *, budget: main.run(c, t, scripted_model(), budget=budget),
+    )
     detail = claims.detail("CLM-1001")
     assert detail["status"] == "waiting"
     assert detail["decision"] is None
@@ -151,6 +164,9 @@ def test_ollama_failure_is_actionable_and_redacted(
     events = claims.events("CLM-1001")
     assert events[-1]["status"] == "failed"
     assert message in events[-1]["detail"]
+    assert "uv run -m agent" in events[-1]["detail"]
+    assert "Two failed assessments require handler review" in events[-1]["detail"]
+    assert "restart the backend" not in events[-1]["detail"]
     assert "secret" not in str(events)
 
 

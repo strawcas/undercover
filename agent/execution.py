@@ -1,18 +1,22 @@
 """Local execution state shared with the queue's HTTP tools."""
 
 from collections.abc import Callable
-from contextlib import contextmanager
-from contextvars import ContextVar
 from dataclasses import dataclass, field
 from threading import Event
 from time import monotonic
-from typing import Any
+from typing import Protocol
 
-Record = dict[str, Any]
-Runner = Callable[[str, str], str]
+from backend.claim_models import ClaimDetail
+from backend.harness_models import Attempt, Run
 
 
-def ignore_result(_result: Record) -> None:
+@dataclass(frozen=True)
+class AttemptResult:
+    attempt: Attempt
+    claim: ClaimDetail
+
+
+def ignore_result(_result: AttemptResult) -> None:
     """Leave reporting to the dashboard when no terminal observer is attached."""
 
 
@@ -20,8 +24,8 @@ def ignore_result(_result: Record) -> None:
 class Execution:
     stopping: Event = field(default_factory=Event)
     cancel_active: Event = field(default_factory=Event)
-    on_result: Callable[[Record], None] = ignore_result
-    result: Record | None = None
+    on_result: Callable[[AttemptResult], None] = ignore_result
+    result: Run | None = None
     run_id: str | None = None
 
 
@@ -33,28 +37,26 @@ class AgentRunError(Exception):
     """An actionable failure safe to show in claim activity."""
 
 
-attempt_budget: ContextVar[tuple[float, Event] | None] = ContextVar(
-    "attempt_budget", default=None
-)
 DEFAULT_ATTEMPT_SECONDS = 600
 
 
-def check_attempt() -> None:
-    budget = attempt_budget.get()
-    if budget is not None:
-        deadline, cancelled = budget
-        if cancelled.is_set():
+@dataclass
+class AttemptBudget:
+    deadline: float = field(
+        default_factory=lambda: monotonic() + DEFAULT_ATTEMPT_SECONDS
+    )
+    cancelled: Event = field(default_factory=Event)
+    model_calls: int = 40
+    tool_calls: int = 80
+
+    def check(self) -> None:
+        if self.cancelled.is_set():
             raise QueueStopped
-        if monotonic() >= deadline:
+        if monotonic() >= self.deadline:
             raise AgentRunError("Assessment deadline exceeded.")
 
 
-@contextmanager
-def default_budget():
-    token = attempt_budget.set(
-        attempt_budget.get() or (monotonic() + DEFAULT_ATTEMPT_SECONDS, Event())
-    )
-    try:
-        yield
-    finally:
-        attempt_budget.reset(token)
+class Runner(Protocol):
+    def __call__(
+        self, claim_id: str, thread_id: str, /, *, budget: AttemptBudget
+    ) -> str: ...

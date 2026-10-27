@@ -25,7 +25,7 @@ os.environ.pop("UNDERCOVER_MAX_CLAIMS", None)
 attempts: dict[str, int] = {}
 
 
-def scripted_runner(claim_id: str, thread_id: str) -> str:
+def scripted_runner(claim_id: str, thread_id: str, *, budget) -> str:
     time.sleep(1.2)
     attempts[claim_id] = attempts.get(claim_id, 0) + 1
     if claim_id == "CLM-1001" and attempts[claim_id] == 1:
@@ -41,7 +41,7 @@ def scripted_runner(claim_id: str, thread_id: str) -> str:
         "CLM-1004": ("refer", "0"),
     }
     outcome, payout = outcomes.get(claim_id, ("approve", "420.00"))
-    return run(claim_id, thread_id, scripted_model(outcome, payout))
+    return run(claim_id, thread_id, scripted_model(outcome, payout), budget=budget)
 
 
 def wait_for_command(gate: Path) -> None:

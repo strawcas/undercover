@@ -7,6 +7,7 @@ from pathlib import Path
 from tempfile import mkstemp
 
 from backend.config import ROOT, database_path
+from backend.diagnostics import preserve_primary
 from backend.ownership import DatabaseOwner
 from backend.storage import Store
 
@@ -26,7 +27,8 @@ def rebuild(path: Path, data_dir: Path = ROOT / "data") -> int:
             count = len(fresh.records("claim"))
             os.replace(replacement, path)
         finally:
-            replacement.unlink(missing_ok=True)
+            with preserve_primary("Remove temporary rebuild database"):
+                replacement.unlink(missing_ok=True)
     return count
 
 

@@ -7,6 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from backend.diagnostics import preserve_primary
 from backend.harness_storage import migrate
 from backend.models import Claim, Company, Customer, Handler, Policy
 from backend.reference_index import install
@@ -66,7 +67,8 @@ class Store:
                 yield connection
                 connection.commit()
             except Exception:
-                connection.rollback()
+                with preserve_primary("Roll back database transaction"):
+                    connection.rollback()
                 raise
 
     def initialize(self, data_dir: Path = ROOT / "data") -> None:
@@ -100,8 +102,8 @@ class Store:
         self, connection: sqlite3.Connection, data_dir: Path
     ) -> None:
         for key, path in (
-            ("instructions", ROOT / "backend/instructions.md"),
-            ("queue_instructions", ROOT / "backend/queue_instructions.md"),
+            ("instructions", ROOT / "agent/instructions.md"),
+            ("queue_instructions", ROOT / "agent/queue_instructions.md"),
         ):
             connection.execute(
                 "INSERT OR REPLACE INTO records VALUES ('settings', ?, ?)",
@@ -198,7 +200,7 @@ class Store:
             connection,
             "settings",
             "instructions",
-            (ROOT / "backend" / "instructions.md").read_text(encoding="utf-8"),
+            (ROOT / "agent" / "instructions.md").read_text(encoding="utf-8"),
         )
 
     @staticmethod

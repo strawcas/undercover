@@ -2,20 +2,23 @@
 
 import os
 from http import HTTPStatus
+from typing import Any
 
 import httpx
 from dotenv import load_dotenv
 from langchain.agents import create_agent
+from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddleware
 from langchain_core.language_models import BaseChatModel
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from ollama import ResponseError
 from pydantic import SecretStr
 
-from agent.execution import AgentRunError, default_budget
+from agent.execution import AgentRunError, AttemptBudget
 from agent.http import request
-from agent.middleware import claim_middleware
+from agent.middleware import ProviderRetry
 from agent.tools import ClaimTools
+from backend.reference_models import InstructionsResponse
 
 load_dotenv()
 
@@ -83,20 +86,34 @@ def model() -> BaseChatModel:
     )
 
 
-def run(claim_id: str, thread_id: str, llm: BaseChatModel | None = None) -> str:
+def run(
+    claim_id: str,
+    thread_id: str,
+    llm: BaseChatModel | None = None,
+    *,
+    budget: AttemptBudget | None = None,
+) -> str:
     """Run the agent on one claim and return its final reply."""
-    with default_budget(), backend() as client:
-        response = request(client, "GET", "/api/agent-instructions")
+    limits = budget or AttemptBudget()
+    with backend() as client:
+        response = request(client, "GET", "/api/agent-instructions", budget=limits)
         response.raise_for_status()
-        tools = ClaimTools(client, claim_id, thread_id)
+        instructions = InstructionsResponse.model_validate(response.json())
+        tools = ClaimTools(client, claim_id, thread_id, limits)
         tools.event(
             "Read agent instructions", "completed", "Loaded backend instructions."
         )
+        middleware: list[AgentMiddleware[Any, Any, Any]] = [
+            ProviderRetry(tools.model_retry, limits),
+            ModelCallLimitMiddleware(
+                run_limit=limits.model_calls, exit_behavior="error"
+            ),
+        ]
         agent = create_agent(
             llm or model(),
             tools=tools.tools(),
-            system_prompt=response.json()["text"],
-            middleware=claim_middleware(tools.model_retry),
+            system_prompt=instructions.text,
+            middleware=middleware,
         )
         try:
             result = agent.invoke(
@@ -116,9 +133,17 @@ def run(claim_id: str, thread_id: str, llm: BaseChatModel | None = None) -> str:
     if reply.response_metadata.get("done_reason") == "length":
         raise AgentRunError(
             "Ollama stopped at its context or generation limit. Increase "
-            "OLLAMA_NUM_CTX in .env, then restart the backend to retry."
+            "OLLAMA_NUM_CTX in .env. " + retry_advice()
         )
     return reply.text
+
+
+def retry_advice() -> str:
+    return (
+        "After fixing the configuration, run uv run -m agent to retry eligible "
+        "Waiting claims. Two failed assessments require handler review; this "
+        "command cannot retry Handler review claims."
+    )
 
 
 def ollama_failure(status: int) -> str:
@@ -127,15 +152,14 @@ def ollama_failure(status: int) -> str:
         return (
             "Ollama could not find the configured model or API endpoint. Check "
             "MODEL_NAME against ollama list and OLLAMA_BASE_URL, pull the exact "
-            "model tag if needed, then restart the backend to retry."
+            "model tag if needed. " + retry_advice()
         )
     if status == HTTPStatus.BAD_REQUEST:
         return (
             "Ollama rejected the request. Check that the selected model supports "
-            "tool calling and review the Ollama server log, then restart the "
-            "backend to retry."
+            "tool calling and review the Ollama server log. " + retry_advice()
         )
     return (
         f"Ollama request failed (HTTP {status}). Check the Ollama server log "
-        "and available memory, then restart the backend to retry."
+        "and available memory. " + retry_advice()
     )

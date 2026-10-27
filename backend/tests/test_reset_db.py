@@ -102,7 +102,9 @@ def test_rebuild_refuses_a_running_http_backend(repository):
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
-    with local_backend(repository, lambda _c, _t: "Unused", f"http://127.0.0.1:{port}"):
+    with local_backend(
+        repository, lambda _c, _t, *, budget: "Unused", f"http://127.0.0.1:{port}"
+    ):
         before = repository.path.read_bytes()
         with pytest.raises(RuntimeError, match="already in use"):
             rebuild(repository.path)
