@@ -10,6 +10,14 @@ from sqlalchemy.engine import make_url
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def agent_owner_path(path: Path) -> Path:
+    return path.with_name(path.name + ".agent.db")
+
+
+def checkpoint_owner_path(path: Path) -> Path:
+    return path.with_name(path.name + ".checkpointer.db")
+
+
 def database_identity(path: Path | str) -> str:
     """Identify the configured local database without exposing its path over HTTP."""
     if isinstance(path, str):

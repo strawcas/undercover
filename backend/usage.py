@@ -24,11 +24,16 @@ class Usage(BaseModel):
     tool_calls: int
 
 
-def reserve(store: Store, claim_id: str, request: UsageInput) -> Usage:
+def reserve(
+    store: Store, claim_id: str, request: UsageInput, execution_id: str | None = None
+) -> Usage:
     """Consume budget before an external request, including provider retries."""
     with store.transaction() as connection:
         require_attempt(
-            connection, claim_row(connection, claim_id), str(request.thread_id)
+            connection,
+            claim_row(connection, claim_id),
+            str(request.thread_id),
+            execution_id,
         )
         rows = connection.execute(
             "SELECT kind,request_id FROM attempt_usage WHERE thread_id=?",

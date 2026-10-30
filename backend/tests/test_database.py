@@ -94,6 +94,21 @@ def test_failed_postgres_acquisition_preserves_primary_and_closes_on_unlock_fail
     assert "PRIVATE-" not in caplog.text
 
 
+def test_postgres_owner_exit_preserves_operation_failure(caplog):
+    engine = Mock()
+    engine.connect.return_value.scalar.return_value = True
+    engine.connect.return_value.execute.side_effect = RuntimeError("PRIVATE-CLEANUP")
+    primary = ValueError("Original operation")
+    with (
+        pytest.raises(ValueError, match="Original operation") as error,
+        PostgresOwner(engine),
+    ):
+        raise primary
+    assert error.value is primary
+    assert "Release Postgres database ownership also failed" in str(primary.__notes__)
+    assert "PRIVATE-" not in caplog.text
+
+
 def test_backfill_order_of_older_harness_records(repository):
     with repository.transaction() as connection:
         connection.execute("ALTER TABLE agent_runs DROP COLUMN position")

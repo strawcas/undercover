@@ -12,7 +12,9 @@ from backend.diagnostics import diagnose, preserve_primary
 
 
 @contextmanager
-def claim_trace(claim_id: str, thread_id: str) -> Iterator[list[BaseCallbackHandler]]:
+def claim_trace(
+    claim_id: str, thread_id: str, run_id: str = "", attempt_number: int = 0
+) -> Iterator[list[BaseCallbackHandler]]:
     if not all(
         os.getenv(key) for key in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY")
     ):
@@ -22,7 +24,12 @@ def claim_trace(claim_id: str, thread_id: str) -> Iterator[list[BaseCallbackHand
         handler = CallbackHandler()
         scope = propagate_attributes(
             session_id=f"{claim_id}:{thread_id}",
-            metadata={"claim_id": claim_id, "thread_id": thread_id},
+            metadata={
+                "claim_id": claim_id,
+                "thread_id": thread_id,
+                "run_id": run_id,
+                "attempt_number": attempt_number,
+            },
         )
     except Exception as error:
         diagnose("Initialize claim tracing", error)

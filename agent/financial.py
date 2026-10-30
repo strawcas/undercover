@@ -5,13 +5,13 @@ from decimal import Decimal
 import httpx
 
 from agent.execution import AttemptBudget
-from agent.http import RETRY_STATUSES, request
-from backend.claim_models import ClaimDetail, Decision, Payment
+from agent.http import RETRY_STATUSES, RequestOptions, request
+from backend.claim_models import ClaimDetail
 
 
 def committed(
     claim: ClaimDetail, path: str, body: dict[str, object]
-) -> Decision | Payment | None:
+) -> ClaimDetail | None:
     if path.endswith("/decision"):
         saved = claim.decision
         if (
@@ -23,11 +23,11 @@ def committed(
             )
             and Decimal(saved.payout) == Decimal(str(body["payout"]))
         ):
-            return saved
+            return claim
     else:
         payment = claim.payment
         if payment and Decimal(payment.amount) == Decimal(str(body["amount"])):
-            return payment
+            return claim
     return None
 
 
@@ -50,7 +50,9 @@ def write(
                 return response
         except httpx.TransportError as error:
             failure = error
-        stored = request(client, "GET", claim_path, budget=budget)
+        stored = request(
+            client, "GET", claim_path, options=RequestOptions(budget=budget)
+        )
         stored.raise_for_status()
         claim = ClaimDetail.model_validate(stored.json())
         saved = committed(claim, path, body)

@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, JsonValue
 
 from agent.execution import AgentRunError, AttemptBudget
 from agent.financial import write
-from agent.http import request
+from agent.http import RequestOptions, request
 from backend.diagnostics import diagnose
 from backend.payouts import Benefit, PayoutLine
 from backend.usage import Usage
@@ -43,6 +43,7 @@ class ClaimTools:
         self.budget = budget or AttemptBudget()
         self.calls = 0
         self.lock = Lock()
+        self.usage = Usage(model_calls=0, tool_calls=0)
 
     def event(self, action: str, status: str, detail: str) -> None:
         try:
@@ -79,12 +80,13 @@ class ClaimTools:
                 "kind": kind,
                 "limit": limit,
             },
-            budget=self.budget,
+            options=RequestOptions(budget=self.budget),
         )
         if response.status_code == HTTPStatus.CONFLICT:
             raise AgentRunError(response.json()["detail"])
         response.raise_for_status()
-        return Usage.model_validate(response.json())
+        self.usage = Usage.model_validate(response.json())
+        return self.usage
 
     def call(
         self, action: str, method: str, path: str, body: dict[str, object] | None = None
@@ -104,7 +106,7 @@ class ClaimTools:
                 method,
                 path,
                 body,
-                budget=self.budget,
+                options=RequestOptions(budget=self.budget),
             )
             retries = response.extensions.get("undercover_retries", 0)
             if retries:

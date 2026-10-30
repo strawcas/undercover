@@ -91,8 +91,13 @@ class Store:
 
     @contextmanager
     def connect(self):
-        with self.slots, self.engine.connect() as raw:
-            yield Connection(raw)
+        with self.slots:
+            raw = self.engine.connect()
+            try:
+                yield Connection(raw)
+            finally:
+                with preserve_primary("Close database connection"):
+                    raw.close()
 
     @contextmanager
     def transaction(self):

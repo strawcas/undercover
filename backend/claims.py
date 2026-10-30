@@ -4,6 +4,8 @@ import json
 from decimal import Decimal
 from typing import Any
 
+from pydantic import ValidationError
+
 from backend.attempt_guard import require_attempt
 from backend.claim_records import append_event, claim_row, now, start_claim
 from backend.database import Connection, Row
@@ -17,8 +19,9 @@ from backend.storage import Store
 class Claims:
     """Use the store for claim context and atomic financial changes."""
 
-    def __init__(self, store: Store):
+    def __init__(self, store: Store, execution_id: str | None = None):
         self.store = store
+        self.execution_id = execution_id
 
     def detail(self, claim_id: str) -> dict[str, Any]:
         with self.store.connect() as connection:
@@ -134,12 +137,25 @@ class Claims:
         state = "awaiting_sign_off" if over_limit else "decided"
         with self.store.transaction() as connection:
             row = claim_row(connection, claim_id)
+            if row["decision"]:
+                saved = row["decision_request"] or row["decision"]
+                fields = json.loads(saved)
+                fields = {
+                    key: fields[key]
+                    for key in DecisionInput.model_fields
+                    if key in fields
+                }
+                try:
+                    matching = DecisionInput.model_validate(fields) == decision
+                except ValidationError:
+                    matching = False
+                if not matching:
+                    raise ClaimError(409, "The claim already has a different decision.")
+                return self.detail(claim_id)
             if not row["active"] or row["thread_id"] != decision.thread_id:
                 raise ClaimError(409, "The decision must belong to the active run.")
-            if row["decision"]:
-                raise ClaimError(409, "The claim already has a decision.")
             if row["run_id"]:
-                require_attempt(connection, row, decision.thread_id)
+                require_attempt(connection, row, decision.thread_id, self.execution_id)
                 result.update(decision_versions(connection, claim_id, decision))
             else:
                 result.update(
@@ -148,8 +164,15 @@ class Claims:
                     claims_manual_version=None,
                 )
             connection.execute(
-                "UPDATE claims SET decision=?, payout_cents=?, state=? WHERE id=?",
-                (json.dumps(result), payout, state, claim_id),
+                "UPDATE claims SET decision=?, payout_cents=?, state=?, "
+                "decision_request=? WHERE id=?",
+                (
+                    json.dumps(result),
+                    payout,
+                    state,
+                    decision.model_dump_json(),
+                    claim_id,
+                ),
             )
             append_event(
                 connection,
@@ -164,11 +187,16 @@ class Claims:
                     ),
                 ),
             )
-        return result
+        return self.detail(claim_id)
 
     def validate_thread(self, claim_id: str, thread_id: str) -> None:
         with self.store.connect() as connection:
-            require_attempt(connection, claim_row(connection, claim_id), thread_id)
+            require_attempt(
+                connection,
+                claim_row(connection, claim_id),
+                thread_id,
+                self.execution_id,
+            )
 
     def sign_off(self, claim_id: str, handler_id: str) -> dict[str, Any]:
         handlers = self.store.record("settings", "handlers")
@@ -188,7 +216,7 @@ class Claims:
                 "created_at": now(),
             }
             connection.execute(
-                "UPDATE claims SET sign_off=?, state='decided' WHERE id=?",
+                "UPDATE claims SET sign_off=?, state='in_progress' WHERE id=?",
                 (json.dumps(result), claim_id),
             )
             append_event(
@@ -211,16 +239,24 @@ class Claims:
         )
         with self.store.transaction() as connection:
             row = claim_row(connection, claim_id)
+            if row["payment"]:
+                if cents(amount) != row["payout_cents"] or (
+                    thread_id and thread_id != row["thread_id"]
+                ):
+                    raise ClaimError(409, "Payment conflicts with the recorded payout.")
+                return self.detail(claim_id)
             if thread_id:
-                require_attempt(connection, row, thread_id)
+                require_attempt(connection, row, thread_id, self.execution_id)
             self._check_payment(row, amount, limit)
             result = {
                 "amount": dollars(cents(amount)),
                 "created_at": now(),
                 "simulated": True,
+                "sign_off": json.loads(row["sign_off"]) if row["sign_off"] else None,
             }
             connection.execute(
-                "UPDATE claims SET payment=?, review_reason=NULL WHERE id=?",
+                "UPDATE claims SET payment=?, review_reason=NULL, "
+                "state='decided' WHERE id=?",
                 (json.dumps(result), claim_id),
             )
             append_event(
@@ -235,15 +271,13 @@ class Claims:
                     ),
                 ),
             )
-        return result
+        return self.detail(claim_id)
 
     @staticmethod
     def _check_payment(row: Row, amount: Decimal, limit: int) -> None:
         decision = json.loads(row["decision"]) if row["decision"] else {}
         if decision.get("outcome") != "approve":
             raise ClaimError(409, "Only an approved claim can be paid.")
-        if row["payment"]:
-            raise ClaimError(409, "Payment has already been recorded.")
         if cents(amount) != row["payout_cents"]:
             raise ClaimError(409, "Payment must equal the approved payout.")
         sign_off = json.loads(row["sign_off"]) if row["sign_off"] else {}
@@ -266,7 +300,7 @@ class Claims:
             if row["thread_id"] != event.thread_id or not row["active"]:
                 raise ClaimError(409, "The event must belong to the active run.")
             if row["run_id"]:
-                require_attempt(connection, row, event.thread_id)
+                require_attempt(connection, row, event.thread_id, self.execution_id)
             append_event(connection, claim_id, event)
 
     def finish(self, claim_id: str, thread_id: str, error: str = "") -> None:

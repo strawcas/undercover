@@ -1,6 +1,7 @@
 """A claim's visible reasoning, decision, approval and payment workflow."""
 
 import json
+from collections.abc import Callable
 from time import sleep
 from typing import Annotated, Any, TypedDict
 
@@ -25,6 +26,8 @@ class ClaimState(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
     claim_id: str
     thread_id: str
+    run_id: str
+    attempt_number: int
     instructions: str
     decision: dict[str, JsonValue] | None
     saved_claim: dict[str, JsonValue] | None
@@ -34,13 +37,19 @@ class ClaimState(TypedDict):
 class ClaimWorkflow:
     """Keep business ordering in named nodes and backend enforcement in HTTP."""
 
-    def __init__(self, tools: ClaimTools, model: BaseChatModel):
+    def __init__(
+        self, tools: ClaimTools, model: BaseChatModel | Callable[[], BaseChatModel]
+    ):
         self.tools = tools
-        self.model = model
+        self._model = model
         self.bound_tools = tools.tools()
-        self.reasoner = model.bind_tools(self.bound_tools)
-        self.decider = model.with_structured_output(DecisionFields)
         self.model_calls = 0
+
+    @property
+    def model(self) -> BaseChatModel:
+        if not isinstance(self._model, BaseChatModel):
+            self._model = self._model()
+        return self._model
 
     def invoke_model(
         self, runnable: Runnable, messages: list[AnyMessage], config: RunnableConfig
@@ -79,14 +88,29 @@ class ClaimWorkflow:
             "started",
             "Reasoning from the claim and selected policy evidence.",
         )
-        reply = self.invoke_model(self.reasoner, self.messages(state), config)
+        reply = self.invoke_model(
+            self.model.bind_tools(self.bound_tools), self.messages(state), config
+        )
         self.tools.event("Assess claim", "completed", "The reasoning step completed.")
         return {"messages": [reply], "model_calls": self.model_calls}
 
     def decide(self, state: ClaimState, config: RunnableConfig) -> dict[str, Any]:
+        existing = ClaimDetail.model_validate(self.tools.read_claim())
+        if existing.decision:
+            decision = DecisionFields.model_validate(
+                {
+                    key: getattr(existing.decision, key)
+                    for key in DecisionFields.model_fields
+                }
+            )
+            return {
+                "decision": decision.model_dump(mode="json"),
+                "saved_claim": existing.model_dump(mode="json"),
+                "model_calls": self.tools.usage.model_calls,
+            }
         try:
             answer = self.invoke_model(
-                self.decider,
+                self.model.with_structured_output(DecisionFields),
                 [
                     *self.messages(state),
                     HumanMessage(

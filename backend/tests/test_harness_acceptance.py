@@ -123,7 +123,7 @@ def test_published_seven_step_api_acceptance(client, repository):
         client.post(f"/api/claims/{ids[0]}/agent-pay", json=payment).status_code == 201
     )
     assert (
-        client.post(f"/api/claims/{ids[0]}/agent-pay", json=payment).status_code == 409
+        client.post(f"/api/claims/{ids[0]}/agent-pay", json=payment).status_code == 201
     )
     scenario.finish(retry)
     assert client.get(scenario.path + "/completion-check").json()["missing_claim_ids"]

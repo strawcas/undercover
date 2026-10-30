@@ -4,6 +4,7 @@ from collections.abc import Iterator, Sequence
 from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     Column,
     Integer,
     MetaData,
@@ -25,6 +26,13 @@ usage = Table(
     Column("request_id", Text, primary_key=True),
     Column("kind", Text, nullable=False),
 )
+run_requests = Table(
+    "run_requests",
+    metadata,
+    Column("request_id", Text, primary_key=True),
+    Column("run_id", Text, nullable=False),
+    Column("scope", Text, nullable=False),
+)
 records = Table(
     "records",
     metadata,
@@ -40,7 +48,8 @@ claims = Table(
     Column("thread_id", Text),
     Column("active", Integer, nullable=False, server_default="0"),
     Column("decision", Text),
-    Column("payout_cents", Integer),
+    Column("decision_request", Text),
+    Column("payout_cents", BigInteger),
     Column("sign_off", Text),
     Column("payment", Text),
     Column("queue_position", Integer),

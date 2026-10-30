@@ -139,8 +139,12 @@ def test_ctrl_c_prints_partial_totals_and_retries_next_session(terminal, capsys)
     assert claims.events("CLM-1003") == []
     first_events = claims.events("CLM-1001")
     assert batch.main(scripted_runner) == 0
-    assert "Attempted: 2 | Decided: 2" in capsys.readouterr().out
+    assert "Attempted: 3 | Decided: 3" in capsys.readouterr().out
     assert claims.events("CLM-1001") == first_events
+
+    current = Runs(terminal).current()
+    assert current is not None
+    assert len(current["attempts"]) == 3
 
 
 def test_interruption_after_decision_is_counted_and_preserved(terminal, capsys):
@@ -156,7 +160,7 @@ def test_interruption_after_decision_is_counted_and_preserved(terminal, capsys):
     assert batch.main(runner) == 130
     output = capsys.readouterr().out
     assert "Attempted: 1 | Decided: 1 | Approved: 1" in output
-    assert "Failed runs: 1 | Awaiting sign-off: 1" in output
+    assert "Failed runs: 0 | Awaiting sign-off: 1" in output
     assert claims.detail("CLM-1001")["decision"] is not None
 
 

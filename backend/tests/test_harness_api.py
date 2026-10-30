@@ -17,7 +17,11 @@ from backend.tests.conftest import audit_decision, decision_payload
 def register(client, scope=None):
     payload = {"run_id": str(uuid4()), "scope": scope or {"mode": "all"}}
     response = client.post("/api/agent-runs", json=payload)
-    assert response.status_code == 201, response.text
+    assert response.status_code in {200, 201}, response.text
+    if "execution_generation" in response.json():
+        client.headers["X-UnderCover-Run-Generation"] = str(
+            response.json()["execution_generation"]
+        )
     return response.json(), payload
 
 
@@ -36,7 +40,11 @@ def plan_claims(client, run_id, ids):
 def reserve(client, run_id, claim_id):
     payload = {"claim_id": claim_id, "thread_id": str(uuid4())}
     response = client.post(f"/api/agent-runs/{run_id}/attempts", json=payload)
-    assert response.status_code == 201, response.text
+    assert response.status_code in {200, 201}, response.text
+    if "execution_generation" in response.json():
+        client.headers["X-UnderCover-Run-Generation"] = str(
+            response.json()["execution_generation"]
+        )
     return response.json(), payload
 
 
@@ -299,47 +307,46 @@ def test_recovery_is_idempotent_across_runs(client, repository):
     run, _ = register(client, {"mode": "claim", "claim_id": "CLM-1001"})
     key = run["run_id"]
     plan_claims(client, key, ["CLM-1001"])
-    reserve(client, key, "CLM-1001")
+    first, _ = reserve(client, key, "CLM-1001")
     claims = Claims(repository)
     claims.recover_interrupted()
     frozen = client.get(f"/api/agent-runs/{key}").json()
     assert frozen["status"] == "interrupted"
-    assert frozen["todos"][0]["status"] == "to_do"
+    assert frozen["todos"][0]["status"] == "in_progress"
+    assert frozen["counts"]["failed_assessments"] == 0
     claims.recover_interrupted()
     assert client.get(f"/api/agent-runs/{key}").json() == frozen
-    new, _ = register(client, {"mode": "claim", "claim_id": "CLM-1001"})
-    plan_claims(client, new["run_id"], ["CLM-1001"])
-    retry, _ = reserve(client, new["run_id"], "CLM-1001")
+    continued, _ = register(client, {"mode": "claim", "claim_id": "CLM-1001"})
+    assert continued["run_id"] == key
+    assert continued["execution_generation"] == 2
+    owner = client.post(
+        "/api/claims/CLM-1001/execution",
+        json={"thread_id": first["thread_id"], "owner_id": str(uuid4())},
+    ).json()
+    client.headers["X-UnderCover-Execution"] = owner["execution_id"]
+    assert owner["attempt_number"] == 1
+    assert (
+        finish_attempt(client, first, "First true failure").json()["failed_attempts"]
+        == 1
+    )
+    retry, _ = reserve(client, key, "CLM-1001")
     assert retry["attempt_number"] == 2
     assert (
-        finish_attempt(client, retry, "Second failure").json()["claim_status"]
+        finish_attempt(client, retry, "Second true failure").json()["claim_status"]
         == "handler_review"
     )
-    Runs(repository).finish(
-        new["run_id"], RunFinishInput(status="completed", detail="")
+    completed = Runs(repository).finish(
+        key, RunFinishInput(status="completed", detail="")
     )
+    new, _ = register(client, {"mode": "limited", "max_claims": 1})
+    assert new["run_id"] != key
+    assert finish_attempt(client, first, "First true failure").status_code == 200
+    assert finish_attempt(client, first, "Changed failure").status_code == 409
+    assert client.get(f"/api/agent-runs/{key}").json() == completed
     assert (
         client.get("/api/agent-runs/current").json()["run"]["run_id"] == new["run_id"]
     )
-    # An old replay must not make that run current or rewrite its snapshot.
-    old = frozen["attempts"][0]
-    assert (
-        finish_attempt(client, old, "Backend restarted during this run.").status_code
-        == 200
-    )
-    assert (
-        client.get("/api/agent-runs/current").json()["run"]["run_id"] == new["run_id"]
-    )
-    assert (
-        client.post(
-            "/api/agent-runs",
-            json={
-                "run_id": str(uuid4()),
-                "scope": {"mode": "claim", "claim_id": "CLM-1001"},
-            },
-        ).status_code
-        == 409
-    )
+    assert claims.detail("CLM-1001")["failed_attempts"] == 2
 
 
 def test_empty_scope_unknown_resources_and_required_models(client, repository):
@@ -503,7 +510,7 @@ def test_typed_state_recovers_runs_written_before_the_review(client, repository)
     assert recovered["status"] == "interrupted"
     assert recovered["counts"]["assessment_attempts"] == 1
     assert recovered["attempts"][0]["thread_id"] == entry["thread_id"]
-    assert recovered["counts"]["failed_assessments"] == 1
-    assert Claims(repository).detail("CLM-1001")["status"] == "waiting"
+    assert recovered["counts"]["failed_assessments"] == 0
+    assert Claims(repository).detail("CLM-1001")["status"] == "in_progress"
     Runs(repository).recover()
     assert client.get(f"/api/agent-runs/{key}").json() == recovered

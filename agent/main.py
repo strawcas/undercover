@@ -18,7 +18,8 @@ from pydantic import SecretStr
 from agent.checkpoints import checkpointer
 from agent.execution import AgentRunError, AttemptBudget
 from agent.graph import ClaimState, ClaimWorkflow, build_graph
-from agent.http import request
+from agent.http import RequestOptions, request
+from agent.lease import ClaimLease
 from agent.tools import ClaimTools, DecisionFields
 from agent.tracing import claim_trace
 from backend.claim_models import ClaimDetail
@@ -99,9 +100,29 @@ def run(
     """Run the agent on one claim and return its final reply."""
     limits = budget or AttemptBudget()
     limits.check()
-    selected = llm or model()
-    with backend() as client, claim_trace(claim_id, thread_id) as callbacks:
-        response = request(client, "GET", "/api/agent-instructions", budget=limits)
+    selected = llm or model
+    with (
+        backend() as client,
+        ClaimLease(client, claim_id, thread_id, limits) as lease,
+        claim_trace(
+            claim_id,
+            thread_id,
+            lease.entry.run_id if lease.entry else "",
+            lease.entry.attempt_number if lease.entry else 0,
+        ) as callbacks,
+    ):
+        if lease.entry and lease.entry.status in {"paused", "completed"}:
+            return (
+                "Assessment complete; waiting for handler sign-off."
+                if lease.entry.status == "paused"
+                else "The claim assessment is complete."
+            )
+        response = request(
+            client,
+            "GET",
+            "/api/agent-instructions",
+            options=RequestOptions(budget=limits),
+        )
         response.raise_for_status()
         instructions = InstructionsResponse.model_validate(response.json())
         tools = ClaimTools(client, claim_id, thread_id, limits)
@@ -141,6 +162,8 @@ def run(
                     messages=[HumanMessage(content=f"Decide claim {claim_id}.")],
                     claim_id=claim_id,
                     thread_id=thread_id,
+                    run_id=lease.entry.run_id if lease.entry else "",
+                    attempt_number=lease.entry.attempt_number if lease.entry else 0,
                     instructions=instructions.text,
                     decision=decision.model_dump(mode="json") if decision else None,
                     saved_claim=existing.model_dump(mode="json") if decision else None,
@@ -148,6 +171,17 @@ def run(
                 )
             try:
                 result = graph.invoke(initial, config=config, durability="sync")
+                while result.get("__interrupt__"):
+                    stored = request(client, "GET", f"/api/claims/{claim_id}")
+                    stored.raise_for_status()
+                    if not stored.json()["sign_off"]:
+                        lease.mode = "pause"
+                        break
+                    result = graph.invoke(
+                        Command(resume={"claim_id": claim_id}),
+                        config=config,
+                        durability="sync",
+                    )
             except ResponseError as error:
                 raise AgentRunError(ollama_failure(error.status_code)) from error
     return (

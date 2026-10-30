@@ -1,11 +1,13 @@
 """Scoped admission, retries and completion of local agent runs."""
 
+import json
 from datetime import UTC, datetime, timedelta
 
 from backend.claim_records import append_event, claim_row, now, start_claim
 from backend.database import Connection, Row
 from backend.database import attempts as attempts_table
 from backend.errors import ClaimError
+from backend.executions import Executions, read_attempt, suspend
 from backend.harness_models import (
     Attempt,
     AttemptInput,
@@ -41,8 +43,23 @@ ATTEMPT_TIMEOUT_SECONDS = 600
 class Runs:
     """Keep the run's financial and workload boundaries in transactions."""
 
-    def __init__(self, store: Store):
+    def __init__(
+        self,
+        store: Store,
+        execution_id: str | None = None,
+        run_generation: str | None = None,
+    ):
         self.store = store
+        self.execution_id = execution_id
+        self.run_generation = run_generation
+
+    def require_generation(self, data: StoredRun) -> None:
+        if (
+            data.execution_generation > 1
+            and self.run_generation is not None
+            and self.run_generation != str(data.execution_generation)
+        ):
+            raise ClaimError(409, "Queue execution has been superseded.")
 
     def get(self, run_id: str) -> dict:
         with self.store.connect() as connection:
@@ -61,9 +78,22 @@ class Runs:
             return view(connection, data).model_dump(mode="json")
 
     def create(self, request: RunInput) -> tuple[dict, bool]:
+        Executions(self.store).recover_expired()
+        self._recover_abandoned_runs()
         run_id = str(request.run_id)
         scope = request.scope
         with self.store.transaction() as connection:
+            alias = connection.execute(
+                "SELECT run_id,scope FROM run_requests WHERE request_id=?", (run_id,)
+            ).fetchone()
+            if alias:
+                if json.loads(alias["scope"]) != scope.model_dump(mode="json"):
+                    raise ClaimError(
+                        409, "Run ID is already used with a different scope."
+                    )
+                return view(
+                    connection, read_run(connection, alias["run_id"])
+                ).model_dump(mode="json"), False
             prior = connection.execute(
                 "SELECT body FROM agent_runs WHERE id=?", (run_id,)
             ).fetchone()
@@ -74,9 +104,38 @@ class Runs:
                         409, "Run ID is already used with a different scope."
                     )
                 return view(connection, data).model_dump(mode="json"), False
-            for row in connection.execute("SELECT body FROM agent_runs"):
-                if StoredRun.model_validate_json(row["body"]).status == "running":
-                    raise ClaimError(409, "Another agent run is active.")
+            stored_runs = [
+                StoredRun.model_validate_json(row["body"])
+                for row in connection.execute(
+                    "SELECT body FROM agent_runs ORDER BY position"
+                )
+            ]
+            if any(run.status == "running" for run in stored_runs):
+                raise ClaimError(409, "Another agent run is active.")
+            interrupted = next(
+                (
+                    run
+                    for run in stored_runs
+                    if run.status == "interrupted" and run.summary is None
+                ),
+                None,
+            )
+            if interrupted:
+                if scope.mode != "all" and scope != interrupted.scope:
+                    raise ClaimError(
+                        409,
+                        "Continue the saved scope with uv run -m agent before "
+                        "selecting a different cap or claim.",
+                    )
+                interrupted.status = "running"
+                interrupted.execution_generation += 1
+                interrupted.finish_input = None
+                save_run(connection, interrupted)
+                connection.execute(
+                    "INSERT INTO run_requests (request_id,run_id,scope) VALUES (?,?,?)",
+                    (run_id, interrupted.run_id, scope.model_dump_json()),
+                )
+                return view(connection, interrupted).model_dump(mode="json"), False
             snapshot = self._snapshot(connection, scope)
             limit = (
                 scope.max_claims if isinstance(scope, LimitedScope) else len(snapshot)
@@ -115,6 +174,7 @@ class Runs:
         with self.store.transaction() as connection:
             data = read_run(connection, run_id)
             require_running(data)
+            self.require_generation(data)
             if len(request.items) > data.claim_limit:
                 raise ClaimError(409, "To-do list exceeds the run claim limit.")
             items = [
@@ -165,6 +225,14 @@ class Runs:
                 return Attempt.model_validate_json(prior["body"]).model_dump(
                     mode="json"
                 ), False
+            self.require_generation(data)
+            previous = (
+                read_attempt(connection, row["thread_id"])
+                if row["thread_id"] and row["run_id"] == run_id
+                else None
+            )
+            if previous and previous.status == "suspended":
+                return previous.model_dump(mode="json"), False
             require_running(data)
             self._admit(connection, data, row)
             start_claim(connection, request.claim_id, thread)
@@ -225,15 +293,34 @@ class Runs:
     def finish_attempt(self, run_id: str, thread: str, error: str) -> dict:
         with self.store.transaction() as connection:
             data = read_run(connection, run_id)
-            entry = self._finish_attempt(connection, data, thread, error)
+            entry = self._finish_attempt(
+                connection, data, thread, error, self.execution_id
+            )
             if data.status == "running":
                 sync_todos(connection, data)
                 save_run(connection, data)
             return entry.model_dump(mode="json")
 
+    def suspend_attempt(self, run_id: str, thread: str, detail: str) -> dict:
+        with self.store.transaction() as connection:
+            entry = read_attempt(connection, thread)
+            if entry.run_id != run_id:
+                raise ClaimError(409, "Assessment does not belong to this run.")
+            if (
+                entry.execution_id
+                and self.execution_id is not None
+                and self.execution_id != entry.execution_id
+            ):
+                raise ClaimError(409, "Claim execution has been superseded.")
+            return suspend(connection, entry, detail).model_dump(mode="json")
+
     @staticmethod
     def _finish_attempt(
-        connection: Connection, data: StoredRun, thread: str, error: str
+        connection: Connection,
+        data: StoredRun,
+        thread: str,
+        error: str,
+        execution_id: str | None = None,
     ) -> Attempt:
         stored = connection.execute(
             "SELECT * FROM agent_attempts WHERE thread_id=? AND run_id=?",
@@ -242,13 +329,20 @@ class Runs:
         if stored is None:
             raise ClaimError(404, "Claim attempt not found.")
         entry = Attempt.model_validate_json(stored["body"])
+        if entry.status in {"paused", "suspended"} and not error:
+            return entry
+        if (
+            entry.execution_id
+            and execution_id is not None
+            and execution_id != entry.execution_id
+        ):
+            raise ClaimError(409, "Claim execution has been superseded.")
         if entry.status != "active":
             if stored["finish_input"] != error:
                 raise ClaimError(
                     409, "Attempt request conflicts with the recorded attempt."
                 )
             return entry
-        require_running(data)
         row = claim_row(connection, entry.claim_id)
         if row["thread_id"] != thread or not row["active"]:
             raise ClaimError(409, "Claim attempt is no longer active.")
@@ -311,6 +405,13 @@ class Runs:
     def finish(self, run_id: str, request: RunFinishInput) -> dict:
         with self.store.transaction() as connection:
             data = read_run(connection, run_id)
+            self.require_generation(data)
+            if request.status == "interrupted" and data.status in {
+                "running",
+                "interrupted",
+            }:
+                self._suspend_run(connection, data, request)
+                return view(connection, data).model_dump(mode="json")
             if data.status != "running":
                 if data.finish_input != request:
                     raise ClaimError(
@@ -343,8 +444,37 @@ class Runs:
             data.summary = Summary(text=text, detail=request.detail, counts=totals)
             data.final_check = check
             data.finish_input = request
+            data.final_attempts = attempts(connection, run_id)
             save_run(connection, data)
             return view(connection, data).model_dump(mode="json")
+
+    @staticmethod
+    def _suspend_run(
+        connection: Connection, data: StoredRun, request: RunFinishInput
+    ) -> None:
+        if data.status != "running":
+            return
+        for entry in attempts(connection, data.run_id):
+            if entry.status == "active":
+                suspend(connection, entry, request.detail)
+        data.status = "interrupted"
+        data.finish_input = request
+        sync_todos(connection, data)
+        save_run(connection, data)
+
+    def _recover_abandoned_runs(self) -> None:
+        with self.store.transaction() as connection:
+            for row in connection.execute("SELECT body FROM agent_runs"):
+                data = StoredRun.model_validate_json(row["body"])
+                entries = attempts(connection, data.run_id)
+                if (
+                    data.status == "running"
+                    and any(a.status == "suspended" for a in entries)
+                    and not any(a.status == "active" for a in entries)
+                ):
+                    data.status = "interrupted"
+                    sync_todos(connection, data)
+                    save_run(connection, data)
 
     def recover(self, detail: str = "Backend restarted during this run.") -> None:
         with self.store.connect() as connection:
@@ -354,7 +484,4 @@ class Runs:
                 if read_run(connection, row["id"]).status == "running"
             ]
         for run_id in ids:
-            self.finish(
-                run_id,
-                RunFinishInput(status="interrupted", detail=detail),
-            )
+            self.finish(run_id, RunFinishInput(status="interrupted", detail=detail))

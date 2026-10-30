@@ -41,6 +41,7 @@ class Payment(BaseModel):
     amount: str
     created_at: str
     simulated: Literal[True]
+    sign_off: "SignOff | None" = None
 
 
 class SignOff(BaseModel):

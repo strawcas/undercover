@@ -151,5 +151,9 @@ def main(runner: Runner = default_runner, argv: Sequence[str] = ()) -> int:
         print(f"Queue processing failed: {error}", file=sys.stderr)
         code = 1
     finally:
+        if context.continued:
+            print("Continued the saved queue scope; no new snapshot was started.")
+        if context.resumed_count:
+            print(f"Resumed saved assessments: {context.resumed_count}")
         report.summary(context.result)
     return code

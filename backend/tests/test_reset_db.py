@@ -1,15 +1,27 @@
 import json
 import socket
 from decimal import Decimal
+from typing import TypedDict
 
 import pytest
+from langgraph.graph import END, START, StateGraph
 
+from agent.checkpoints import checkpointer
 from backend.claims import Claims
+from backend.config import agent_owner_path
 from backend.local import local_backend
 from backend.ownership import DatabaseOwner
 from backend.reset_db import main, rebuild
 from backend.storage import ROOT, SEED_FILES, Store
 from backend.tests.test_payments import approve
+
+
+class ResetState(TypedDict):
+    value: int
+
+
+def advance_reset(state: ResetState) -> ResetState:
+    return {"value": state["value"] + 1}
 
 
 @pytest.fixture
@@ -109,3 +121,32 @@ def test_rebuild_refuses_a_running_http_backend(repository):
         with pytest.raises(RuntimeError, match="already in use"):
             rebuild(repository.path)
         assert repository.path.read_bytes() == before
+
+
+def test_rebuild_clears_checkpoints_and_refuses_active_graph_owners(repository):
+    with checkpointer() as saver:
+        builder = StateGraph(ResetState)
+        builder.add_node("step", advance_reset)
+        builder.add_edge(START, "step")
+        builder.add_edge("step", END)
+        graph = builder.compile(checkpointer=saver)
+        assert (
+            graph.invoke(
+                {"value": 1},
+                {"configurable": {"thread_id": "saved-test"}},
+                durability="sync",
+            )["value"]
+            == 2
+        )
+        with pytest.raises(RuntimeError, match="already in use"):
+            rebuild(repository.path)
+    with (
+        DatabaseOwner(agent_owner_path(repository.path)),
+        pytest.raises(RuntimeError, match="already in use"),
+    ):
+        rebuild(repository.path)
+    assert rebuild(repository.path) == 25
+    with repository.connect() as connection:
+        assert not connection.execute(
+            "SELECT name FROM sqlite_master WHERE name='checkpoints'"
+        ).fetchone()

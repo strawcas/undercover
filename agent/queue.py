@@ -20,7 +20,7 @@ from agent.main import backend, model, run, validate_model_config
 from agent.middleware import ProviderRetry, QueueContext
 from agent.queue_tools import QueueTools
 from backend.diagnostics import diagnose, preserve_primary
-from backend.harness_models import Run, Scope
+from backend.harness_models import Attempt, Run, Scope
 from backend.reference_models import InstructionsResponse
 
 
@@ -77,6 +77,32 @@ def work_queue(tools: QueueTools, registered: Run, llm: BaseChatModel | None) ->
         }
 
 
+def resume_saved_claims(
+    client, registered: Run, runner: Runner, execution: Execution
+) -> None:
+    """Continue existing admissions before the coordinator selects fresh work."""
+    response = request(client, "GET", "/api/claim-executions/pending")
+    response.raise_for_status()
+    entries = TypeAdapter(list[Attempt]).validate_python(response.json())
+    for entry in entries:
+        if entry.run_id == registered.run_id:
+            QueueTools(
+                client,
+                registered.run_id,
+                runner,
+                execution,
+                registered.execution_generation,
+            ).work_attempt(entry, resume=True)
+        else:
+            old = request(client, "GET", f"/api/agent-runs/{entry.run_id}")
+            old.raise_for_status()
+            parent = Run.model_validate(old.json())
+            QueueTools(
+                client, parent.run_id, runner, execution, parent.execution_generation
+            ).work_attempt(entry, resume=True)
+            execution.resumed_count += 1
+
+
 def run_queue(
     scope: Scope | dict[str, object],
     runner: Runner = claim_runner,
@@ -102,10 +128,14 @@ def run_queue(
                 else "The backend rejected the run scope."
             )
         registered = Run.model_validate(response.json())
+        context.continued = registered.run_id != context.run_id
         context.run_id = registered.run_id
-        tools = QueueTools(client, registered.run_id, runner, context)
+        tools = QueueTools(
+            client, registered.run_id, runner, context, registered.execution_generation
+        )
         status, detail = "completed", ""
         try:
+            resume_saved_claims(client, registered, runner, context)
             if registered.claim_limit:
                 work_queue(tools, registered, llm)
         except QueueStopped:

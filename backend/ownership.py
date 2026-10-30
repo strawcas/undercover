@@ -50,7 +50,8 @@ class DatabaseOwner:
         return self.acquire()
 
     def __exit__(self, *_error) -> None:
-        self.release()
+        with preserve_primary("Release file database ownership"):
+            self.release()
 
 
 class PostgresOwner:
@@ -101,4 +102,5 @@ class PostgresOwner:
         return self.acquire()
 
     def __exit__(self, *_error) -> None:
-        self.release()
+        with preserve_primary("Release Postgres database ownership"):
+            self.release()

@@ -27,6 +27,9 @@ class Execution:
     on_result: Callable[[AttemptResult], None] = ignore_result
     result: Run | None = None
     run_id: str | None = None
+    active_budget: "AttemptBudget | None" = None
+    continued: bool = False
+    resumed_count: int = 0
 
 
 class QueueStopped(Exception):
@@ -48,6 +51,7 @@ class AttemptBudget:
     cancelled: Event = field(default_factory=Event)
     model_calls: int = 30
     tool_calls: int = 80
+    execution_id: str = ""
 
     def check(self) -> None:
         if self.cancelled.is_set():

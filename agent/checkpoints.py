@@ -12,12 +12,13 @@ from psycopg import Connection
 from psycopg.rows import DictRow, dict_row
 from psycopg_pool import ConnectionPool
 
-from backend.config import database_target
+from backend.config import checkpoint_owner_path, database_target
 from backend.diagnostics import preserve_primary
+from backend.ownership import DatabaseOwner
 
 
 def checkpoint_path(path: Path) -> Path:
-    return path.with_name(path.name + ".checkpoints.sqlite")
+    return path
 
 
 def configure(connection: Connection[DictRow]) -> None:
@@ -33,14 +34,17 @@ def configure(connection: Connection[DictRow]) -> None:
 def checkpointer() -> Iterator[BaseCheckpointSaver]:
     target = database_target()
     if isinstance(target, Path):
-        connection = sqlite3.connect(checkpoint_path(target), check_same_thread=False)
-        try:
-            saver = SqliteSaver(connection)
-            saver.setup()
-            yield saver
-        finally:
-            with preserve_primary("Close claim checkpointer"):
-                connection.close()
+        with DatabaseOwner(checkpoint_owner_path(target)):
+            connection = sqlite3.connect(
+                checkpoint_path(target), check_same_thread=False
+            )
+            try:
+                saver = SqliteSaver(connection)
+                saver.setup()
+                yield saver
+            finally:
+                with preserve_primary("Close claim checkpointer"):
+                    connection.close()
     else:
         pool: ConnectionPool[Connection[DictRow]] = ConnectionPool(
             target,

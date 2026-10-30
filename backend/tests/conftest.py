@@ -57,9 +57,9 @@ def decision_payload(thread_id, outcome="approve", payout="1250.00"):
     }
 
 
-def begin_claim(repository, claim_id="CLM-1001"):
+def begin_claim(repository, claim_id="CLM-1001", scope=None):
     runs = Runs(repository)
-    run, _ = runs.create(RunInput(run_id=uuid4(), scope=AllScope(mode="all")))
+    run, _ = runs.create(RunInput(run_id=uuid4(), scope=scope or AllScope(mode="all")))
     runs.todos(
         run["run_id"],
         TodosInput.model_validate(

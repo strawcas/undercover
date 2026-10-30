@@ -45,7 +45,7 @@ def save_run(connection: Connection, data: StoredRun) -> None:
 
 
 def require_running(data: StoredRun) -> None:
-    if data.status != "running":
+    if data.status not in {"running", "interrupted"}:
         raise ClaimError(409, "Agent run is already finished.")
 
 
@@ -61,7 +61,7 @@ def eligible(row: Row) -> bool:
 def progress(row: Row) -> tuple[TodoStatus, Handoff | None]:
     decision = json.loads(row["decision"]) if row["decision"] else {}
     conditions: tuple[tuple[bool, TodoStatus, Handoff | None], ...] = (
-        (bool(row["active"]), "in_progress", None),
+        (bool(row["active"]) or row["state"] == "in_progress", "in_progress", None),
         (row["state"] == "handler_review", "left_for_handler", "technical_failure"),
         (not decision, "to_do", None),
         (row["state"] == "awaiting_sign_off", "left_for_handler", "sign_off"),
@@ -135,9 +135,13 @@ def counts(connection: Connection, data: StoredRun) -> Counts:
 
 
 def view(connection: Connection, data: StoredRun) -> Run:
-    entries = attempts(connection, data.run_id)
+    entries = (
+        data.final_attempts
+        if data.final_attempts is not None
+        else attempts(connection, data.run_id)
+    )
     totals = data.counts
-    if data.status == "running":
+    if data.status in {"running", "interrupted"}:
         sync_todos(connection, data)
         totals = counts(connection, data)
         for entry in entries:
@@ -159,13 +163,14 @@ def view(connection: Connection, data: StoredRun) -> Run:
 
 
 def completion(connection: Connection, data: StoredRun) -> CompletionCheck:
-    if data.status != "running":
+    if data.status not in {"running", "interrupted"}:
         if data.final_check is None:
             raise RuntimeError("Finished run has no completion check.")
         return data.final_check
     remaining = data.claim_limit - len(data.admitted_claim_ids)
-    missing, retryable, active, unresolved = [], [], [], []
+    missing, retryable, active, unresolved, resumable = [], [], [], [], []
     admitted = set(data.admitted_claim_ids)
+    resumable = resumable_claims(connection, admitted)
     for claim_id in data.snapshot_claim_ids:
         row = claim_row(connection, claim_id)
         if eligible(row):
@@ -181,11 +186,21 @@ def completion(connection: Connection, data: StoredRun) -> CompletionCheck:
             unresolved.append(item.id)
     return CompletionCheck(
         run_id=data.run_id,
-        complete=not (missing or retryable or active or unresolved),
+        complete=not (missing or retryable or active or unresolved or resumable),
         capacity_remaining=remaining,
         missing_claim_ids=missing,
         retryable_claim_ids=retryable,
         active_claim_ids=active,
         unresolved_todo_ids=unresolved,
+        resumable_claim_ids=resumable,
         counts=counts(connection, data),
     )
+
+
+def resumable_claims(connection: Connection, admitted: set[str]) -> list[str]:
+    return [
+        claim_id
+        for claim_id in admitted
+        if (row := claim_row(connection, claim_id))["state"] == "in_progress"
+        and not row["active"]
+    ]

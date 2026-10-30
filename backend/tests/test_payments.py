@@ -31,7 +31,7 @@ def test_payment_boundary(client, repository, amount):
         assert client.get("/api/claims/CLM-1001").json()["payment"] is None
     else:
         assert response.status_code == 201
-        assert response.json()["amount"] == amount
+        assert response.json()["payment"]["amount"] == amount
         assert client.get("/api/claims").json()[0]["payment_status"] == "paid"
 
 
@@ -49,10 +49,10 @@ def test_sign_off_and_payment_persist(client, repository):
     assert client.get("/api/claims").json()[0]["payment_status"] == "eligible"
     paid = client.post("/api/claims/CLM-1001/pay", json={"amount": "1250"})
     assert paid.status_code == 201
-    assert paid.json()["simulated"] is True
+    assert paid.json()["payment"]["simulated"] is True
     assert (
         client.post("/api/claims/CLM-1001/pay", json={"amount": "1250"}).status_code
-        == 409
+        == 201
     )
     assert (
         client.post(
@@ -62,7 +62,7 @@ def test_sign_off_and_payment_persist(client, repository):
     )
     repository.initialize()
     detail = Claims(repository).detail("CLM-1001")
-    assert detail["payment"] == paid.json()
+    assert detail["payment"] == paid.json()["payment"]
     assert detail["sign_off"] == signed.json()
     assert len(Claims(repository).events("CLM-1001")) == 4
 
@@ -127,7 +127,7 @@ def test_competing_payments(repository):
         return 201
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        assert sorted(executor.map(pay_once, range(2))) == [201, 409]
+        assert sorted(executor.map(pay_once, range(2))) == [201, 201]
     assert (
         len(
             [
@@ -167,5 +167,5 @@ def test_financial_records_survive_a_new_app_and_store(repository):
             restarted.post(
                 "/api/claims/CLM-1001/pay", json={"amount": "1250"}
             ).status_code
-            == 409
+            == 201
         )

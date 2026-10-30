@@ -15,12 +15,19 @@ from agent.execution import (
 from backend.harness_models import Attempt
 
 
-def invoke_helper(runner: Runner, entry: Attempt, execution: Execution) -> str:
+def invoke_helper(
+    runner: Runner, entry: Attempt, execution: Execution, *, resume: bool = False
+) -> str:
     remaining = (
-        datetime.fromisoformat(entry.deadline_at) - datetime.now(UTC)
-    ).total_seconds()
+        entry.remaining_seconds
+        if resume or entry.status in {"paused", "suspended"}
+        else (
+            datetime.fromisoformat(entry.deadline_at) - datetime.now(UTC)
+        ).total_seconds()
+    )
     deadline = monotonic() + max(0, remaining)
     budget = AttemptBudget(deadline=deadline, cancelled=execution.cancel_active)
+    execution.active_budget = budget
     budget.check()
     future: Future[str] = Future()
 

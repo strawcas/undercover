@@ -53,8 +53,9 @@ def decision_versions(
 class References:
     """Use the stored allowlisted corpus, never a client-supplied file path."""
 
-    def __init__(self, store: Store):
+    def __init__(self, store: Store, execution_id: str | None = None):
         self.store = store
+        self.execution_id = execution_id
 
     def contents(self, source: str) -> dict:
         with self.store.connect() as connection:

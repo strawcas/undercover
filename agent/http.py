@@ -1,5 +1,7 @@
 """Bounded retries for reads and replay-safe backend state operations."""
 
+from collections.abc import Mapping
+from dataclasses import dataclass
 from http import HTTPStatus
 from time import sleep
 
@@ -17,19 +19,34 @@ RETRY_STATUSES = {
 }
 
 
+@dataclass(frozen=True)
+class RequestOptions:
+    budget: AttemptBudget | None = None
+    headers: dict[str, str] | None = None
+
+
 def request(
     client: httpx.Client,
     method: str,
     path: str,
-    body: dict[str, object] | None = None,
+    body: Mapping[str, object] | None = None,
     *,
-    budget: AttemptBudget | None = None,
+    options: RequestOptions | None = None,
 ) -> httpx.Response:
     """Retry safe transport operations while leaving financial writes untouched."""
+    budget = options.budget if options else None
     safe = (
         method in {"GET", "PUT"}
         or path.startswith("/api/agent-runs")
-        or path.endswith(("/reference-search", "/reference-reads", "/usage"))
+        or path.endswith(
+            (
+                "/reference-search",
+                "/reference-reads",
+                "/usage",
+                "/execution",
+                "/release",
+            )
+        )
     )
     limit = MAX_RETRIES if safe else 0
     attempt = 0
@@ -37,7 +54,9 @@ def request(
         if budget is not None:
             budget.check()
         try:
-            response = client.request(method, path, json=body)
+            response = client.request(
+                method, path, json=body, headers=options.headers if options else None
+            )
         except httpx.TransportError:
             if attempt >= limit:
                 raise

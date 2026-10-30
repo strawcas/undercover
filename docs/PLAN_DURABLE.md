@@ -99,7 +99,7 @@ Success criteria:
 - [x] Configuration tests prove injected SQLite storage overrides ambient settings, imports do not read `.env`, configured Postgres never falls back silently, and backend/service identities match the actual target without exposing URLs/passwords.
 - [x] Pool tests assert at most four connections per database-using process and no unbounded overflow; disposal releases them. Concurrent admission/financial/reset tests retain atomic behavior and stale-owner rejection. Review the corresponding Postgres locking strategy explicitly; SQLite tests alone do not prove it.
 - [ ] On Supabase, read-only MCP inspection verifies business tables are confined to `undercover`; initialization and reseeding restore the permitted queue in source order. Repeated startup preserves stored records. Inspect schema, transaction and uniqueness behavior against the real database without model calls.
-- [ ] Reset tests validate before destructive changes, preserve the existing database on invalid seed data, reject active owners, and clear business state plus applicable checkpoints without affecting `lab`, other schemas, source files or another configured database.
+- [x] Reset tests validate before destructive changes, preserve the existing database on invalid seed data, reject active owners, and clear business state plus applicable checkpoints without affecting `lab`, other schemas, source files or another configured database.
 - [x] `npm run check:python` passes. Review complete changed transactions and callers, including rollback/cleanup failures, update status and commit the phase.
 
 ## Phase 3: Build the synchronous checkpointed claim graph
@@ -110,9 +110,9 @@ Success criteria:
 
 - [x] Graph tests with a stub model cover approval below/equal/above the backend limit, decline, referral, a corrected refused decision/tool call, and missing evidence. All approvals reach `pay`; decline/referral never do. The model has no payment or sign-off tool.
 - [x] An over-limit approval saves one decision and checkpointed interrupt, makes zero payments and releases execution capacity so another claim can proceed. The graph branches on backend state, not a copied limit.
-- [ ] After backend sign-off is saved, `Command(resume=...)` on the same thread pays once without another assessment/model decision, and payment includes handler identity and sign-off time. A forged/early resume cannot authorize payment.
+- [x] After backend sign-off is saved, `Command(resume=...)` on the same thread pays once without another assessment/model decision, and payment includes handler identity and sign-off time. A forged/early resume cannot authorize payment.
 - [x] File-backed SQLite checkpoint tests close/recreate the graph and saver between invocations and resume completed steps. Adapter tests verify synchronous `PostgresSaver` setup/settings and `durability="sync"` on initial, crash-resume and interrupt-resume invocation paths.
-- [ ] Persisted usage tests bound the assessment to thirty model requests across retries/resumes, count structured-decision calls, retain tool/history limits and provider timeouts, and ensure paused time does not exhaust active-work time. Exhausted budgets produce a real assessment failure.
+- [x] Persisted usage tests bound the assessment to thirty model requests across retries/resumes, count structured-decision calls, retain tool/history limits and provider timeouts, and ensure paused time does not exhaust active-work time. Exhausted budgets produce a real assessment failure.
 - [x] Every graph step/refusal/retry is visible through claim activity. Observational event/tracing failures cannot stop committed decisions or payments; mandatory evidence and lifecycle failures remain visible. LangGraph interrupts are never caught as ordinary errors.
 - [x] `npm run check:python` passes. Review nodes, routing, serialized state, tool adapters and all callers; update status and commit.
 
@@ -122,15 +122,15 @@ Change attempt/run finalization and startup/shutdown recovery to distinguish sus
 
 Success criteria:
 
-- [ ] Stop a stub-backed subprocess after an early persisted graph step, recreate the process and continue with the same attempt number, thread, evidence and call counters. Saved steps are not repeated; an unfinished node may replay. Failure counts stay unchanged.
-- [ ] Repeat crash injection after decision/payment commit but before node checkpoint, and after graph completion but before attempt finalization. Each case converges to exactly one decision/payment and one finalization without a new assessment.
-- [ ] Matching decision/payment repeats return HTTP success and the stored claim, preserving original timestamps, attribution and mandatory events. A different decision, calculation/reference set or payment amount returns 409. Concurrent duplicates produce one stored result.
-- [ ] Backend restart and service restart preserve suspended/held attempts; resume renews execution ownership without changing assessment identity. Old-generation writes remain fenced, even with the same thread ID. Missing initial checkpoints start only the still-reserved attempt, not another one.
-- [ ] Pre-upgrade records without checkpoints remain readable. Preserve historical outcomes and attribution; initialize payment-only continuation for an existing held/unpaid approval without a new assessment. Never claim to restore an older conversation that was not saved.
-- [ ] A genuine undecided error retries from clean state with a new thread and increments failures once. Two such errors produce Handler review. Ctrl+C, kill, a human pause, lost response and observational failure do not consume that allowance. Previously committed outcomes survive all failure paths.
-- [ ] A stopped queue continues its stored scope/cap/to-dos, resumes existing claims first and completes its missed-work check before finishing. Continuation does not admit later arrivals, increase the distinct-claim cap or start a second snapshot. Completed queues can still have their held claims resumed separately.
-- [ ] Combined primary/cleanup failures, cleanup-only failures, interruption during cleanup and post-commit errors preserve stored state and intended exit codes. Diagnostic tests retain useful references/code locations and exclude credential/provider/customer sentinels from public errors and logs.
-- [ ] `npm run check:python` passes. Trace admission through recovery, decision/payment and attempt/run finalization, retain existing regressions individually, record review results and commit.
+- [x] Stop a stub-backed subprocess after an early persisted graph step, recreate the process and continue with the same attempt number, thread, evidence and call counters. Saved steps are not repeated; an unfinished node may replay. Failure counts stay unchanged.
+- [x] Repeat crash injection after decision/payment commit but before node checkpoint, and after graph completion but before attempt finalization. Each case converges to exactly one decision/payment and one finalization without a new assessment.
+- [x] Matching decision/payment repeats return HTTP success and the stored claim, preserving original timestamps, attribution and mandatory events. A different decision, calculation/reference set or payment amount returns 409. Concurrent duplicates produce one stored result.
+- [x] Backend restart and service restart preserve suspended/held attempts; resume renews execution ownership without changing assessment identity. Old-generation writes remain fenced, even with the same thread ID. Missing initial checkpoints start only the still-reserved attempt, not another one.
+- [x] Pre-upgrade records without checkpoints remain readable. Preserve historical outcomes and attribution; initialize payment-only continuation for an existing held/unpaid approval without a new assessment. Never claim to restore an older conversation that was not saved.
+- [x] A genuine undecided error retries from clean state with a new thread and increments failures once. Two such errors produce Handler review. Ctrl+C, kill, a human pause, lost response and observational failure do not consume that allowance. Previously committed outcomes survive all failure paths.
+- [x] A stopped queue continues its stored scope/cap/to-dos, resumes existing claims first and completes its missed-work check before finishing. Continuation does not admit later arrivals, increase the distinct-claim cap or start a second snapshot. Completed queues can still have their held claims resumed separately.
+- [x] Combined primary/cleanup failures, cleanup-only failures, interruption during cleanup and post-commit errors preserve stored state and intended exit codes. Diagnostic tests retain useful references/code locations and exclude credential/provider/customer sentinels from public errors and logs.
+- [x] `npm run check:python` passes. Trace admission through recovery, decision/payment and attempt/run finalization, retain existing regressions individually, record review results and commit.
 
 ## Phase 5: Connect sign-off to the agent service and dashboard
 

@@ -139,7 +139,7 @@ def test_http_cleanup_failure_is_reconciled_before_ownership_release(
     reconcile_execution(Claims(repository), context)
     assert context.result is not None
     assert context.result.status == "interrupted"
-    assert context.result.counts.failed_assessments == 1
+    assert context.result.counts.failed_assessments == 0
     assert Claims(repository).detail("CLM-1001")["run_active"] is False
     assert (
         client.post(
@@ -149,7 +149,7 @@ def test_http_cleanup_failure_is_reconciled_before_ownership_release(
         == 409
     )
     reconcile_execution(Claims(repository), context)
-    assert Claims(repository).detail("CLM-1001")["failed_attempts"] == 1
+    assert Claims(repository).detail("CLM-1001")["failed_attempts"] == 0
 
 
 def test_queue_history_is_bounded_over_a_full_workload(client, repository, monkeypatch):

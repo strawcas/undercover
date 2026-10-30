@@ -14,6 +14,7 @@ def migrate(connection: Connection) -> None:
             "run_id": "TEXT",
             "failed_attempts": "INTEGER NOT NULL DEFAULT 0",
             "review_reason": "TEXT",
+            "decision_request": "TEXT",
         },
         "agent_runs": {"position": "INTEGER"},
         "agent_attempts": {"position": "INTEGER"},

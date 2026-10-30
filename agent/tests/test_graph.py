@@ -19,6 +19,8 @@ def initial(claim_id, thread, instructions):
         messages=[HumanMessage(content=f"Decide claim {claim_id}.")],
         claim_id=claim_id,
         thread_id=thread,
+        run_id="",
+        attempt_number=1,
         instructions=instructions,
         decision=None,
         saved_claim=None,
@@ -45,9 +47,13 @@ def test_saved_interrupt_resumes_without_model_or_new_attempt(
         )
         assert graph.get_state(config).next == ("approval",)
     claims.sign_off("CLM-1001", "HND-01")
-    unused = StubModel(messages=iter(()))
-    main.run("CLM-1001", thread, unused)
-    assert unused.first_messages == []
+
+    def unavailable_model():
+        raise AssertionError("Payment-only continuation must not construct a model")
+
+    monkeypatch.setattr(main, "model", unavailable_model)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    main.run("CLM-1001", thread)
     assert claims.detail("CLM-1001")["payment"]["amount"] == "1250.00"
     assert (
         len([e for e in claims.events("CLM-1001") if e["action"] == "Record decision"])

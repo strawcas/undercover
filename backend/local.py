@@ -11,6 +11,7 @@ import httpx
 import uvicorn
 
 from backend.claims import Claims
+from backend.diagnostics import preserve_primary
 from backend.main import create_app
 from backend.storage import Store
 from backend.worker import Runner
@@ -73,8 +74,9 @@ def local_backend(store: Store, runner: Runner, url: str) -> Iterator[Claims]:
             wait_started(server, thread)
             yield app.state.claims
         finally:
-            server.should_exit = True
-            thread.join(timeout=10)
+            with preserve_primary("Stop temporary backend"):
+                server.should_exit = True
+                thread.join(timeout=10)
 
 
 def existing_backend(store: Store, url: str) -> bool:

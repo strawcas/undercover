@@ -82,6 +82,10 @@ class AttemptFinishInput(RequiredInput):
     error: str = Field(max_length=2000)
 
 
+class SuspendInput(RequiredInput):
+    detail: str = Field(min_length=1, max_length=2000)
+
+
 class RunFinishInput(RequiredInput):
     status: Literal["completed", "failed", "interrupted"]
     detail: str = Field(max_length=2000)
@@ -120,11 +124,15 @@ class Attempt(ClaimResult):
     claim_id: str
     thread_id: str
     attempt_number: int
-    status: Literal["active", "completed", "failed"]
+    status: Literal["active", "completed", "failed", "paused", "suspended"]
     started_at: str
     deadline_at: str
     finished_at: str | None
     error: str | None
+    execution_id: str | None = None
+    owner_id: str | None = None
+    lease_until: str | None = None
+    remaining_seconds: float = Field(default=600, ge=0)
 
 
 class CompletionCheck(BaseModel):
@@ -135,6 +143,7 @@ class CompletionCheck(BaseModel):
     retryable_claim_ids: list[str]
     active_claim_ids: list[str]
     unresolved_todo_ids: list[str]
+    resumable_claim_ids: list[str] = Field(default_factory=list)
     counts: Counts
 
 
@@ -158,6 +167,7 @@ class Run(BaseModel):
     attempts: list[Attempt]
     counts: Counts
     summary: Summary | None
+    execution_generation: int = 1
 
 
 class CurrentRun(BaseModel):
@@ -180,3 +190,5 @@ class StoredRun(BaseModel):
     counts: Counts = Field(default_factory=Counts)
     final_check: CompletionCheck | None = None
     finish_input: RunFinishInput | None = None
+    execution_generation: int = 1
+    final_attempts: list[Attempt] | None = None

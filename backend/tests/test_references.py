@@ -90,16 +90,16 @@ def test_unread_unknown_and_client_supplied_decision_provenance(client, reposito
     assert client.post(path, json=body | {"manual_sections": ["99"]}).status_code == 404
     result = client.post(path, json=body)
     assert result.status_code == 201
-    assert result.json()["policy_wording_version"] == "2026.1"
-    assert result.json()["claims_manual_version"] == "2026.2"
-    assert result.json()["manual_sections"] == ["6"]
-    assert client.post(path, json=body).status_code == 409
+    assert result.json()["decision"]["policy_wording_version"] == "2026.1"
+    assert result.json()["decision"]["claims_manual_version"] == "2026.2"
+    assert result.json()["decision"]["manual_sections"] == ["6"]
+    assert client.post(path, json=body).status_code == 201
     payment = {"thread_id": thread, "amount": "420"}
     assert (
         client.post("/api/claims/CLM-1001/agent-pay", json=payment).status_code == 201
     )
     assert (
-        client.post("/api/claims/CLM-1001/agent-pay", json=payment).status_code == 409
+        client.post("/api/claims/CLM-1001/agent-pay", json=payment).status_code == 201
     )
 
 

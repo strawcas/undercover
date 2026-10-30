@@ -15,6 +15,7 @@ from backend.harness_models import (
     Run,
     RunFinishInput,
     RunInput,
+    SuspendInput,
     TodosInput,
     TodosResponse,
 )
@@ -30,10 +31,24 @@ router = APIRouter(
 
 
 def service(request: Request) -> Runs:
-    return Runs(request.app.state.claims.store)
+    return Runs(
+        request.app.state.claims.store,
+        request.headers.get("X-UnderCover-Execution", ""),
+        request.headers.get("X-UnderCover-Run-Generation", ""),
+    )
 
 
 Service = Annotated[Runs, Depends(service)]
+
+
+@router.post(
+    "/{run_id}/attempts/{thread_id}/suspend",
+    operation_id="suspend_claim_attempt",
+    response_model=Attempt,
+)
+def suspend_attempt(run_id: UUID, thread_id: UUID, body: SuspendInput, runs: Service):
+    """Suspend the current assessment without consuming a failed attempt."""
+    return runs.suspend_attempt(str(run_id), str(thread_id), body.detail)
 
 
 @router.post(

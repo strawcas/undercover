@@ -9,7 +9,13 @@ from tempfile import TemporaryDirectory, mkstemp
 from sqlalchemy import inspect, table
 from sqlalchemy.exc import SQLAlchemyError
 
-from backend.config import ROOT, database_target, load_environment
+from backend.config import (
+    ROOT,
+    agent_owner_path,
+    checkpoint_owner_path,
+    database_target,
+    load_environment,
+)
 from backend.database import metadata
 from backend.diagnostics import preserve_primary
 from backend.harness_storage import migrate
@@ -20,7 +26,11 @@ from backend.storage import Store
 def rebuild(path: Path, data_dir: Path = ROOT / "data") -> int:
     """Rebuild only the selected database, preserving it if source validation fails."""
     path = path.resolve()
-    with DatabaseOwner(path):
+    with (
+        DatabaseOwner(path),
+        DatabaseOwner(agent_owner_path(path)),
+        DatabaseOwner(checkpoint_owner_path(path)),
+    ):
         descriptor, name = mkstemp(
             prefix=f".{path.name}-", suffix=".db", dir=path.parent
         )
@@ -30,6 +40,14 @@ def rebuild(path: Path, data_dir: Path = ROOT / "data") -> int:
             fresh = Store(replacement)
             fresh.initialize(data_dir)
             count = len(fresh.records("claim"))
+            fresh.dispose()
+            if path.exists():
+                existing = sqlite3.connect(path)
+                try:
+                    existing.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                finally:
+                    with preserve_primary("Close rebuilt database checkpoint"):
+                        existing.close()
             os.replace(replacement, path)
         finally:
             with preserve_primary("Remove temporary rebuild database"):

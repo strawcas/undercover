@@ -15,7 +15,7 @@ from agent.execution import (
     QueueStopped,
     Runner,
 )
-from agent.http import request
+from agent.http import RequestOptions, request
 from agent.invocation import invoke_helper
 from backend.claim_models import ClaimDetail, QueueRow
 from backend.diagnostics import diagnose, preserve_primary
@@ -34,7 +34,12 @@ class QueueTools:
     """Keep claim evidence inside each helper and workload enforcement in the API."""
 
     def __init__(
-        self, client: httpx.Client, run_id: str, runner: Runner, execution: Execution
+        self,
+        client: httpx.Client,
+        run_id: str,
+        runner: Runner,
+        execution: Execution,
+        run_generation: int = 1,
     ):
         self.client = client
         self.run_id = run_id
@@ -42,20 +47,39 @@ class QueueTools:
         self.runner = runner
         self.execution = execution
         self.lock = Lock()
+        self.run_generation = run_generation
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        body: dict[str, object] | None = None,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        return request(
+            self.client,
+            method,
+            path,
+            body,
+            options=RequestOptions(
+                headers={"X-UnderCover-Run-Generation": str(self.run_generation)}
+                | (headers or {})
+            ),
+        )
 
     def check(self) -> CompletionCheck:
-        response = request(self.client, "GET", f"{self.path}/completion-check")
+        response = self.request("GET", f"{self.path}/completion-check")
         response.raise_for_status()
         return CompletionCheck.model_validate(response.json())
 
     def current(self) -> Run:
-        response = request(self.client, "GET", self.path)
+        response = self.request("GET", self.path)
         response.raise_for_status()
         return Run.model_validate(response.json())
 
     def finish_run(self, status: str, detail: str) -> Run:
-        response = request(
-            self.client,
+        response = self.request(
             "POST",
             f"{self.path}/finish",
             {"status": status, "detail": detail},
@@ -68,15 +92,22 @@ class QueueTools:
         return Run.model_validate(response.json())
 
     def finish_attempt(self, thread_id: str, error: str) -> Attempt:
-        response = request(
-            self.client,
+        response = self.request(
             "POST",
             f"{self.path}/attempts/{thread_id}/finish",
             {"error": error},
+            headers={
+                "X-UnderCover-Execution": self.execution.active_budget.execution_id
+                if self.execution.active_budget
+                else ""
+            },
         )
         if response.status_code == HTTPStatus.CONFLICT:
             current = self.current()
-            if current.status != "running":
+            if (
+                current.status in {"interrupted", "failed"}
+                and current.run_id == self.execution.run_id
+            ):
                 self.execution.result = current
                 self.execution.stopping.set()
                 return next(
@@ -88,9 +119,13 @@ class QueueTools:
     def waiting(self) -> dict:
         """Read eligible claims, capacity and the stored to-do list."""
         check, run = self.check(), self.current()
-        response = request(self.client, "GET", "/api/claims")
+        response = self.request("GET", "/api/claims")
         response.raise_for_status()
-        allowed = set(check.missing_claim_ids + check.retryable_claim_ids)
+        allowed = set(
+            check.missing_claim_ids
+            + check.retryable_claim_ids
+            + check.resumable_claim_ids
+        )
         claims = TypeAdapter(list[QueueRow]).validate_python(response.json())
         return WaitingClaims(
             run_id=self.run_id,
@@ -102,8 +137,7 @@ class QueueTools:
 
     def write_todos(self, items: list[TodoInput]) -> dict:
         """Replace the claim-linked plan using statuses returned by the backend."""
-        response = request(
-            self.client,
+        response = self.request(
             "PUT",
             f"{self.path}/todos",
             {"items": [item.model_dump(mode="json") for item in items]},
@@ -112,7 +146,7 @@ class QueueTools:
 
     def report(self, entry: Attempt) -> None:
         try:
-            response = request(self.client, "GET", f"/api/claims/{entry.claim_id}")
+            response = self.request("GET", f"/api/claims/{entry.claim_id}")
             response.raise_for_status()
             claim = ClaimDetail.model_validate(response.json())
             self.execution.on_result(AttemptResult(entry, claim))
@@ -144,8 +178,7 @@ class QueueTools:
         with self.lock:
             if self.execution.stopping.is_set():
                 return "Queue processing is stopping; do not start another claim."
-            response = request(
-                self.client,
+            response = self.request(
                 "POST",
                 f"{self.path}/attempts",
                 {"claim_id": claim_id, "thread_id": str(uuid4())},
@@ -153,23 +186,44 @@ class QueueTools:
             if response.is_error:
                 return f"{claim_id}: {response.json()['detail']}"
             entry = Attempt.model_validate(response.json())
-            try:
-                invoke_helper(self.runner, entry, self.execution)
-            except (QueueStopped, KeyboardInterrupt):
-                with preserve_primary("Finalize interrupted assessment"):
-                    self.finish_attempt(
-                        entry.thread_id,
-                        "Assessment interrupted. "
-                        "Retry eligible work with uv run -m agent.",
-                    )
-                raise
-            except AgentRunError as failure:
-                return self.conclude(entry, str(failure), failure)
-            except Exception as failure:
-                reference = diagnose("Assess claim", failure)
-                error = f"Agent run failed ({type(failure).__name__}). {reference}."
-                return self.conclude(entry, error, failure)
-            return self.conclude(entry, "")
+            return self.work_attempt(entry)
+
+    def work_attempt(self, entry: Attempt, *, resume: bool = False) -> str:
+        try:
+            invoke_helper(self.runner, entry, self.execution, resume=resume)
+            current = self.current()
+            if (
+                current.status == "interrupted"
+                and current.run_id == self.execution.run_id
+            ):
+                self.execution.stopping.set()
+                self.execution.result = current
+                raise QueueStopped
+        except (QueueStopped, KeyboardInterrupt):
+            with preserve_primary("Suspend interrupted assessment"):
+                self.request(
+                    "POST",
+                    f"{self.path}/attempts/{entry.thread_id}/suspend",
+                    {
+                        "detail": "Assessment interrupted; saved work resumes "
+                        "on the next explicit command."
+                    },
+                    headers={
+                        "X-UnderCover-Execution": (
+                            self.execution.active_budget.execution_id
+                        )
+                        if self.execution.active_budget
+                        else ""
+                    },
+                ).raise_for_status()
+            raise
+        except AgentRunError as failure:
+            return self.conclude(entry, str(failure), failure)
+        except Exception as failure:
+            reference = diagnose("Assess claim", failure)
+            error = f"Agent run failed ({type(failure).__name__}). {reference}."
+            return self.conclude(entry, error, failure)
+        return self.conclude(entry, "")
 
     def check_completion(self) -> dict:
         """Check for missed or retryable work before returning the final summary."""

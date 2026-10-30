@@ -7,9 +7,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from backend.claim_models import (
     ClaimDetail,
     ClaimEvent,
-    Decision,
     Health,
-    Payment,
     QueueRow,
     Recorded,
     SignOff,
@@ -35,7 +33,10 @@ router = APIRouter(
 
 
 def service(request: Request) -> Claims:
-    return request.app.state.claims
+    return Claims(
+        request.app.state.claims.store,
+        request.headers.get("X-UnderCover-Execution", ""),
+    )
 
 
 Service = Annotated[Claims, Depends(service)]
@@ -48,7 +49,7 @@ Service = Annotated[Claims, Depends(service)]
 )
 def reserve_assessment_call(claim_id: str, body: UsageInput, claims: Service):
     """Reserve an assessment call before contacting a model or tool."""
-    return reserve(claims.store, claim_id, body)
+    return reserve(claims.store, claim_id, body, claims.execution_id)
 
 
 @router.post(
@@ -145,11 +146,10 @@ def record_claim_event(claim_id: str, event: EventInput, claims: Service):
     "/claims/{claim_id}/decision",
     operation_id="record_decision",
     status_code=201,
-    response_model=Decision,
+    response_model=ClaimDetail,
 )
 def record_decision(claim_id: str, decision: DecisionInput, claims: Service):
     """Record a claim decision and calculated payout."""
-    claims.validate_thread(claim_id, decision.thread_id)
     return claims.decide(claim_id, decision)
 
 
@@ -168,7 +168,7 @@ def sign_off_claim(claim_id: str, sign_off: SignOffInput, claims: Service):
     "/claims/{claim_id}/pay",
     operation_id="pay_claim",
     status_code=201,
-    response_model=Payment,
+    response_model=ClaimDetail,
 )
 def pay_claim(claim_id: str, payment: PaymentInput, claims: Service):
     """Record a simulated payment for the approved amount."""

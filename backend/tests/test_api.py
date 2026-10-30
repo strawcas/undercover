@@ -81,7 +81,7 @@ def test_decision_and_events(client, repository):
         client.post(
             "/api/claims/CLM-1001/decision", json=decision_payload(thread)
         ).status_code
-        == 409
+        == 201
     )
     events = client.get("/api/claims/CLM-1001/events").json()
     assert [e["id"] for e in events] == sorted(e["id"] for e in events)

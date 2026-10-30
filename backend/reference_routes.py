@@ -4,13 +4,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, Response
 
+from backend.claim_models import ClaimDetail
 from backend.harness_models import ApiError
 from backend.reference_models import (
     AgentPaymentInput,
     Contents,
     Evidence,
     EvidenceResponse,
-    PaymentResponse,
     ReadInput,
     SearchInput,
     SearchResponse,
@@ -25,7 +25,10 @@ router = APIRouter(
 
 
 def service(request: Request) -> References:
-    return References(request.app.state.claims.store)
+    return References(
+        request.app.state.claims.store,
+        request.headers.get("X-UnderCover-Execution", ""),
+    )
 
 
 Service = Annotated[References, Depends(service)]
@@ -78,7 +81,7 @@ def evidence(claim_id: str, references: Service):
 @router.post(
     "/claims/{claim_id}/agent-pay",
     operation_id="pay_claim_as_agent",
-    response_model=PaymentResponse,
+    response_model=ClaimDetail,
     status_code=201,
 )
 def agent_pay(claim_id: str, body: AgentPaymentInput, claims: ClaimService):
