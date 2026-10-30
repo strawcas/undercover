@@ -6,7 +6,7 @@ Implement `docs/DURABLE.md` on top of the current harness. Move business records
 
 **Course sidenote:** For consistency with the course, read `labs/week2day3.ipynb` and build the solution in the same style as the lab. Where the lab and this brief differ, follow the brief. The notebook has been read for this plan, together with the payout and tracing examples in `labs/week2day1.ipynb` and `labs/week2day1_payout.py`. Read notebook source only; do not execute evaluation, cleanup or model-call cells.
 
-Implementation is in progress. Check criteria only after verification, retaining explicit pending live checks. Leave `docs/PLAN.md` and `docs/PLAN_HARNESS.md` as historical plans. Preserve the student's existing notebook changes and `docs/DURABLE.md`.
+Local implementation and offline handover are complete. Live Supabase/model/Langfuse acceptance remains pending explicit approval. Check criteria only after verification, retaining the pending live checks. Leave `docs/PLAN.md` and `docs/PLAN_HARNESS.md` as historical plans. Preserve the student's existing notebook changes and `docs/DURABLE.md`.
 
 ## Starting point and approach
 
@@ -149,7 +149,7 @@ Success criteria:
 - [x] Component tests verify continued polling while signed-off/unpaid, paid handler/time rendering, no premature Decided/payment action, notification-failure recovery text, and cleanup on navigation/unmount. `npm run check:ts` passes without `any` or lowered thresholds.
 - [x] Playwright E2E starts a stand-in agent service on port 8003 and points only its isolated test backend at it. A dashboard sign-off sends the saved claim to that stand-in once, preserves handler/time and updates pending-payment UI; it never contacts port 8002, Supabase, Langfuse or a model. Python tests prove the actual resume/payment behavior.
 - [x] In Playwright MCP, inspect the sign-off journey, refreshed records, read-only instructions and activity at desktop and 390-pixel widths in light/dark modes. Confirm keyboard access, readable USD amounts and no uncaught browser errors.
-- [ ] `npm run check` passes with stub models/temporary databases. Review backend notification, service admission/worker/shutdown, CLI ownership/reporting and dashboard callers; update status and commit.
+- [x] `npm run check` passes with stub models/temporary databases. Review backend notification, service admission/worker/shutdown, CLI ownership/reporting and dashboard callers; update status and commit.
 
 ## Phase 6: Verify offline operation, live durability and handover
 
@@ -159,15 +159,17 @@ Every real-model trial starts from a reseed of the selected product database and
 
 Success criteria:
 
-- [ ] `npm run check` exits 0 with `.env` temporarily absent and inherited external-service variables removed, with guaranteed restoration even if checks fail. Ruff, Pyright, pytest, Prettier, ESLint, strict TypeScript, Vitest and Playwright pass at existing thresholds with no external network/model access. Record exact totals/coverage.
-- [ ] Offline suites explicitly cover payout calculation, interrupt-before-payment, sign-off/resume/pay-once, crash recovery with the same attempt/thread, error retry with a fresh thread, repeated financial requests, completed-parent-run continuation and the port-8003 E2E notification path.
+- [x] `npm run check` exits 0 with `.env` temporarily absent and inherited external-service variables removed, with guaranteed restoration even if checks fail. Ruff, Pyright, pytest, Prettier, ESLint, strict TypeScript, Vitest and Playwright pass at existing thresholds with no external network/model access. Record exact totals/coverage.
+- [x] Offline suites explicitly cover payout calculation, interrupt-before-payment, sign-off/resume/pay-once, crash recovery with the same attempt/thread, error retry with a fresh thread, repeated financial requests, completed-parent-run continuation and the port-8003 E2E notification path.
 - [ ] On Windows, `uv sync`, `npm install` and `npm run dev` start all three services correctly, with backend health still returning `{"status":"ok"}`. Test both Supabase configuration and SQLite local mode, and ensure stopped/reloaded processes release locks, workers, connections and trace resources.
 - [ ] After Supabase reseed, a default-model capped run works five distinct claims, retains evidence/activity/to-dos, leaves the rest Waiting and pauses an over-limit approval. If model choices yield no held approval, record that limitation and use a separate freshly seeded capped trial rather than changing business rules or exceeding the cap.
 - [ ] With the agent worker free, use Playwright MCP to sign off the held claim. It becomes In progress then Paid within five seconds; backend/Supabase records show one payment, the approving handler and sign-off timestamp, and unchanged attempt/thread.
 - [ ] Kill the live agent after an early checkpoint within the capped trial, restart the service and invoke the CLI continuation. It resumes the same thread and attempt, finishes the interrupted queue within its original cap, and leaves one decision/payment per claim. Capture checkpoint/attempt evidence before and after.
 - [ ] During live execution, use the read-only Supabase MCP server to sample `SELECT count(*) FROM pg_stat_activity WHERE usename = 'postgres'`; record no more than twelve connections. Check application pool configuration as well as observations, and close notebook/lab connections before measuring.
 - [ ] Through Langfuse's authenticated API, fetch the held claim's `claim_id:thread_id` session and verify traces before and after sign-off. Record session/trace identifiers without credentials or customer payloads. Trace retrieval/ingestion failures remain an explicit unverified acceptance item, not a claimed pass.
-- [ ] Review the final diff and complete changed workflows/callers under `docs/PROCESS.md`. Record actual results, live evidence and limitations in status; check off only verified criteria, commit with hooks enabled and report the handover. Do not push, change course notebooks, open evaluation data, build later-day features or create/delete AWS resources.
+- [x] Review the final diff and complete changed workflows/callers under `docs/PROCESS.md`. Record actual results, live evidence and limitations in status; check off only verified criteria, commit with hooks enabled and report the handover. Do not push, change course notebooks, open evaluation data, build later-day features or create/delete AWS resources.
+
+Offline handover verification on October 31, 2026: `npm run check` exited 0 with 305 Python tests (94.97% coverage), 24 component tests (99.35% statement / 93.85% branch coverage) and eight E2E tests, with `.env` absent and external-service variables removed/restored. Windows dependency setup and all three services passed in isolated SQLite mode. The Windows criterion stays open because hosted startup is unverified. Supabase writes were rejected by automatic approval review; schema/reseed, live capped run, timed sign-off, live crash recovery, connection observations and Langfuse trace retrieval remain unverified. The final review and handover documentation are complete; no live pass is inferred from offline tests.
 
 ## Planning baseline checks
 

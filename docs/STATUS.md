@@ -1,59 +1,18 @@
 # Status
 
-## Durable state build in progress
+## Durable state
 
-Phase 5 connects a single sequential agent service to explicit CLI commands and saved-sign-off notifications. The production service owns one shared synchronous saver pool (at most four connections including its ownership session). Standalone commands start separate Windows child processes; attached commands leave the app running. Notifications acknowledge before graph payment, coalesce duplicates, and never undo a saved sign-off. Saved approvals take priority at the next claim boundary. The service waits for cancelled helper threads before reusing/closing its saver. The dashboard polls signed-off In progress claims, preserves attribution, and leaves payment to agent-owned graphs.
+The durable-state implementation is built locally on the harness. `docs/PLAN_DURABLE.md` tracks verified criteria and the remaining live acceptance. The pilot and harness plans remain historical records.
 
-Phase 5 review covered notification commit/order/failure, service API validation and database identity, job admission/coalescing, lease and helper shutdown, CLI standalone/attached ownership/reporting and dashboard actions/polling. Stub tests cover service failure after acknowledgment, ownership conflicts, stopped-scope continuation, pre-checkpoint sign-off races, forged resume fencing and payment-only recovery without model construction. Browser review at 1440 and 390 pixels in both color schemes confirmed keyboard sign-off, readable USD values, activity, read-only instructions, refreshed In progress state and one port-8003 notification; the console had no errors before preview shutdown. All eight E2E tests passed, including the previous retry regression. Its scripted model now retries after another claim continues; assertions for failure counts, payment, full snapshot completion and later arrivals remain. Windows uv sync --locked, npm install and isolated three-service npm run dev startup passed without admitting a run. The secrets-free check passed 300 Python tests (94.95% coverage) and 24 component tests (99.35% statement / 93.85% branch coverage). Its final browser stage hit the finite-queue completion wait; that wait now uses forty seconds within the existing forty-five-second test budget, preserving all outcome, snapshot and later-arrival assertions. The corrected browser stage passed all eight tests. Final combined offline verification follows in the handover phase. A final review also fenced fresh admission and undecided claim execution after a queue is paused by backend recovery; its twenty-test targeted lifecycle/queue/service group passed. The phase hook will verify the final combined Python tree.
+The backend payout calculator uses exact Decimal/cents arithmetic and stored plan, policy, add-on and company limits. It covers quantities, item/cash/electronics caps, hotel rooms/nights, unreceipted meals, third-party payments before deductibles, benefit/trip-cost caps, rounding and the zero floor. It is read only; the backend still enforces every financial gate.
 
-Phase 4 adds renewable execution ownership, generation fencing, suspension without assessment failure, continuation of stopped finite queue scopes and completed-parent approval recovery. Matching financial repeats return the stored claim without duplicating events; differing business fields remain blocked. Payments copy saved sign-off attribution. Remaining active-work time excludes human pauses and process downtime. SQLite business records and checkpoints share the selected file so validated replacement clears them together; reset refuses active backend, agent or checkpointer owners. Legacy decisions remain immutable when original request fields cannot be reconstructed. Payment-only recovery constructs no model.
+The queue remains on `create_agent`. Each claim uses a synchronous LangGraph with explicit reasoning, tools, structured decision, approval interrupt and payment nodes. Every approval reaches payment; the backend determines whether sign-off is required. Neither model has a payment or sign-off tool. Canonical instructions and exact versioned reference sections remain visible read only in the dashboard.
 
-Phase 4 review traced queue admission/generation through lease acquisition/renewal/release, graph replay, financial reconciliation, attempt/run finalization and reset. Four real subprocess termination tests cover an early checkpoint, committed decision/payment before their next checkpoint and completed graph before finalization. Targeted tests also cover completed-parent payment with frozen summaries, thirty-call reservations, paused deadlines, stale owners, saved caps/later arrivals and combined primary/cleanup failures. `npm run check:python` passed 282 tests at 94.99% coverage; the final legacy-record test passed separately with the four-test financial lifecycle group. Ruff and Pyright passed; the phase hook verifies the final combined tree. The service and dashboard integration follow in phase 5; live Supabase writes remain pending explicit approval.
-
-Phase 3 replaces the claim helper's `create_agent` with a hand-written synchronous `StateGraph`: reasoning/tools, structured decision, approval interrupt and payment. The backend alone chooses whether sign-off is needed. The model-facing tools no longer expose decision persistence, payment or sign-off; canonical instructions match. Each graph invocation uses `durability="sync"`, Postgres uses a bounded synchronous saver pool and local/tests use a file-backed SQLite saver. Durable backend call reservations cap models at thirty requests across retries and checkpoint reopening; the queue remains on `create_agent`. Pre-existing approvals enter payment/approval nodes without another model assessment.
-
-Phase 3 verification: `npm run check:python` passed 268 tests at 96.20% coverage; targeted tests cover the final exact-limit and observational-event changes. Workflow review traced graph inputs/edges, tools/refusals, decision/payment order, stored instructions, call reservations, saver setup/cleanup and all existing helper callers. Checkpointer cleanup tests preserve primary failures and surface cleanup-only errors. The previous truncation regression now also proves a saved approval makes no further model call; post-commit crash/payment replay is covered in the following lifecycle phase. Waiting-time deadlines, payment attribution and continuation of held attempts after parent-run completion remain phase 4 work. The live Supabase check remains blocked by approval review, including a second request scoped to the verified connected project and the explicitly invented fixture records.
-
-Phase 2 moves backend queries onto SQLAlchemy Core with shared table metadata and named bindings. Explicit positions replace `rowid` ordering in normal queries; only the legacy SQLite migration reads `rowid`. SQLite keeps file ownership and bounded short-lived connections; Postgres uses `undercover` search paths, a four-connection pool with no overflow, session maintenance/backend ownership and serialized write transactions. Module imports no longer load `.env`; development/terminal entry points load it explicitly. Existing SQLite work migrates without reseeding. The Postgres reset path validates source data locally before its owned-table transaction.
-
-Phase 2 offline verification: `npm run check:python` passed 256 tests with 96.29% coverage, plus the final 16-test database/cleanup suite. Review covered storage/table creation, migrations/order, claim/evidence/run callers, connection ownership, startup disposal, CLI identities and reset transactions. Binding and dynamic row mapping are confined to the persistence boundary; existing typed API/run/evidence records remain in use. Ownership failure tests combine unlock/close failures and prove the original conflict survives with safe diagnostics. Supabase execution is pending: automatic approval review rejected initialization/seeding because the external destination and business-record payload need explicit approval. No remote records/tables were changed. Checkpoint reset integration follows with the graph phase.
-
-Phase 1 of `docs/PLAN_DURABLE.md` adds the backend payout operation, its HTTP claim tool and optional Langfuse claim tracing. Calculations use stored policy/plan/company settings and exact Decimal arithmetic, including benefit/item limits, offsets, deductibles and the sign-off boundary. Missing tracing keys disable export; initialization/export failures produce safe diagnostics without changing business results. Tests remove external database/tracing credentials and use stub models.
-
-Phase 1 verification: `npm run check:python` passed Ruff, Pyright and 247 tests at 97.62% coverage; the final required-input and HTTP-tool additions passed the focused 25-test suite and Pyright separately. The commit hook verifies the final combined suite. Workflow review covered payout route -> stored context -> calculator -> HTTP tool -> canonical prompt, and helper invocation -> callback session -> observational flush. Calculation is read-only; existing evidence, lifecycle and financial writes retain their enforcement and reconciliation. No database migration, real-model run or remote write has taken place yet. The durable phases below remain to be implemented; the existing harness description is retained until their handover.
-
-The harness in `docs/HARNESS.md` is implemented with explicit command-only launch. Verification is tracked in `docs/PLAN_HARNESS.md`; `docs/PLAN.md` remains the completed pilot plan.
-
-## What is built
-
-One queue agent chooses the order within a finite snapshot, writes a claim-linked to-do list and delegates each claim to a fresh helper. Helpers read the complete claim and selected policy/manual sections through HTTP, record a decision and make an eligible simulated payment. The queue receives concise results; full activity and exact versioned section text remain on each claim. The dashboard shows the current/latest plan, all five claim states, evidence and both roles' read-only instructions.
-
-FastAPI/SQLite exposes 25 typed API operations: the existing 12 plus eight run/attempt and five reference/evidence/agent-payment operations. Run creation records a scope and never launches a model. The runtime performs delegation. The backend enforces atomic reservations, distinct-claim caps, stable truthful to-dos, completion checks, stale-attempt fencing, exact money, duplicate prevention and handler sign-off above $1,000. Neither agent has a sign-off tool. Existing databases migrate without reseeding saved work; legacy decisions retain their original references without invented manual provenance.
-
-The agent runs only from an explicit terminal command. Backend startup/restart initializes storage, recovers interrupted state and serves APIs without creating a worker, run or model call. Claims added after a run's snapshot, and cap-excluded claims, wait for another explicit command. Polling and refresh only read progress. A run's finished summary is a completion-time snapshot and does not change after later handler actions.
-
-## Harness human review
-
-The six findings in `docs/HUMAN_REVIEW_HARNESS.md` were confirmed against the implementation. They arose because the earlier plan/checklist emphasized feature acceptance, financial safety and coverage, without requiring a readable workflow trace or combined operation/cleanup failure tests. Basic type checking accepted `Any` dictionaries; isolated happy-path activity and reporting tests did not exercise their failure boundaries. The launch revision also left old provider error advice behind. These were review and test gaps, even though the earlier checks passed.
-
-| Finding | Implemented correction |
-| --- | --- |
-| Activity delivery could stop a helper after approval or interrupt a provider retry | `ClaimTools.event` treats HTTP logging failures as observational and emits a safe diagnostic. Append-only events are sent once to avoid duplicate activity after a lost response. Mandatory decision, payment, evidence and lifecycle writes keep their existing failure/reconciliation rules. Tests fail the post-approval completion event both before and after its commit and still verify the exact payment. |
-| Cleanup could replace the original failure | Attempt and run finalization preserve the primary cause and record secondary diagnostics. Claim reads and terminal observers run after finalization and cannot fail an assessment. Tests combine primary/cleanup failures, include Ctrl+C, and prove reporting failure permits subsequent claims. |
-| Unexpected helper errors lost developer context | Public errors include a diagnostic reference. The `undercover` Python logger writes that reference, exception/cause types and file/function/line locations. It excludes exception messages, source text, locals and request/response payloads. Tests use private-data sentinels and assert useful locations without leaks. |
-| Workflows were hidden across framework callbacks | `run_queue` registers the scope, calls `work_queue` and finalizes the run. `work_queue` explicitly checks backend completion after every final reply and continues missed work within a shared call budget. `QueueTools.delegate` reserves, invokes and concludes each attempt; `main.run` loads instructions, binds named claim tools and invokes a fresh helper. Middleware handles retries, limits and history only. |
-| Business records shared an untyped dictionary | The agent validates/reuses `Scope`, `Run`, `Attempt`, `CompletionCheck` and `ClaimDetail`; reports use `AttemptResult`. Backend persistence now uses `StoredRun`, typed attempts, counts, to-dos and claim results. Dynamic dictionaries remain at JSON serialization and heterogeneous source-record boundaries. `AttemptBudget` is passed explicitly from the reserved deadline/cancellation signal to the helper, tools, HTTP and middleware; the context variable is removed. |
-| Ollama recovery advice contradicted explicit launch | Provider and truncation messages now direct eligible Waiting claims to `uv run -m agent` and explain that two failed assessments require handler review. The dashboard says an assessment **can** be retried, avoiding a promise that an ended run will restart. |
-
-The related-code review covered backend startup/shutdown, direct helpers, CLI reconciliation, transactions, rebuilding, typed run storage, financial reconciliation, and dashboard fetching, polling, actions and retry labels. It found and fixed primary-error masking in startup recovery, rollback, rebuild cleanup, direct-helper cleanup and CLI reconciliation. Startup failure now releases ownership without attempting run recovery against incompletely initialized storage. Dashboard polling/request handling already surfaces errors and cleans up timers; the retry heading was the related wording defect. HTTP endpoints and their public fields remain unchanged.
-
-Canonical prompts are now `agent/instructions.md` and `agent/queue_instructions.md`. The backend still stores/serves their exact text for the dashboard and agents. `run(claim_id, thread_id)` remains callable; injected helper runners accept the explicit keyword-only `budget`. No app start invokes an agent.
-
-`docs/PROCESS.md` now requires a workflow/caller review, a write-classification review, combined failure injection and safe-diagnostic assertions before committing. `docs/CODE_STANDARDS.md` defines the corresponding rules for orchestration, types, explicit budgets, observational work, cleanup and recovery wording. These checks address the causes of this review's findings; a coverage percentage alone is no longer accepted as review evidence.
+The agent service owns one sequential worker for CLI requests and sign-off notifications. A handler sign-off commits identity, amount and time before a bounded notification. The claim stays In progress until paid. The graph resumes its saved thread, rechecks backend sign-off and copies attribution into the payment. Failed delivery leaves recoverable saved state. Duplicate notifications and matching decision/payment replays do not duplicate financial records or lifecycle events.
 
 ## Run locally
 
-Use Python 3.12, uv and Node 26. From the repository root:
+Use Python 3.12, uv and Node 26 from the repo root:
 
 ```powershell
 uv sync
@@ -61,40 +20,32 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173. The backend is at http://localhost:8000, API documentation at `/docs`, and health at `/api/health`. Configure the existing root `.env`; never commit it. Environment variables in the terminal take precedence. Normal startup preserves saved claims, decisions, sign-offs, payments, activity, evidence and failure counts.
+The dashboard is at `http://localhost:5173`, backend/API docs at `http://localhost:8000/docs`, and agent docs at `http://127.0.0.1:8002/docs`. Backend `/api/health` still returns `{"status":"ok"}`. Development startup admits no claims. Refresh, navigation and polling are read only.
+
+Configure the existing root `.env` using `.env.example`; terminal variables take precedence. Imports and tests never load that file. Development and terminal entry points load it explicitly.
+
+| Setting | Behavior |
+| --- | --- |
+| `DATABASE_URL` | Supabase session pooler, synchronous psycopg, port 5432, `search_path=undercover`. Leave absent for SQLite. A configured database error never falls back. |
+| `UNDERCOVER_DB_PATH` | SQLite file; defaults to root `undercover.db`. Local checkpoints use this same file. |
+| `UNDERCOVER_BACKEND_URL` | Defaults to `http://localhost:8000`. Tools and service use this backend. |
+| `UNDERCOVER_AGENT` | Defaults to `http://127.0.0.1:8002`. Sign-off notifications and CLI requests use this service. |
+| `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` | Enable claim tracing when both are set. Missing keys disable export locally. |
+| `LANGFUSE_BASE_URL` | Langfuse host; defaults to `https://cloud.langfuse.com`. |
+
+Backend and service must select the same database. Health identity headers contain a safe hash, not credentials. CLI attachment requires matching local HTTP services; it rejects an unrelated service/database. Those checks are not authentication. Normal startup preserves saved records; switching to Supabase does not move historical SQLite work or overwrite its file.
 
 ## Model configuration
 
-OpenRouter is the default provider. It requires `OPENROUTER_API_KEY` and uses `deepseek/deepseek-v4.1-flash` with low reasoning effort. Selecting that same model explicitly also uses low effort. `MODEL_NAME` overrides the model; other names are not forced to accept its reasoning setting.
+OpenRouter is the default provider and requires `OPENROUTER_API_KEY`. Its default model is `deepseek/deepseek-v4.1-flash` with low reasoning effort; selecting that exact name explicitly retains low effort. `MODEL_NAME=openrouter/free` selects the course's free option. Other model names are not forced to accept the default's reasoning setting.
 
-```dotenv
-MODEL_PROVIDER=openrouter
-OPENROUTER_API_KEY=your-openrouter-key
-# Optional override:
-# MODEL_NAME=openrouter/free
-```
+For Ollama, set `MODEL_PROVIDER=ollama` and `MODEL_NAME` to a downloaded tool-calling model. `OLLAMA_BASE_URL` defaults to `http://localhost:11434` without `/v1`; `OLLAMA_NUM_CTX` defaults to 16384 and must be a positive integer. Ollama needs no OpenRouter key. There is no provider fallback.
 
-For local Ollama, install and keep the Ollama server running, download a tool-calling model and configure its exact installed tag:
+The running agent service owns model configuration. Restart it after changing provider, model or database settings; changing only the attached CLI's environment does not reconfigure that service. Missing/invalid model settings fail before fresh claim admission. An empty queue and payment-only recovery need no model construction.
 
-```powershell
-ollama pull qwen3:8b
-ollama list
-Invoke-RestMethod http://localhost:11434/api/tags
-```
+## Explicit commands and recovery
 
-```dotenv
-MODEL_PROVIDER=ollama
-MODEL_NAME=qwen3:8b
-OLLAMA_BASE_URL=http://localhost:11434
-# Optional positive context-token override; default 16384:
-# OLLAMA_NUM_CTX=32768
-```
-
-Ollama uses its native API address without `/v1`, temperature zero and no OpenRouter key. Choose model/context sizes that fit local memory. A missing model tag, invalid provider/context setting or missing required key fails before any claim is reserved. An empty run needs no model configuration. Ollama connection, missing-model, tool-support and truncation failures produce actionable messages; there is no automatic provider fallback. Each explicit command reads its model settings. Database/backend address settings must match the running app; restart the app when changing those settings. Provider changes affect future attempts; saved decisions remain unchanged.
-
-## Full, capped and named terminal runs
-
-Leave `npm run dev` running to watch assessments in the dashboard. In another terminal with the same database/backend settings, run one of:
+With matching services running, use another terminal:
 
 ```powershell
 uv run -m agent
@@ -102,50 +53,64 @@ uv run -m agent --cap 5
 uv run -m agent --claim-id CLM-1001
 ```
 
-The command uses the existing local backend if it serves the same configured database. When the app is stopped, it starts its own temporary backend. It works the registered scope, prints each attempt's saved outcome, payout, explanation, policy/manual references and payment/sign-off state, then prints backend-derived totals and exits. An attached app stays running. The queue agent chooses the order; database queue order remains stable for display.
+Without a cap, a new run snapshots eligible Waiting claims. `--cap N` limits distinct claims; retries use the same slot. `--max-claims N` remains an alias. `UNDERCOVER_MAX_CLAIMS` is ignored. Named mode selects one eligible claim and cannot be combined with a cap. Later arrivals and cap-excluded claims wait for another command.
 
-Without flags, the command works the full eligible waiting snapshot. `--cap 5` admits up to five distinct claims and leaves the rest Waiting; `--max-claims` remains a compatibility alias. The old `UNDERCOVER_MAX_CLAIMS` environment setting is ignored. Named mode accepts only one existing eligible claim. Do not combine cap and named mode. Unknown, decided, active or Handler review claims are rejected without reassessment. Retries consume the same slot. Claims outside the snapshot cannot enter that run.
+The CLI attaches to existing services or starts temporary backend/agent child processes. It prints saved outcomes, explanations, references and backend-derived totals, then exits. An attached app stays available. Exit codes are 0 for completed work, including referrals and pending sign-offs; 1 for setup/incomplete work, technical handoffs or unresolved unpaid approvals; and 130 for Ctrl+C.
 
-Exit codes are 0 for completed work, including business referrals and pending sign-offs; 1 for setup/incomplete execution, technical handoffs or unresolved unpaid approvals; and 130 for Ctrl+C. A recovered transient failure alone does not cause exit 1. Totals distinguish distinct claims from assessment attempts and count recorded outcomes and payments, pending sign-offs, technical handoffs and claims left waiting. A failure after a saved decision remains visible without erasing that decision.
+A stopped queue retains its original snapshot, admitted IDs, to-dos and cap. The next command continues that scope, reports continuation and does not start another fresh snapshot afterward. Default invocation continues any saved scope; an incompatible explicit cap or named claim is refused. Interrupted and signed-off claims continue before new admissions, using their existing slots. Unsigned held approvals remain paused so the queue can finish. A completed parent's summary and attempt views stay completion-time snapshots; live claim/execution records show later sign-off/payment.
 
-## Recovery and limits
+Interruption preserves the attempt number, thread, evidence, checkpoints, failure count and remaining active-work budget. Genuine undecided errors create clean attempts with new threads. Two failed assessments require Handler review; restart does not grant a third. A saved decision is never reassessed. Historical decisions without checkpoints remain readable; eligible approvals enter payment-only continuation without inventing an earlier conversation.
 
-A failed assessment without a decision returns to Waiting. The queue retries it during the same run while continuing other work. Two undecided failures place it in Handler review with no invented referral or payout. Failure counts persist across runs/restarts, so restarting cannot silently give it a third attempt. There is no manual review-resolution/reset-failure workflow in this build.
+Each assessment allows thirty durable model requests, including retries and structured-decision requests, eighty tool calls and ten minutes of active work. Human waiting and process downtime do not consume that allowance. Provider requests time out after 120 seconds; transient requests retry at most twice with 0.25/0.5-second backoff. Durable reservations prevent a crash from restoring spent calls. Queue middleware bounds history and calls; backend completion checks prevent missed work from being called complete.
 
-Provider and replay-safe HTTP operations retry transient connection/timeout, 429 and selected 5xx errors at most twice after the initial request, with 0.25/0.5-second backoff. OpenRouter SDK retries are disabled. Validation errors, business conflicts and financial POSTs are not blindly replayed. A lost decision/payment response triggers stored-state read-back; a second financial write is allowed only if the first did not commit and the same attempt remains active. Unrecoverable unpaid approvals visibly require handler attention.
+Execution leases renew while work is active, and fresh execution IDs fence late writes even when a thread is unchanged. Paused queues require an explicit continuation before admitting or resuming undecided work. Already approved continuations remain valid after their parent queue ends. The service waits for cancelled helper threads before reusing or closing the shared saver.
 
-Each claim assessment has a ten-minute overall deadline, forty model calls and eighty tool calls. Model requests time out after 120 seconds. The coordinator has a workload-scaled call budget and checks for missed/retryable work before accepting a final answer. Its old queue snapshots are discarded to bound conversation growth. Detailed claim evidence never enters the parent conversation.
+Service startup first acquires exclusive ownership, then reconciles the previous owner's running queue and active claim executions through the existing backend APIs. Registration before the first checkpoint and active continuation after a completed parent are covered. Startup preserves the saved scope/attempt and admits no claims; the next explicit command or saved-sign-off notification continues the work.
 
-Ctrl+C stops new admissions and cancels the CLI's active work, closing its run/to-do state. The standalone command shuts down its temporary backend; an attached app stays available. Backend shutdown also fences any active explicit run before releasing database ownership. Server-side attempt IDs and deadlines reject late helper decisions, evidence, events and payments. Restart closes abandoned runs once and leaves eligible work Waiting until another explicit command; it does not resume model execution. Saved decisions, sign-offs and payments survive recovery.
+## Storage, tracing and reset
 
-## Rebuild and ownership
+SQLAlchemy Core provides the shared business query surface. Supabase business and checkpoint tables are confined to `undercover`. Backend pools allow at most four connections with no overflow; the agent's synchronous saver pool allows at most four, including service ownership. A separate setup/reset process also allows at most four. The CLI and dashboard open no database connections. Ownership uses SQLite file locks or Postgres advisory locks, and business transactions never span network/model calls or human waits.
 
-Use one backend owner per database. The explicit CLI attaches through HTTP and the backend rejects overlapping agent runs. A standalone command owns its temporary backend for the run. Reset still requires stopping the app. All commands honor `UNDERCOVER_DB_PATH`, defaulting to the root `undercover.db`. `UNDERCOVER_BACKEND_URL` defaults to `http://localhost:8000`; a custom backend's listening address must match it. The CLI accepts only local HTTP addresses and verifies the configured database identity using health headers before attaching; an unrelated service/database is rejected without assessment.
+Graph checkpoints use `durability="sync"` with synchronous Postgres/SQLite savers. Langfuse callbacks group all executions of a claim/thread in session `claim_id:thread_id`, with claim/run/attempt metadata. Setup/export/flush and activity/reporting are observational; errors produce safe diagnostic references without undoing a decision or payment. Mandatory evidence, financial and lifecycle writes still surface failures and reconcile ambiguous responses.
 
-Stop UnderCover before rebuilding:
+Stop backend and agent before reseeding:
 
 ```powershell
 uv run -m backend.reset_db
 ```
 
-This validates the permitted seed files and replaces only the configured database. It restores all source claims in source order and clears decisions, sign-offs, simulated payments, events, failure counts, runs, attempts, to-dos and evidence. Invalid input leaves an existing database intact. It starts no agent; evaluation/security claims are never imported. Ordinary startup updates the section index/current instructions without resetting claims.
+Reset validates the permitted source allowlist first. SQLite replaces only the selected file and its included checkpoints. Postgres clears owned product/checkpoint data transactionally, preserving checkpointer migration metadata and other schemas. It restores the source queue and clears decisions, sign-offs, payments, activity, failures, runs, attempts, to-dos, evidence and applicable checkpoints. Active owners block reset. Normal startup never reseeds existing claims.
 
-For a low-cost live trial, use a dedicated PowerShell terminal and a separate database:
+## Verification and review
 
-```powershell
-$env:UNDERCOVER_DB_PATH = Join-Path (Get-Location) 'undercover-harness-trial.db'
-$env:MODEL_PROVIDER = 'openrouter'
-$env:MODEL_NAME = 'deepseek/deepseek-v4.1-flash'
-uv run -m backend.reset_db
-uv run -m agent --cap 5
-```
+On October 31, 2026, `npm run check` exited 0 with `.env` absent and inherited external-service variables removed. The original file and process settings were restored in `finally`. No Supabase, Langfuse or real-model access was needed.
 
-Reseed before every live trial and keep the cap at five. To watch the trial in the dashboard, start `npm run dev` first in a separate terminal with the same database setting, then execute the agent command from the terminal above. Stop the app before reseeding. Each explicit invocation has its own cap; starting the app alone consumes no model calls. Close the dedicated terminals afterward to discard their environment overrides.
+| Check | Result |
+| --- | --- |
+| Ruff format/lint and Pyright | Passed; zero type errors/warnings |
+| Python | 305 tests passed; 94.97% coverage |
+| Prettier, ESLint and strict TypeScript | Passed |
+| Component tests | 24 passed; 99.35% statement / 93.85% branch coverage |
+| Playwright | Eight passed, using the isolated port-8003 receiver |
 
-## Verification
+The service phase also committed with hooks enabled after 301 Python and 24 component tests passed. Final handover checks include the subsequent startup, connection and routing-identity fixes described below. The final commit runs the required hooks again.
 
-`npm run check` exits 0 for the October 27 human-review revision: Ruff, Pyright, 224 Python tests with 97.53% coverage, Prettier, ESLint, TypeScript, 21 component tests with 99.33% statement / 92.72% branch coverage, and eight Playwright tests. The production dashboard build also passes. The synthetic API acceptance sequence verifies five distinct claims, seven attempts, three failures, one technical handoff, one pending sign-off and one cap-excluded Waiting claim. CLI integration verifies standalone and attached commands, full/capped/named scopes, cross-database rejection, interruption, rebuilding and preserved outcomes. Twenty new regression cases cover logging, retry logging, combined cleanup failures, safe diagnostic locations, reporting continuation, explicit budgets, startup/rollback/rebuild/CLI cleanup and compatibility with the previous stored-run format. Existing provider tests also assert explicit-command and two-failure recovery advice.
+Four real subprocess termination cases cover a saved early graph step, decision/payment committed before checkpoint, and graph completion before attempt finalization. They retain the same attempt/thread and original named scope, with one decision/payment and no new failures. Other tests cover the exact payout boundaries, thirty-call reservations, paused budgets, stale execution/coordinator fencing, matching/different financial replays, completed-parent continuation, saved caps/later arrivals, ownership/reset exclusion and primary/cleanup failures. Tests use stub models, temporary SQLite and no external tracing or database access.
 
-Playwright MCP verified that the app starts idle and stays idle across refresh and navigation: all 25 isolated test claims remained Waiting, with `{"run":null}` before and after, and no console errors. Full-stack tests then explicitly invoke the stubbed CLI to follow plan progress, outcomes, retries, handoff, evidence and handler actions. Earlier harness browser checks cover full evidence, both prompts, frozen summaries, keyboard access and desktop/390-pixel layouts in light/dark modes. Automated checks use stub models and temporary databases. Coverage thresholds and hooks remain enabled. No real agent run was launched for the explicit-command revision.
+The port-8003 E2E receiver verifies sign-off was saved before notification, exactly one notification, attribution after refresh, In progress UI and no competing manual payment action. Python tests verify actual graph resume/payment. Browser review at 1440 and 390 pixels in light/dark modes confirmed keyboard sign-off, readable USD values, activity, both read-only prompts, refreshed pending payment and no console errors before preview shutdown. Windows `uv sync --locked`, `npm install` and isolated three-service `npm run dev` startup passed, with no run admitted. Temporary services were stopped and the original environment restored.
 
-The historical October 26 live trial, before the explicit-launch revision, used a freshly seeded separate database and the specified default model. It completed five distinct claims in five attempts: five approvals, four simulated payments, one awaiting sign-off, zero failed assessments/technical handoffs/unpaid approvals, and twenty claims left Waiting. All five claims retained wording and manual evidence. Health, live plan updates, full reads, exact read-only prompts, final totals and refresh persistence were checked in Playwright MCP. This verifies operation and observability, not accuracy against the held-out answer key. The trial servers are stopped and results remain in ignored `undercover-harness-trial.db`; the student's `.env` and working `undercover.db` were preserved.
+Review traced admission through service/queue ownership, helper budgets and cancellation, graph routing, financial reconciliation, attempt/run finalization, notifications, dashboard polling/actions, migrations and reset. It retained the harness review's safe-diagnostic and observational-write protections. Cleanup injection covers primary plus cleanup errors, cleanup alone and interruption; public logs exclude private sentinels while retaining diagnostic locations. Coverage thresholds, hooks and existing regression assertions remain enabled. The finite-queue browser wait uses forty seconds inside its existing forty-five-second test budget; retries are scripted after another claim continues, and all full-snapshot/later-arrival assertions remain.
+
+Final connection review moved matching financial replay responses outside their transactions. Each request now releases its transaction connection before reading the stored claim, avoiding nested connection checkout under a saturated bounded pool. A connection-nesting guard covers both decision and payment replay, and four concurrent matching payments still produce one financial event. Startup reconciliation tests cover orphan registration, reservation without an initial checkpoint, a completed-parent active continuation and ownership release after a recovery failure.
+
+Database identity includes the pooler routing username inside its hash, so projects sharing a session-pooler host remain distinct. Password rotation and driver spelling do not change that identity. No username, password or URL is exposed in the health header.
+
+## Pending live acceptance
+
+No Supabase write or real-model trial has been performed for this durable build. Read-only inspection found no `undercover` tables in the connected project, and safe configuration inspection matched `DATABASE_URL` to project `tqjlbjkndxvmdxiqkloh`.
+
+Automatic approval review rejected initialization/reseeding, including a second request limited to the verified project and the explicitly fictional course records. The rejected action would upload those records and create/reset the project's owned `undercover` data. Explicit approval for that destination and payload is still required. No remote records or resources were changed.
+
+After approval, stop the app and agent, reseed the selected Supabase database, select the default OpenRouter model in the service terminal, then start `npm run dev`. In a matching second terminal run `uv run -m agent --cap 5`. Each independent live trial must start from a reseed and stay capped at five; do not reseed between killing that trial and continuing its saved scope.
+
+Still unverified: live Supabase initialization/reseed and schema isolation; a default-model capped run; dashboard sign-off to Paid within five seconds while the worker is free; live kill/restart with the same attempt/thread; no more than twelve observed Postgres connections; and authenticated Langfuse session traces before/after sign-off. Pool settings and offline mocks do not substitute for those observations. No later-day features, evaluation data, AWS resources or course notebooks were changed. Existing notebook edits remain the student's work, and nothing has been pushed.

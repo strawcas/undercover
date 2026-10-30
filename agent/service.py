@@ -10,12 +10,14 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import JSONResponse
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from pydantic import TypeAdapter
 
 from agent.checkpoints import checkpointer
 from agent.execution import Runner
+from agent.http import RequestOptions, request
 from agent.main import backend
 from agent.service_worker import ModelFactory, Worker
-from backend.claim_models import Health, Recorded
+from backend.claim_models import Health, QueueRow, Recorded
 from backend.config import (
     agent_owner_path,
     agent_url,
@@ -24,7 +26,7 @@ from backend.config import (
     load_environment,
 )
 from backend.diagnostics import preserve_primary
-from backend.harness_models import ApiError, Run, RunInput
+from backend.harness_models import ApiError, Attempt, CurrentRun, Run, RunInput
 from backend.local import local_address
 from backend.ownership import DatabaseOwner
 
@@ -66,6 +68,45 @@ def resources(runner: Runner | None) -> Iterator[BaseCheckpointSaver | None]:
             yield None
 
 
+def recover_service_work() -> None:
+    """Suspend the previous owner's work before starting the exclusive worker."""
+    detail = "The agent service restarted; an explicit command continues saved work."
+    with backend() as client:
+        response = request(client, "GET", "/api/agent-runs/current")
+        response.raise_for_status()
+        parent = CurrentRun.model_validate(response.json()).run
+        if parent and parent.status == "running":
+            request(
+                client,
+                "POST",
+                f"/api/agent-runs/{parent.run_id}/finish",
+                {"status": "interrupted", "detail": detail},
+                options=RequestOptions(
+                    headers={
+                        "X-UnderCover-Run-Generation": str(parent.execution_generation)
+                    }
+                ),
+            ).raise_for_status()
+        response = request(client, "GET", "/api/claims")
+        response.raise_for_status()
+        for claim in TypeAdapter(list[QueueRow]).validate_python(response.json()):
+            if claim.run_active:
+                response = request(
+                    client, "GET", f"/api/claims/{claim.claim_id}/execution"
+                )
+                response.raise_for_status()
+                entry = Attempt.model_validate(response.json())
+                request(
+                    client,
+                    "POST",
+                    f"/api/agent-runs/{entry.run_id}/attempts/{entry.thread_id}/suspend",
+                    {"detail": detail},
+                    options=RequestOptions(
+                        headers={"X-UnderCover-Execution": entry.execution_id or ""}
+                    ),
+                ).raise_for_status()
+
+
 def create_app(
     runner: Runner | None = None, model_factory: ModelFactory | None = None
 ) -> FastAPI:
@@ -76,6 +117,7 @@ def create_app(
     async def lifespan(app: FastAPI):
         verify_backend(identity)
         with resources(runner) as saver:
+            recover_service_work()
             worker = Worker(runner, model_factory, saver)
             app.state.worker = worker
             worker.thread.start()

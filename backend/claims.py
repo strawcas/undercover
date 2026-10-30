@@ -1,4 +1,4 @@
-"""Claim lifecycle and payment rules enforced in SQLite transactions."""
+"""Claim lifecycle and payment rules enforced in business transactions."""
 
 import json
 from decimal import Decimal
@@ -151,42 +151,44 @@ class Claims:
                     matching = False
                 if not matching:
                     raise ClaimError(409, "The claim already has a different decision.")
-                return self.detail(claim_id)
-            if not row["active"] or row["thread_id"] != decision.thread_id:
-                raise ClaimError(409, "The decision must belong to the active run.")
-            if row["run_id"]:
-                require_attempt(connection, row, decision.thread_id, self.execution_id)
-                result.update(decision_versions(connection, claim_id, decision))
             else:
-                result.update(
-                    manual_sections=[],
-                    policy_wording_version=None,
-                    claims_manual_version=None,
-                )
-            connection.execute(
-                "UPDATE claims SET decision=?, payout_cents=?, state=?, "
-                "decision_request=? WHERE id=?",
-                (
-                    json.dumps(result),
-                    payout,
-                    state,
-                    decision.model_dump_json(),
-                    claim_id,
-                ),
-            )
-            append_event(
-                connection,
-                claim_id,
-                EventInput(
-                    thread_id=decision.thread_id,
-                    action="Record decision",
-                    status="completed",
-                    detail=(
-                        f"{decision.outcome.title()}: ${dollars(payout)}. "
-                        f"{decision.explanation}"
+                if not row["active"] or row["thread_id"] != decision.thread_id:
+                    raise ClaimError(409, "The decision must belong to the active run.")
+                if row["run_id"]:
+                    require_attempt(
+                        connection, row, decision.thread_id, self.execution_id
+                    )
+                    result.update(decision_versions(connection, claim_id, decision))
+                else:
+                    result.update(
+                        manual_sections=[],
+                        policy_wording_version=None,
+                        claims_manual_version=None,
+                    )
+                connection.execute(
+                    "UPDATE claims SET decision=?, payout_cents=?, state=?, "
+                    "decision_request=? WHERE id=?",
+                    (
+                        json.dumps(result),
+                        payout,
+                        state,
+                        decision.model_dump_json(),
+                        claim_id,
                     ),
-                ),
-            )
+                )
+                append_event(
+                    connection,
+                    claim_id,
+                    EventInput(
+                        thread_id=decision.thread_id,
+                        action="Record decision",
+                        status="completed",
+                        detail=(
+                            f"{decision.outcome.title()}: ${dollars(payout)}. "
+                            f"{decision.explanation}"
+                        ),
+                    ),
+                )
         return self.detail(claim_id)
 
     def validate_thread(self, claim_id: str, thread_id: str) -> None:
@@ -244,33 +246,36 @@ class Claims:
                     thread_id and thread_id != row["thread_id"]
                 ):
                     raise ClaimError(409, "Payment conflicts with the recorded payout.")
-                return self.detail(claim_id)
-            if thread_id:
-                require_attempt(connection, row, thread_id, self.execution_id)
-            self._check_payment(row, amount, limit)
-            result = {
-                "amount": dollars(cents(amount)),
-                "created_at": now(),
-                "simulated": True,
-                "sign_off": json.loads(row["sign_off"]) if row["sign_off"] else None,
-            }
-            connection.execute(
-                "UPDATE claims SET payment=?, review_reason=NULL, "
-                "state='decided' WHERE id=?",
-                (json.dumps(result), claim_id),
-            )
-            append_event(
-                connection,
-                claim_id,
-                EventInput(
-                    thread_id=row["thread_id"],
-                    action="Simulated payment",
-                    status="completed",
-                    detail=(
-                        f"Recorded ${result['amount']}. No real money was transferred."
+            else:
+                if thread_id:
+                    require_attempt(connection, row, thread_id, self.execution_id)
+                self._check_payment(row, amount, limit)
+                result = {
+                    "amount": dollars(cents(amount)),
+                    "created_at": now(),
+                    "simulated": True,
+                    "sign_off": json.loads(row["sign_off"])
+                    if row["sign_off"]
+                    else None,
+                }
+                connection.execute(
+                    "UPDATE claims SET payment=?, review_reason=NULL, "
+                    "state='decided' WHERE id=?",
+                    (json.dumps(result), claim_id),
+                )
+                append_event(
+                    connection,
+                    claim_id,
+                    EventInput(
+                        thread_id=row["thread_id"],
+                        action="Simulated payment",
+                        status="completed",
+                        detail=(
+                            f"Recorded ${result['amount']}. "
+                            "No real money was transferred."
+                        ),
                     ),
-                ),
-            )
+                )
         return self.detail(claim_id)
 
     @staticmethod

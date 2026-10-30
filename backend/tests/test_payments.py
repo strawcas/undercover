@@ -126,8 +126,8 @@ def test_competing_payments(repository):
             return error.status
         return 201
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        assert sorted(executor.map(pay_once, range(2))) == [201, 201]
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        assert sorted(executor.map(pay_once, range(4))) == [201] * 4
     assert (
         len(
             [

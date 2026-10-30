@@ -22,6 +22,18 @@ def test_environment_selection_and_identity(monkeypatch, tmp_path):
     assert config.database_target() == first
     assert config.database_identity(first) == config.database_identity(second)
     assert config.database_identity(first) != config.database_identity(first + "2")
+    pooler = (
+        "postgresql://postgres.project_a:private@shared.pooler.example:5432/postgres"
+    )
+    assert config.database_identity(pooler) != config.database_identity(
+        pooler.replace("project_a", "project_b")
+    )
+    assert config.database_identity(pooler) == config.database_identity(
+        pooler.replace("private", "rotated")
+    )
+    assert config.database_identity(pooler) == config.database_identity(
+        pooler.replace("postgresql://", "postgresql+psycopg://")
+    )
     for invalid in ["", "sqlite:///other.db"]:
         monkeypatch.setenv("DATABASE_URL", invalid)
         with pytest.raises(ValueError, match="session pooler"):

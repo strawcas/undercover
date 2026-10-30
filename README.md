@@ -18,15 +18,15 @@ npm install
 npm run dev
 ```
 
-Open [the claims dashboard](http://localhost:5173). The backend is at [localhost:8000](http://localhost:8000/docs). Add `OPENROUTER_API_KEY` to your existing `.env` for agent runs; `.env.example` lists the supported settings. Set `MODEL_NAME=openrouter/free` to use the free model option, or leave it unset for the default model.
+Open [the claims dashboard](http://localhost:5173). The backend is at [localhost:8000](http://localhost:8000/docs), and the agent service at [localhost:8002](http://localhost:8002/docs). Add `OPENROUTER_API_KEY` to your existing `.env`; `.env.example` lists the settings. `DATABASE_URL` selects the Supabase session pooler and `undercover` schema; without it, storage uses SQLite. Langfuse keys enable claim tracing. Set `MODEL_NAME=openrouter/free` for the free model option or leave it unset for the default.
 
-`npm run dev` serves the backend and dashboard and leaves the agent idle. Start assessments explicitly from another terminal with `uv run -m agent`, or `uv run -m agent --cap 5` for up to five distinct claims. The command uses the running backend, so you can watch the to-do list and claim evidence in the dashboard. It also works standalone by starting its own temporary backend when the app is stopped.
+`npm run dev` starts all three services and admits no claims. Start assessments explicitly in another terminal with `uv run -m agent`, or `uv run -m agent --cap 5` for up to five distinct claims. Watch the plan, evidence and activity in the dashboard. Standalone commands start temporary backend/agent child processes when the app is stopped.
 
-The queue agent chooses the order within the eligible snapshot and delegates fresh claim helpers one at a time. Helpers look up the policy wording and claims manual by section; each claim shows the exact versioned evidence read. Failed undecided claims retry once; two failures require Handler review. Later arrivals and cap-excluded claims wait for another explicit command. Backend restarts and browser refreshes never start assessments.
+The queue agent delegates claims one at a time. Each claim graph saves its steps and exact versioned policy/manual evidence. A stopped queue continues its saved scope on the next command, keeping the same interrupted attempt/thread. Genuine undecided failures retry once with a new thread; two failures require Handler review. Later arrivals and cap-excluded claims wait for another command.
 
-The default model is `deepseek/deepseek-v4.1-flash` with low reasoning effort. Approved payouts up to $1,000 can be paid automatically during an explicit run. Above $1,000, select a reviewing handler and **Sign off payout**, then **Record simulated payment**. Everyone shares the local workspace without sign-in. All payments are simulated.
+The default model is `deepseek/deepseek-v4.1-flash` with low reasoning effort. The graph pays approvals up to $1,000 directly. Above the limit, select a handler and **Sign off payout**. The same graph resumes and pays, recording who signed off and when. The claim stays In progress until paid. If the service was offline, the next explicit command recovers the saved sign-off. Everyone shares the workspace without sign-in; payments are simulated.
 
-Stop the app before rebuilding the database from `data/`, which clears previous decisions, sign-offs, payments and activity and puts every source claim back in Waiting:
+Stop the backend and agent before rebuilding the selected database from `data/`. This clears business work and matching checkpoints, restoring the source queue:
 
 ```powershell
 uv run -m backend.reset_db
@@ -40,9 +40,9 @@ uv run -m agent --cap 5
 uv run -m agent --claim-id CLM-1001
 ```
 
-The agent exits after one explicitly requested run and leaves an existing app running. The cap counts distinct claims, including failures; retries use the same slot. Without a cap, the full eligible snapshot is worked; `UNDERCOVER_MAX_CLAIMS` no longer changes that behavior. `--max-claims` remains a compatibility alias. Decided, awaiting-sign-off and Handler review claims are skipped. Commands honor `UNDERCOVER_DB_PATH`, otherwise `undercover.db`. An attached CLI requires the same database setting as the app; competing agent runs and unrelated backends are rejected.
+The command exits after the requested scope and leaves an attached app running. The cap counts distinct claims; retries use the same slot. `--max-claims` remains an alias and `UNDERCOVER_MAX_CLAIMS` is ignored. Unsigned held claims remain paused. A continuation finishes its original snapshot/cap before any new snapshot can be requested. Commands and services must select the same database; SQLite defaults to `undercover.db` or `UNDERCOVER_DB_PATH`. Restart the agent service after changing its model/database settings.
 
-`npm run check` uses stub models and temporary databases, including CLI and Playwright integration tests. Normal startup preserves saved work; source claim changes load on a fresh database or explicit rebuild. Before a live trial, reseed a separate database and cap the run at five. See [the product status](docs/STATUS.md) for the exact Windows trial commands, providers, APIs, output/exit codes and recovery limits.
+`npm run check` uses stub models and temporary SQLite databases, with a separate browser-test notification receiver on port 8003. Normal startup preserves saved work. Every live trial requires a reseed first and a cap of five. See [the product status](docs/STATUS.md) for configuration, recovery and acceptance results, including pending live verification.
 
 _If you're looking at this in VS Code or Cursor, right-click `README.md` in the Explorer on the left and choose **Open Preview** to see it formatted._
 

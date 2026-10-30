@@ -1,5 +1,7 @@
 import json
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from threading import local
 from uuid import uuid4
 
 from backend.claims import Claims
@@ -68,11 +70,33 @@ def test_legacy_decision_without_request_fields_stays_immutable(client, reposito
         )
 
 
-def test_matching_financial_replays_preserve_records_and_events(client, repository):
+def guard_connection_nesting(repository, monkeypatch):
+    original = repository.connect
+    state = local()
+
+    @contextmanager
+    def single_connection():
+        assert not getattr(state, "active", False), (
+            "A financial request nested connections"
+        )
+        state.active = True
+        try:
+            with original() as connection:
+                yield connection
+        finally:
+            state.active = False
+
+    monkeypatch.setattr(repository, "connect", single_connection)
+
+
+def test_matching_financial_replays_preserve_records_and_events(
+    client, repository, monkeypatch
+):
     assert client.get("/api/claims/CLM-1001/execution").status_code == 404
     thread = begin_claim(repository)
     body = decision_payload(thread, payout="420.00")
     audit_decision(repository, "CLM-1001", DecisionInput.model_validate(body))
+    guard_connection_nesting(repository, monkeypatch)
     first = client.post("/api/claims/CLM-1001/decision", json=body)
     assert first.status_code == 201
     decision = first.json()["decision"]

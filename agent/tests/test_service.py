@@ -13,6 +13,10 @@ from agent.tests.stubs import api_client, scripted_model
 from backend import routes
 from backend.claims import Claims
 from backend.config import database_identity
+from backend.executions import ExecutionInput, Executions
+from backend.harness_models import LimitedScope, RunInput
+from backend.runs import Runs
+from backend.tests.conftest import begin_claim
 
 
 def until(predicate):
@@ -217,3 +221,84 @@ def test_notification_ack_followed_by_service_failure_remains_recoverable(
         until(lambda: Claims(repository).detail("CLM-1001")["payment"] is not None)
         assert Claims(repository).detail("CLM-1001")["failed_attempts"] == 0
         assert Claims(repository).detail("CLM-1001")["run_id"] == run_id
+
+
+@pytest.mark.parametrize("reserved", [False, True])
+def test_service_restart_recovers_registration_and_missing_first_checkpoint(
+    connected, repository, reserved
+):
+    scope = LimitedScope(mode="limited", max_claims=1)
+    thread = begin_claim(repository, scope=scope) if reserved else None
+    if thread:
+        parent = Runs(repository).current()
+    else:
+        parent, _ = Runs(repository).create(RunInput(run_id=uuid4(), scope=scope))
+    assert parent is not None
+    run_id = parent["run_id"]
+    repository.add_claim(
+        repository.record("claim", "CLM-1001") | {"claim_id": "TEST-LATER"}
+    )
+    with TestClient(service.create_app(model_factory=ScriptedQueueModel)) as agent:
+        path = f"/api/agent-runs/{run_id}"
+        paused = connected.get(path).json()
+        assert paused["status"] == "interrupted"
+        assert paused["counts"]["assessment_attempts"] == int(reserved)
+        assert Claims(repository).detail("CLM-1001")["decision"] is None
+        assert Claims(repository).detail("CLM-1001")["failed_attempts"] == 0
+        result = agent.post(
+            "/runs", json={"run_id": str(uuid4()), "scope": {"mode": "all"}}
+        )
+        assert result.status_code == 202
+        assert result.json()["run_id"] == run_id
+        until(lambda: connected.get(path).json()["status"] == "completed")
+        after = connected.get(path).json()
+        assert after["counts"]["assessment_attempts"] == 1
+        assert after["counts"]["worked"] == 1
+        assert after["counts"]["failed_assessments"] == 0
+        if thread:
+            assert after["attempts"][0]["thread_id"] == thread
+        assert Claims(repository).detail("TEST-LATER")["status"] == "waiting"
+        assert len(after["snapshot_claim_ids"]) == 25
+
+
+def test_service_restart_releases_claim_execution_after_parent_completed(
+    connected, repository
+):
+    parent = queue.run_queue({"mode": "claim", "claim_id": "CLM-1001"})
+    claim = Claims(repository)
+    claim.sign_off("CLM-1001", "HND-01")
+    entry = parent.attempts[0]
+    stale = Executions(repository).acquire(
+        "CLM-1001",
+        ExecutionInput.model_validate(
+            {"thread_id": entry.thread_id, "owner_id": str(uuid4())}
+        ),
+    )
+    with TestClient(service.create_app(model_factory=ScriptedQueueModel)) as agent:
+        saved = connected.get("/api/claims/CLM-1001/execution").json()
+        assert saved["status"] == "suspended"
+        assert saved["owner_id"] is None
+        assert saved["thread_id"] == stale.thread_id
+        assert agent.post("/claims/CLM-1001/resume").status_code == 202
+        until(lambda: claim.detail("CLM-1001")["payment"] is not None)
+        assert claim.detail("CLM-1001")["failed_attempts"] == 0
+        assert connected.get(
+            f"/api/agent-runs/{parent.run_id}"
+        ).json() == parent.model_dump(mode="json")
+
+
+def test_failed_startup_reconciliation_releases_checkpoint_ownership(
+    connected, monkeypatch
+):
+    original = service.request
+    monkeypatch.setattr(
+        service, "request", Mock(side_effect=RuntimeError("Backend unavailable"))
+    )
+    with (
+        pytest.raises(RuntimeError, match="Backend unavailable"),
+        TestClient(service.create_app()),
+    ):
+        pass
+    monkeypatch.setattr(service, "request", original)
+    with TestClient(service.create_app()) as agent:
+        assert agent.get("/health").json() == {"status": "ok"}

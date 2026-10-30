@@ -1,12 +1,16 @@
 # Process
 
-`uv sync` and `npm install` at the repo root install everything, including a git pre-commit hook. `npm run dev` starts the backend and the dashboard.
+`uv sync` and `npm install` at the repo root install everything, including a git pre-commit hook. `npm run dev` starts the backend, agent service and dashboard on Windows or macOS. Development/terminal entry points load the root `.env` explicitly; tests and imported product modules never load it. Terminal variables take precedence.
+
+Start a queue explicitly with `uv run -m agent`, `--cap N` or `--claim-id ID`. The command attaches to matching local services or owns temporary backend/agent child processes. An interrupted queue keeps its scope, cap, to-dos and admitted claims; the next command continues it before admitting fresh work. Restarting services alone admits no fresh claims. Sign-off notifications resume already approved claims through the same sequential worker.
 
 `npm run check` runs every check:
 
 - Python: ruff (lint and format), pyright, and pytest with 80% coverage
 - TypeScript: ESLint, Prettier, tsc, and vitest with 80% coverage
 - Playwright end-to-end tests
+
+Checks use temporary SQLite databases and stub models. Browser tests run a stand-in agent on port 8003 and point only their isolated backend at it. They must not use the development service on port 8002, Supabase, Langfuse or a real model. For durable-state handover, run the full command with `.env` temporarily absent and external-service variables removed, restoring both in `finally` even on failure.
 
 The pre-commit hook runs the format, lint, type and unit test checks on every commit.
 
@@ -41,6 +45,14 @@ When the last phase is done, run `npm run check` and report the results.
 - Don't open `data/evals/` unless you're asked to.
 - Everything must work on Windows: write `package.json` scripts as `uv run` commands or `.mjs` files.
 - When asked a question about the code, explain the issue and its cause without modifying any code unless I explicitly ask you to make changes.
+
+## Durable-state acceptance
+
+Stop the backend and agent before `uv run -m backend.reset_db`. It validates permitted source records before replacing SQLite or transactionally reseeding owned Supabase tables/checkpoints in `undercover`. Normal startup preserves saved work. Switching to Supabase does not transfer or overwrite historical SQLite work.
+
+Every real-model trial starts with a reseed and uses the default model with `uv run -m agent --cap 5`. Keep the service running for dashboard sign-off. Test kill/restart recovery inside that same capped run without reseeding between interruption and continuation. A second independent trial needs a fresh reseed. Never reset the student's working database as part of automated tests.
+
+Verify one payment with saved handler/time, the same attempt/thread after recovery, at most twelve observed Postgres connections across processes, and Langfuse session traces before/after sign-off. Each database-using process must have at most four connections, including ownership sessions. Record live evidence and explicit pending items in status; offline mocks do not establish these live results.
 
 ## Review before committing
 

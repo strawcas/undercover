@@ -19,10 +19,12 @@ def checkpoint_owner_path(path: Path) -> Path:
 
 
 def database_identity(path: Path | str) -> str:
-    """Identify the configured local database without exposing its path over HTTP."""
+    """Hash the database target, including pooler routing but excluding passwords."""
     if isinstance(path, str):
         url = make_url(path.replace("postgres://", "postgresql://", 1))
-        identity = str((url.host, url.port or 5432, url.database, "undercover"))
+        identity = str(
+            (url.host, url.port or 5432, url.database, url.username, "undercover")
+        )
     else:
         identity = os.path.normcase(str(path.resolve()))
     return sha256(identity.encode()).hexdigest()
