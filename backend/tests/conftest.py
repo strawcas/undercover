@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from agent import queue
 from agent.tests.queue_stubs import ScriptedQueueModel
-from backend import config
+from backend import config, routes
 from backend.harness_models import AllScope, AttemptInput, RunInput, TodosInput
 from backend.main import create_app
 from backend.models import DecisionInput
@@ -25,6 +25,7 @@ def repository(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def stub_queue(monkeypatch):
+    monkeypatch.setattr(routes, "notify_sign_off", lambda _claim: None)
     monkeypatch.setattr(config, "load_environment", lambda: None)
     monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
     monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)

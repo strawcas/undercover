@@ -41,7 +41,7 @@ function api(initial: ClaimDetail) {
       if (path.endsWith("/sign-off"))
         current = {
           ...current,
-          status: "decided",
+          status: "in_progress",
           sign_off: {
             handler_id: "HND-01",
             handler_name: "Dana Whitfield",
@@ -56,6 +56,7 @@ function api(initial: ClaimDetail) {
             amount: decision.payout,
             created_at: decision.created_at,
             simulated: true,
+            sign_off: current.sign_off,
           },
         };
       return Promise.resolve(new Response("{}", { status: 201 }));
@@ -269,4 +270,64 @@ it("continues polling after a transient failure and cleans up on unmount", async
     await vi.advanceTimersByTimeAsync(3000);
   });
   expect(backend.fetcher).toHaveBeenCalledTimes(calls);
+});
+
+it("polls signed-off payment while the agent is offline and renders saved attribution", async () => {
+  vi.useFakeTimers();
+  const signOff = {
+    handler_id: "HND-01",
+    handler_name: "Dana Whitfield",
+    amount: "1250.00",
+    created_at: decision.created_at,
+  };
+  const pending: ClaimDetail = {
+    ...claim,
+    decision,
+    run_id: "saved-run",
+    status: "in_progress",
+    sign_off: signOff,
+  };
+  const backend = api(pending);
+  let view: ReturnType<typeof render> | undefined;
+  await act(async () => {
+    view = render(<ClaimReader claimId="CLM-1001" />);
+    await Promise.resolve();
+  });
+  expect(screen.getByText("Payment in progress")).toBeDefined();
+  expect(screen.getByText(/If the agent is offline/)).toBeDefined();
+  expect(
+    screen.queryByRole("button", { name: "Record simulated payment" }),
+  ).toBeNull();
+  backend.update({
+    ...pending,
+    status: "decided",
+    payment: {
+      amount: "1250.00",
+      created_at: decision.created_at,
+      simulated: true,
+      sign_off: signOff,
+    },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000);
+  });
+  expect(screen.getByText(/Simulated payment recorded/).textContent).toContain(
+    "Approved by Dana Whitfield",
+  );
+  expect(screen.queryByText("Payment in progress")).toBeNull();
+  view?.unmount();
+  const calls = backend.fetcher.mock.calls.length;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3000);
+  });
+  expect(backend.fetcher).toHaveBeenCalledTimes(calls);
+});
+
+it("explains continuation of a suspended assessment", async () => {
+  api({ ...claim, status: "in_progress", run_active: false });
+  render(<ClaimReader claimId="CLM-1001" />);
+  expect(await screen.findByText("Assessment paused")).toBeDefined();
+  expect(
+    screen.getByText(/continue the saved assessment from its last step/),
+  ).toBeDefined();
 });

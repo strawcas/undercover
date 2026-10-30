@@ -22,11 +22,14 @@ os.environ["MODEL_PROVIDER"] = "openrouter"
 os.environ["MODEL_NAME"] = ""
 os.environ["OPENROUTER_API_KEY"] = "stub-models-only"
 os.environ.pop("UNDERCOVER_MAX_CLAIMS", None)
+for external in ("DATABASE_URL", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"):
+    os.environ.pop(external, None)
+os.environ["UNDERCOVER_AGENT"] = "http://127.0.0.1:8003"
 attempts: dict[str, int] = {}
 
 
 def scripted_runner(claim_id: str, thread_id: str, *, budget) -> str:
-    time.sleep(1.2)
+    time.sleep(1.2 if claim_id == "CLM-1001" else 0.1)
     attempts[claim_id] = attempts.get(claim_id, 0) + 1
     if claim_id == "CLM-1001" and attempts[claim_id] == 1:
         store = app.state.claims.store
@@ -48,7 +51,7 @@ def wait_for_command(gate: Path) -> None:
     """Let browser tests explicitly invoke the CLI after checking the idle app."""
     while not gate.exists():
         time.sleep(0.1)
-    queue.model = ScriptedQueueModel
+    queue.model = lambda: ScriptedQueueModel(retry_after=7)
     run_command(scripted_runner)
 
 

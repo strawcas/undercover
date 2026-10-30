@@ -108,6 +108,16 @@ export function DecisionPanel({ claim }: Readonly<{ claim: Detail }>) {
           Simulated payment recorded: {money(claim.payment.amount)} at{" "}
           <time>{new Date(claim.payment.created_at).toLocaleString()}</time>. No
           real money was transferred.
+          {claim.payment.sign_off && (
+            <>
+              {" "}
+              Approved by {claim.payment.sign_off.handler_name} at{" "}
+              <time>
+                {new Date(claim.payment.sign_off.created_at).toLocaleString()}
+              </time>
+              .
+            </>
+          )}
         </p>
       )}
     </section>

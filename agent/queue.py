@@ -20,7 +20,7 @@ from agent.main import backend, model, run, validate_model_config
 from agent.middleware import ProviderRetry, QueueContext
 from agent.queue_tools import QueueTools
 from backend.diagnostics import diagnose, preserve_primary
-from backend.harness_models import Attempt, Run, Scope
+from backend.harness_models import Run, Scope
 from backend.reference_models import InstructionsResponse
 
 
@@ -77,65 +77,41 @@ def work_queue(tools: QueueTools, registered: Run, llm: BaseChatModel | None) ->
         }
 
 
-def resume_saved_claims(
-    client, registered: Run, runner: Runner, execution: Execution
-) -> None:
-    """Continue existing admissions before the coordinator selects fresh work."""
-    response = request(client, "GET", "/api/claim-executions/pending")
-    response.raise_for_status()
-    entries = TypeAdapter(list[Attempt]).validate_python(response.json())
-    for entry in entries:
-        if entry.run_id == registered.run_id:
-            QueueTools(
-                client,
-                registered.run_id,
-                runner,
-                execution,
-                registered.execution_generation,
-            ).work_attempt(entry, resume=True)
-        else:
-            old = request(client, "GET", f"/api/agent-runs/{entry.run_id}")
-            old.raise_for_status()
-            parent = Run.model_validate(old.json())
-            QueueTools(
-                client, parent.run_id, runner, execution, parent.execution_generation
-            ).work_attempt(entry, resume=True)
-            execution.resumed_count += 1
-
-
 def run_queue(
     scope: Scope | dict[str, object],
     runner: Runner = claim_runner,
     llm: BaseChatModel | None = None,
     execution: Execution | None = None,
+    registered: Run | None = None,
 ) -> Run:
     """Register the scope, work it and persist the factual final result."""
     selected = TypeAdapter(Scope).validate_python(scope)
     context = execution or Execution()
     with backend() as client:
-        context.run_id = str(uuid4())
-        response = request(
-            client,
-            "POST",
-            "/api/agent-runs",
-            {"run_id": context.run_id, "scope": selected.model_dump(mode="json")},
-        )
-        if response.is_error:
-            detail = response.json().get("detail")
-            raise AgentRunError(
-                detail
-                if isinstance(detail, str)
-                else "The backend rejected the run scope."
+        if registered is None:
+            context.run_id = str(uuid4())
+            response = request(
+                client,
+                "POST",
+                "/api/agent-runs",
+                {"run_id": context.run_id, "scope": selected.model_dump(mode="json")},
             )
-        registered = Run.model_validate(response.json())
-        context.continued = registered.run_id != context.run_id
+            if response.is_error:
+                detail = response.json().get("detail")
+                raise AgentRunError(
+                    detail
+                    if isinstance(detail, str)
+                    else "The backend rejected the run scope."
+                )
+            registered = Run.model_validate(response.json())
+            context.continued = registered.run_id != context.run_id
         context.run_id = registered.run_id
         tools = QueueTools(
             client, registered.run_id, runner, context, registered.execution_generation
         )
         status, detail = "completed", ""
         try:
-            resume_saved_claims(client, registered, runner, context)
+            tools.resume_pending()
             if registered.claim_limit:
                 work_queue(tools, registered, llm)
         except QueueStopped:

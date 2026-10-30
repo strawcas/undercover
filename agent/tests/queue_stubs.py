@@ -19,6 +19,8 @@ class ScriptedQueueModel(BaseChatModel):
     calls: list[str] = Field(default_factory=list)
     last_messages: list[BaseMessage] = Field(default_factory=list)
     peak_messages: int = 0
+    retry_after: int = 0
+    delegations: int = 0
 
     @property
     def _llm_type(self) -> str:
@@ -60,6 +62,8 @@ class ScriptedQueueModel(BaseChatModel):
         return ChatResult(generations=[ChatGeneration(message=response)])
 
     def _respond(self, last: ToolMessage) -> AIMessage:
+        if last.name == "delegate_claim":
+            self.delegations += 1
         if last.name == "list_waiting_claims":
             return self._choose(json.loads(str(last.content)))
         if last.name == "write_todos":
@@ -78,10 +82,11 @@ class ScriptedQueueModel(BaseChatModel):
             return self._call("check_completion", {})
         indices = {row["claim_id"]: index for index, row in enumerate(claims)}
         priority = {claim_id: index for index, claim_id in enumerate(self.order)}
+        retry_first = bool(self.retry_after and self.delegations >= self.retry_after)
         chosen = min(
             claims,
             key=lambda row: (
-                row["claim_id"] in data["retryable_claim_ids"],
+                (row["claim_id"] in data["retryable_claim_ids"]) != retry_first,
                 priority.get(row["claim_id"], len(priority) + indices[row["claim_id"]]),
             ),
         )["claim_id"]

@@ -3,11 +3,13 @@ from uuid import uuid4
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
+from langgraph.types import Command
 
 from agent import main
 from agent.checkpoints import checkpointer
-from agent.execution import AgentRunError
+from agent.execution import AgentRunError, AttemptBudget
 from agent.graph import ClaimState, ClaimWorkflow, build_graph
+from agent.lease import ClaimLease
 from agent.tests.stubs import StubModel, api_client, scripted_model
 from agent.tools import ClaimTools
 from backend.claims import Claims
@@ -46,6 +48,21 @@ def test_saved_interrupt_resumes_without_model_or_new_attempt(
             saver,
         )
         assert graph.get_state(config).next == ("approval",)
+    limits = AttemptBudget()
+    with (
+        api_client(client) as transport,
+        ClaimLease(transport, "CLM-1001", thread, limits),
+        checkpointer() as saver,
+    ):
+        graph = build_graph(
+            ClaimWorkflow(
+                ClaimTools(transport, "CLM-1001", thread, limits), scripted_model()
+            ),
+            saver,
+        )
+        with pytest.raises(AgentRunError, match="no longer active"):
+            graph.invoke(Command(resume={"sign_off": True}), config, durability="sync")
+    assert claims.detail("CLM-1001")["payment"] is None
     claims.sign_off("CLM-1001", "HND-01")
 
     def unavailable_model():
@@ -60,6 +77,39 @@ def test_saved_interrupt_resumes_without_model_or_new_attempt(
         == 1
     )
     assert len(client.get("/api/agent-runs/current").json()["run"]["attempts"]) == 1
+
+
+def test_sign_off_arriving_before_interrupt_acknowledgment_is_not_lost(
+    client, repository, monkeypatch
+):
+    monkeypatch.setattr(main, "backend", lambda: api_client(client))
+    original = main.build_graph
+    claims = Claims(repository)
+    thread = begin_claim(repository)
+
+    def checkpoint_then_sign(workflow, saver):
+        graph = original(workflow, saver)
+        invoke = graph.invoke
+
+        def acknowledge(*args, **kwargs):
+            result = invoke(*args, **kwargs)
+            if (
+                isinstance(result, dict)
+                and result.get("__interrupt__")
+                and not claims.detail("CLM-1001")["sign_off"]
+            ):
+                claims.sign_off("CLM-1001", "HND-01")
+            return result
+
+        monkeypatch.setattr(graph, "invoke", acknowledge)
+        return graph
+
+    monkeypatch.setattr(main, "build_graph", checkpoint_then_sign)
+    main.run("CLM-1001", thread, scripted_model(payout="1250.00"))
+    saved = claims.detail("CLM-1001")
+    assert saved["payment"]["sign_off"] == saved["sign_off"]
+    assert saved["thread_id"] == thread
+    assert saved["failed_attempts"] == 0
 
 
 def test_checkpoint_reopen_continues_after_saved_tools(client, repository, monkeypatch):

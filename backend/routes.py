@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response
 
 from backend.claim_models import (
     ClaimDetail,
@@ -23,6 +23,7 @@ from backend.models import (
     PaymentInput,
     SignOffInput,
 )
+from backend.notifications import notify_sign_off
 from backend.payouts import Payout, PayoutInput, calculate
 from backend.reference_models import InstructionsResponse
 from backend.usage import Usage, UsageInput, reserve
@@ -159,9 +160,13 @@ def record_decision(claim_id: str, decision: DecisionInput, claims: Service):
     status_code=201,
     response_model=SignOff,
 )
-def sign_off_claim(claim_id: str, sign_off: SignOffInput, claims: Service):
+def sign_off_claim(
+    claim_id: str, sign_off: SignOffInput, claims: Service, tasks: BackgroundTasks
+):
     """Sign off the stored approved payout as a handler."""
-    return claims.sign_off(claim_id, sign_off.handler_id)
+    saved = claims.sign_off(claim_id, sign_off.handler_id)
+    tasks.add_task(notify_sign_off, claim_id)
+    return saved
 
 
 @router.post(

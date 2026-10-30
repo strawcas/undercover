@@ -138,3 +138,23 @@ it("recovers from a failed read and stops polling after unmount", async () => {
   });
   expect(fetcher).toHaveBeenCalledTimes(calls);
 });
+
+it("explains how to continue an unfinished saved scope", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ run: { ...run, status: "interrupted" } }),
+        ),
+      ),
+  );
+  render(<RunProgress onSelect={vi.fn()} />);
+  expect(
+    await screen.findByText(/Queue paused.*continue its saved scope/),
+  ).toBeDefined();
+  expect(
+    screen.queryByText("The agent is planning and working this queue."),
+  ).toBeNull();
+});

@@ -45,7 +45,11 @@ def save_run(connection: Connection, data: StoredRun) -> None:
 
 
 def require_running(data: StoredRun) -> None:
-    if data.status not in {"running", "interrupted"}:
+    if data.status == "interrupted":
+        raise ClaimError(
+            409, "Queue is paused. Continue its saved scope with uv run -m agent."
+        )
+    if data.status != "running":
         raise ClaimError(409, "Agent run is already finished.")
 
 

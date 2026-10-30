@@ -16,6 +16,11 @@ export default defineConfig({
   use: { baseURL: "http://localhost:5174" },
   webServer: [
     {
+      command: "uv run -m backend.tests.agent_standin",
+      url: "http://127.0.0.1:8003/health",
+      reuseExistingServer: false,
+    },
+    {
       command: "uv run -m backend.tests.serve",
       url: "http://127.0.0.1:8011/api/health",
       reuseExistingServer: false,

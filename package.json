@@ -7,8 +7,9 @@
   },
   "scripts": {
     "prepare": "lefthook install && playwright install chromium",
-    "dev": "concurrently -k -n backend,dashboard npm:dev:backend npm:dev:dashboard",
+    "dev": "concurrently -k -n backend,agent,dashboard npm:dev:backend npm:dev:agent npm:dev:dashboard",
     "dev:backend": "uv run -m uvicorn backend.main:app --reload --reload-dir backend --env-file .env",
+    "dev:agent": "uv run -m agent.service",
     "dev:dashboard": "vite dashboard",
     "format": "uv run ruff format && prettier --write -u dashboard e2e *.config.*",
     "check": "npm run check:python && npm run check:ts && npm run e2e",

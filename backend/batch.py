@@ -11,9 +11,11 @@ from threading import current_thread, main_thread
 
 import httpx
 
+from agent.client import command
 from agent.execution import AttemptResult, Execution, Runner
 from agent.main import AgentRunError
 from agent.queue import run_queue
+from agent.service_worker import ModelFactory
 from backend.claim_models import ClaimDetail
 from backend.config import backend_url, database_target, run_scope
 from backend.diagnostics import preserve_primary
@@ -115,7 +117,23 @@ def interruptible(context: Execution):
         signal.signal(signal.SIGINT, previous)
 
 
-def main(runner: Runner = default_runner, argv: Sequence[str] = ()) -> int:
+def inline_command(scope: dict, runner: Runner, context: Execution) -> Run:
+    with agent_backend(Store(database_target()), runner, backend_url()) as claims:
+        try:
+            return run_queue(scope, runner, execution=context)
+        finally:
+            if claims is not None:
+                with preserve_primary("Reconcile terminal run"):
+                    reconcile_execution(claims, context)
+
+
+def main(
+    runner: Runner = default_runner,
+    argv: Sequence[str] = (),
+    *,
+    service: bool = False,
+    model_factory: ModelFactory | None = None,
+) -> int:
     """Explicitly work a full, capped or named claims queue."""
     report = Report()
     context = Execution(on_result=report.record)
@@ -123,14 +141,17 @@ def main(runner: Runner = default_runner, argv: Sequence[str] = ()) -> int:
     try:
         parsed = arguments(argv)
         scope = run_scope(parsed.max_claims, parsed.claim_id)
-        with agent_backend(Store(database_target()), runner, backend_url()) as claims:
-            try:
-                with interruptible(context):
-                    result = run_queue(scope, runner, execution=context)
-            finally:
-                if claims is not None:
-                    with preserve_primary("Reconcile terminal run"):
-                        reconcile_execution(claims, context)
+        with interruptible(context):
+            result = (
+                command(
+                    scope,
+                    context,
+                    None if runner is default_runner else runner,
+                    model_factory,
+                )
+                if service
+                else inline_command(scope, runner, context)
+            )
         if (
             result.status != "completed"
             or result.counts.handler_review

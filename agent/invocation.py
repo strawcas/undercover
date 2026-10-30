@@ -37,7 +37,10 @@ def invoke_helper(
         except BaseException as failure:
             future.set_exception(failure)
 
-    Thread(target=invoke, name=f"claim-{entry.claim_id}", daemon=True).start()
+    execution.active_thread = Thread(
+        target=invoke, name=f"claim-{entry.claim_id}", daemon=True
+    )
+    execution.active_thread.start()
     while True:
         if execution.cancel_active.is_set():
             raise QueueStopped

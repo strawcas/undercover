@@ -11,7 +11,40 @@ from backend.executions import (
     save_attempt,
 )
 from backend.models import DecisionInput
+from backend.runs import Runs
 from backend.tests.conftest import audit_decision, begin_claim, decision_payload
+
+
+def test_paused_queue_cannot_admit_or_resume_undecided_work_without_command(
+    client, repository
+):
+    thread = begin_claim(repository)
+    run_id = Claims(repository).detail("CLM-1001")["run_id"]
+    Runs(repository).recover()
+    attempts = f"/api/agent-runs/{run_id}/attempts"
+    for claim_id in ("CLM-1001", "CLM-1002"):
+        response = client.post(
+            attempts, json={"claim_id": claim_id, "thread_id": str(uuid4())}
+        )
+        assert response.status_code == 409
+        assert "paused" in response.json()["detail"]
+    owner = {"thread_id": thread, "owner_id": str(uuid4())}
+    assert client.post("/api/claims/CLM-1001/execution", json=owner).status_code == 409
+    assert Claims(repository).detail("CLM-1001")["failed_attempts"] == 0
+    assert Claims(repository).detail("CLM-1002")["status"] == "waiting"
+    resumed = client.post(
+        "/api/agent-runs", json={"run_id": str(uuid4()), "scope": {"mode": "all"}}
+    )
+    assert resumed.json()["run_id"] == run_id
+    client.headers["X-UnderCover-Run-Generation"] = str(
+        resumed.json()["execution_generation"]
+    )
+    entry = client.post(
+        attempts, json={"claim_id": "CLM-1001", "thread_id": str(uuid4())}
+    )
+    assert entry.status_code == 200
+    assert entry.json()["thread_id"] == thread
+    assert client.post("/api/claims/CLM-1001/execution", json=owner).status_code == 200
 
 
 def test_legacy_decision_without_request_fields_stays_immutable(client, repository):
@@ -36,6 +69,7 @@ def test_legacy_decision_without_request_fields_stays_immutable(client, reposito
 
 
 def test_matching_financial_replays_preserve_records_and_events(client, repository):
+    assert client.get("/api/claims/CLM-1001/execution").status_code == 404
     thread = begin_claim(repository)
     body = decision_payload(thread, payout="420.00")
     audit_decision(repository, "CLM-1001", DecisionInput.model_validate(body))
@@ -57,6 +91,9 @@ def test_matching_financial_replays_preserve_records_and_events(client, reposito
     )
     assert paid.status_code == 201
     Claims(repository).finish("CLM-1001", thread)
+    current = client.get("/api/claims/CLM-1001/execution")
+    assert current.status_code == 200
+    assert current.json()["thread_id"] == thread
     events = Claims(repository).events("CLM-1001")
     assert (
         client.post("/api/claims/CLM-1001/decision", json=body).json()["decision"]

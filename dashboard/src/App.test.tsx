@@ -205,6 +205,7 @@ it("shows decisions, references, sign-off and simulated payment", () => {
           amount: "1250.00",
           created_at: decision.created_at,
           simulated: true,
+          sign_off: null,
         },
       }}
     />,

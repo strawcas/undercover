@@ -41,6 +41,21 @@ def save_attempt(connection: Connection, entry: Attempt) -> None:
     )
 
 
+def require_assessment_queue(
+    connection: Connection, entry: Attempt, decided: bool
+) -> None:
+    """Require explicit queue continuation before resuming an undecided claim."""
+    if decided:
+        return
+    row = connection.execute(
+        "SELECT body FROM agent_runs WHERE id=?", (entry.run_id,)
+    ).fetchone()
+    if row is None or json.loads(row["body"])["status"] != "running":
+        raise ClaimError(
+            409, "Queue is paused. Continue its saved scope with uv run -m agent."
+        )
+
+
 def remaining(entry: Attempt) -> float:
     if entry.owner_id and entry.lease_until:
         end = min(datetime.now(UTC), datetime.fromisoformat(entry.lease_until))
@@ -84,6 +99,13 @@ class Executions:
     def __init__(self, store: Store):
         self.store = store
 
+    def current(self, claim_id: str) -> Attempt:
+        with self.store.connect() as connection:
+            row = claim_row(connection, claim_id)
+            if not row["thread_id"]:
+                raise ClaimError(404, "No assessment is saved for this claim.")
+            return read_attempt(connection, row["thread_id"])
+
     def acquire(self, claim_id: str, request: ExecutionInput) -> Attempt:
         with self.store.transaction() as connection:
             row = claim_row(connection, claim_id)
@@ -92,6 +114,7 @@ class Executions:
                 raise ClaimError(
                     409, "The execution must belong to the saved assessment."
                 )
+            require_assessment_queue(connection, entry, bool(row["decision"]))
             if entry.status == "failed" and not row["decision"]:
                 raise ClaimError(
                     409, "A failed assessment needs a fresh eligible attempt."

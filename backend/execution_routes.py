@@ -38,6 +38,16 @@ def acquire(claim_id: str, body: ExecutionInput, executions: Service):
     return executions.acquire(claim_id, body)
 
 
+@router.get(
+    "/claims/{claim_id}/execution",
+    operation_id="get_claim_execution",
+    response_model=Attempt,
+)
+def current(claim_id: str, executions: Service):
+    """Read the live saved assessment without changing a completed run snapshot."""
+    return executions.current(claim_id)
+
+
 @router.put(
     "/claims/{claim_id}/execution/{execution_id}",
     operation_id="heartbeat_claim_execution",

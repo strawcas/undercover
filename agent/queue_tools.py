@@ -176,6 +176,14 @@ class QueueTools:
     def delegate(self, claim_id: str) -> str:
         """Give one eligible claim to a fresh helper and receive one result line."""
         with self.lock:
+            current = self.current()
+            if current.status != "running":
+                self.execution.result = current
+                self.execution.stopping.set()
+                return (
+                    "The saved queue is paused; continue it with an explicit command."
+                )
+            self.resume_pending()
             if self.execution.stopping.is_set():
                 return "Queue processing is stopping; do not start another claim."
             response = self.request(
@@ -187,6 +195,25 @@ class QueueTools:
                 return f"{claim_id}: {response.json()['detail']}"
             entry = Attempt.model_validate(response.json())
             return self.work_attempt(entry)
+
+    def resume_pending(self) -> None:
+        """Finish saved work before admitting the next fresh claim."""
+        response = self.request("GET", "/api/claim-executions/pending")
+        response.raise_for_status()
+        for entry in TypeAdapter(list[Attempt]).validate_python(response.json()):
+            parent_response = self.request("GET", f"/api/agent-runs/{entry.run_id}")
+            parent_response.raise_for_status()
+            parent = Run.model_validate(parent_response.json())
+            tools = QueueTools(
+                self.client,
+                parent.run_id,
+                self.runner,
+                self.execution,
+                parent.execution_generation,
+            )
+            tools.work_attempt(entry, resume=True)
+            if parent.run_id != self.run_id:
+                self.execution.resumed_count += 1
 
     def work_attempt(self, entry: Attempt, *, resume: bool = False) -> str:
         try:

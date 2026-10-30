@@ -65,7 +65,12 @@ export interface ClaimDetail {
     amount: string;
     created_at: string;
   } | null;
-  payment: { amount: string; created_at: string; simulated: boolean } | null;
+  payment: {
+    amount: string;
+    created_at: string;
+    simulated: boolean;
+    sign_off: ClaimDetail["sign_off"];
+  } | null;
 }
 
 export interface ClaimEvent {
@@ -120,7 +125,7 @@ export interface Attempt {
   claim_id: string;
   thread_id: string;
   attempt_number: number;
-  status: "active" | "completed" | "failed";
+  status: "active" | "completed" | "failed" | "paused" | "suspended";
   started_at: string;
   deadline_at: string;
   finished_at: string | null;

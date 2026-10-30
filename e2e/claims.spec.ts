@@ -40,39 +40,13 @@ test("approves, shows live activity and records an eligible payment", async ({
   ).toContainText("Version 2026.2");
   await page.reload();
   await expect(page.getByText(/Simulated payment recorded/)).toBeVisible();
+  const eventsBefore = await request.get("/api/claims/CLM-1001/events");
   const repeat = await request.post("/api/claims/CLM-1001/pay", {
     data: { amount: "420" },
   });
-  expect(repeat.status()).toBe(409);
-});
-
-test("requires handler sign-off before paying more than USD 1,000", async ({
-  page,
-  request,
-}) => {
-  await page.goto("/");
-  await page.getByRole("button", { name: "Open CLM-1003" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Handler sign-off required" }),
-  ).toBeVisible({ timeout: 10000 });
-  await expect(
-    page.getByRole("button", { name: "Record simulated payment" }),
-  ).toHaveCount(0);
-  const blocked = await request.post("/api/claims/CLM-1003/pay", {
-    data: { amount: "1250.00" },
-  });
-  expect(blocked.status()).toBe(409);
-  await page.getByLabel("Reviewing handler").selectOption("HND-01");
-  await page.getByRole("button", { name: "Sign off payout" }).click();
-  await expect(page.getByText(/Signed off by Dana Whitfield/)).toBeVisible();
-  await page.getByRole("button", { name: "Record simulated payment" }).click();
-  await expect(page.getByText(/Simulated payment recorded/)).toContainText(
-    "$1,250.00",
-  );
-  await page.reload();
-  await page.getByRole("button", { name: "Open CLM-1003" }).click();
-  await expect(page.getByText(/Signed off by Dana Whitfield/)).toBeVisible();
-  await expect(page.getByText(/Simulated payment recorded/)).toBeVisible();
+  expect(repeat.status()).toBe(201);
+  const eventsAfter = await request.get("/api/claims/CLM-1001/events");
+  expect(await eventsAfter.json()).toEqual(await eventsBefore.json());
 });
 
 for (const [id, outcome] of [
@@ -135,7 +109,6 @@ test("hands two failed assessments to a handler without an insurance decision", 
   await expect(
     page.getByRole("region", { name: "Queue run progress" }),
   ).toContainText("Two failed assessments; no decision recorded");
-  await expect(page.getByText(/Completion-time snapshot/)).toBeVisible();
 });
 
 test("leaves later arrivals waiting after the explicit command and browser refresh", async ({
@@ -153,10 +126,11 @@ test("leaves later arrivals waiting after the explicit command and browser refre
         };
         return detail.status === "decided" && !detail.run_active;
       },
-      { timeout: 30000 },
+      { timeout: 40000 },
     )
     .toBe(true);
   await page.goto("/");
+  await expect(page.getByText(/Completion-time snapshot/)).toBeVisible();
   await page.getByRole("button", { name: "Open TEST-LATER" }).click();
   await expect(page.getByText("Waiting for assessment")).toBeVisible();
   await expect(page.getByRole("button", { name: "Run agent" })).toHaveCount(0);
@@ -168,4 +142,60 @@ test("leaves later arrivals waiting after the explicit command and browser refre
   await expect(page.getByText("Waiting for assessment")).toBeVisible();
   const events = await request.get("/api/claims/TEST-LATER/events");
   expect(await events.json()).toEqual([]);
+});
+
+test("saves handler sign-off and notifies the isolated agent service", async ({
+  page,
+  request,
+}) => {
+  await expect
+    .poll(
+      async () => {
+        const response = await request.get("/api/agent-runs/current");
+        const result = (await response.json()) as {
+          run: { status: string } | null;
+        };
+        return result.run?.status;
+      },
+      { timeout: 10000 },
+    )
+    .toBe("completed");
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open CLM-1003" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Handler sign-off required" }),
+  ).toBeVisible({ timeout: 10000 });
+  await expect(
+    page.getByRole("button", { name: "Record simulated payment" }),
+  ).toHaveCount(0);
+  const blocked = await request.post("/api/claims/CLM-1003/pay", {
+    data: { amount: "1250.00" },
+  });
+  expect(blocked.status()).toBe(409);
+  await page.getByLabel("Reviewing handler").selectOption("HND-01");
+  await page.getByRole("button", { name: "Sign off payout" }).click();
+  await expect(page.getByText(/Signed off by Dana Whitfield/)).toBeVisible();
+  await expect(page.getByText("Payment in progress")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Record simulated payment" }),
+  ).toHaveCount(0);
+  await expect
+    .poll(async () => {
+      const response = await request.get("http://127.0.0.1:8003/notifications");
+      return (await response.json()) as unknown[];
+    })
+    .toHaveLength(1);
+  const notices = await request.get("http://127.0.0.1:8003/notifications");
+  const saved = (await notices.json()) as {
+    claim_id: string;
+    sign_off: { handler_name: string; created_at: string };
+  }[];
+  expect(saved).toHaveLength(1);
+  expect(saved[0].claim_id).toBe("CLM-1003");
+  expect(saved[0].sign_off.handler_name).toBe("Dana Whitfield");
+  expect(saved[0].sign_off.created_at).toBeTruthy();
+  await page.reload();
+  await page.getByRole("button", { name: "Open CLM-1003" }).click();
+  await expect(page.getByText(/Signed off by Dana Whitfield/)).toBeVisible();
+  await expect(page.getByText("Payment in progress")).toBeVisible();
 });

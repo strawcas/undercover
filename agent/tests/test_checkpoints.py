@@ -57,3 +57,43 @@ def test_checkpoint_connection_rejects_active_reset():
     }
     with pytest.raises(RuntimeError, match="being rebuilt"):
         checkpoints.configure(connection)
+
+
+def test_service_ownership_uses_one_of_four_checkpoint_connections(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://postgres:stub@localhost/product")
+    pool, connection = Mock(), Mock()
+    pool.getconn.return_value = connection
+    connection.execute.return_value.fetchone.return_value = {
+        "pg_try_advisory_lock": True
+    }
+    factory = Mock(return_value=pool)
+    saver = Mock()
+    monkeypatch.setattr(checkpoints, "ConnectionPool", factory)
+    monkeypatch.setattr(checkpoints, "PostgresSaver", Mock(return_value=saver))
+    with checkpoints.checkpointer(service_owner=True):
+        saver.setup.assert_called_once()
+        pool.getconn.assert_called_once()
+        pool.putconn.assert_not_called()
+        assert factory.call_args.kwargs["max_size"] == 4
+    pool.putconn.assert_called_once_with(connection)
+    pool.close.assert_called_once()
+
+
+def test_service_ownership_conflict_survives_pool_cleanup_failure(monkeypatch, caplog):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://postgres:stub@localhost/product")
+    pool = Mock()
+    connection = pool.getconn.return_value
+    connection.execute.return_value.fetchone.return_value = {
+        "pg_try_advisory_lock": False
+    }
+    pool.putconn.side_effect = ValueError("PRIVATE-RETURN")
+    pool.close.side_effect = TypeError("PRIVATE-CLOSE")
+    monkeypatch.setattr(checkpoints, "ConnectionPool", Mock(return_value=pool))
+    with (
+        pytest.raises(RuntimeError, match="already running") as error,
+        checkpoints.checkpointer(service_owner=True),
+    ):
+        pass
+    assert "Return agent ownership connection also failed" in str(error.value.__notes__)
+    pool.close.assert_called_once()
+    assert "PRIVATE-" not in caplog.text

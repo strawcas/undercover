@@ -2,7 +2,7 @@
 
 import sqlite3
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -12,7 +12,7 @@ from psycopg import Connection
 from psycopg.rows import DictRow, dict_row
 from psycopg_pool import ConnectionPool
 
-from backend.config import checkpoint_owner_path, database_target
+from backend.config import agent_owner_path, checkpoint_owner_path, database_target
 from backend.diagnostics import preserve_primary
 from backend.ownership import DatabaseOwner
 
@@ -31,10 +31,36 @@ def configure(connection: Connection[DictRow]) -> None:
 
 
 @contextmanager
-def checkpointer() -> Iterator[BaseCheckpointSaver]:
+def service_lock(pool: ConnectionPool[Connection[DictRow]], enabled: bool):
+    """Reserve service ownership from the same bounded checkpointer pool."""
+    if not enabled:
+        yield
+        return
+    connection = pool.getconn()
+    try:
+        row = connection.execute("SELECT pg_try_advisory_lock(70914004)").fetchone()
+        if not row or not row["pg_try_advisory_lock"]:
+            raise RuntimeError(
+                "The agent service is already running for this database."
+            )
+        try:
+            yield
+        finally:
+            with preserve_primary("Release agent service ownership"):
+                connection.execute("SELECT pg_advisory_unlock(70914004)")
+    finally:
+        with preserve_primary("Return agent ownership connection"):
+            pool.putconn(connection)
+
+
+@contextmanager
+def checkpointer(*, service_owner: bool = False) -> Iterator[BaseCheckpointSaver]:
     target = database_target()
     if isinstance(target, Path):
-        with DatabaseOwner(checkpoint_owner_path(target)):
+        with (
+            DatabaseOwner(agent_owner_path(target)) if service_owner else nullcontext(),
+            DatabaseOwner(checkpoint_owner_path(target)),
+        ):
             connection = sqlite3.connect(
                 checkpoint_path(target), check_same_thread=False
             )
@@ -47,7 +73,7 @@ def checkpointer() -> Iterator[BaseCheckpointSaver]:
                     connection.close()
     else:
         pool: ConnectionPool[Connection[DictRow]] = ConnectionPool(
-            target,
+            target.replace("postgresql+psycopg://", "postgresql://", 1),
             min_size=1,
             max_size=4,
             open=False,
@@ -62,9 +88,10 @@ def checkpointer() -> Iterator[BaseCheckpointSaver]:
         )
         try:
             pool.open(wait=True, timeout=15)
-            saver = PostgresSaver(pool)
-            saver.setup()
-            yield saver
+            with service_lock(pool, service_owner):
+                saver = PostgresSaver(pool)
+                saver.setup()
+                yield saver
         finally:
             with preserve_primary("Close claim checkpointer pool"):
                 pool.close()

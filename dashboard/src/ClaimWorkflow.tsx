@@ -29,7 +29,11 @@ async function loadClaim(path: string): Promise<Bundle> {
 }
 
 function isRunning(bundle: Bundle) {
-  return bundle.claim.run_active || bundle.claim.status === "waiting";
+  return (
+    bundle.claim.run_active ||
+    bundle.claim.status === "waiting" ||
+    bundle.claim.status === "in_progress"
+  );
 }
 function noChange() {
   return;
@@ -100,6 +104,10 @@ function Waiting({
     heading = "Assessment can be retried";
     detail =
       "The last attempt failed. The queue can retry it once. If the run has ended, run uv run -m agent to pick it up.";
+  } else if (claim.status === "in_progress") {
+    heading = "Assessment paused";
+    detail =
+      "Run uv run -m agent to continue the saved assessment from its last step.";
   }
   return (
     <section className="panel action-panel">
@@ -122,7 +130,7 @@ function Actions({
   busy: boolean;
   failed: boolean;
 }>) {
-  if (claim.run_active)
+  if (claim.run_active && !claim.decision)
     return (
       <section className="panel action-panel">
         <span className="activity-dot" />
@@ -141,6 +149,19 @@ function Actions({
           Review the decision and payout before signing off.
         </p>
         <SignOffControls action={action} busy={busy} />
+      </section>
+    );
+  if (claim.decision.outcome === "approve" && !claim.payment && claim.run_id)
+    return (
+      <section className="panel action-panel">
+        <span className="activity-dot" />
+        <div>
+          <h3>Payment in progress</h3>
+          <p>
+            The agent will record the approved payment. If the agent is offline,
+            run uv run -m agent to continue the saved assessment.
+          </p>
+        </div>
       </section>
     );
   if (claim.decision.outcome === "approve" && !claim.payment)

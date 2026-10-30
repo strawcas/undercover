@@ -53,6 +53,11 @@ def backend_url() -> str:
     return os.getenv("UNDERCOVER_BACKEND_URL", "http://localhost:8000").rstrip("/")
 
 
+def agent_url() -> str:
+    """Read the agent service address used by notifications and commands."""
+    return os.getenv("UNDERCOVER_AGENT", "http://127.0.0.1:8002").rstrip("/")
+
+
 def run_scope(max_claims: int | None = None, claim_id: str | None = None) -> dict:
     """Resolve only the scope explicitly selected by the command."""
     if claim_id is not None:

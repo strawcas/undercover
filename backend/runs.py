@@ -226,6 +226,7 @@ class Runs:
                     mode="json"
                 ), False
             self.require_generation(data)
+            require_running(data)
             previous = (
                 read_attempt(connection, row["thread_id"])
                 if row["thread_id"] and row["run_id"] == run_id
@@ -233,7 +234,6 @@ class Runs:
             )
             if previous and previous.status == "suspended":
                 return previous.model_dump(mode="json"), False
-            require_running(data)
             self._admit(connection, data, row)
             start_claim(connection, request.claim_id, thread)
             connection.execute(

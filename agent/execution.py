@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from threading import Event
+from threading import Event, Thread
 from time import monotonic
 from typing import Protocol
 
@@ -28,6 +28,7 @@ class Execution:
     result: Run | None = None
     run_id: str | None = None
     active_budget: "AttemptBudget | None" = None
+    active_thread: Thread | None = None
     continued: bool = False
     resumed_count: int = 0
 

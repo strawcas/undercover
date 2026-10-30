@@ -53,7 +53,9 @@ function RunDetail({
         </div>
       ) : (
         <p className="muted" role="status">
-          The agent is planning and working this queue.
+          {run.status === "interrupted"
+            ? "Queue paused. Run uv run -m agent to continue its saved scope."
+            : "The agent is planning and working this queue."}
         </p>
       )}
       {run.todos.length ? (
