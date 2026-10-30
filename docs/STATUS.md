@@ -1,5 +1,11 @@
 # Status
 
+## Durable state build in progress
+
+Phase 1 of `docs/PLAN_DURABLE.md` adds the backend payout operation, its HTTP claim tool and optional Langfuse claim tracing. Calculations use stored policy/plan/company settings and exact Decimal arithmetic, including benefit/item limits, offsets, deductibles and the sign-off boundary. Missing tracing keys disable export; initialization/export failures produce safe diagnostics without changing business results. Tests remove external database/tracing credentials and use stub models.
+
+Phase 1 verification: `npm run check:python` passed Ruff, Pyright and 247 tests at 97.62% coverage; the final required-input and HTTP-tool additions passed the focused 25-test suite and Pyright separately. The commit hook verifies the final combined suite. Workflow review covered payout route -> stored context -> calculator -> HTTP tool -> canonical prompt, and helper invocation -> callback session -> observational flush. Calculation is read-only; existing evidence, lifecycle and financial writes retain their enforcement and reconciliation. No database migration, real-model run or remote write has taken place yet. The durable phases below remain to be implemented; the existing harness description is retained until their handover.
+
 The harness in `docs/HARNESS.md` is implemented with explicit command-only launch. Verification is tracked in `docs/PLAN_HARNESS.md`; `docs/PLAN.md` remains the completed pilot plan.
 
 ## What is built

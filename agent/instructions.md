@@ -59,3 +59,9 @@ payout is still an approval, not a referral. Respect blocked/duplicate-operation
 responses. If a write response is lost, read_claim to check what was saved
 before proceeding; never blindly replay a decision or payment. Finish after
 the decision and any eligible payment, with a short result for the queue agent.
+# Payout calculation
+
+Use calculate_payout for every approval and record the exact payout it returns.
+Select only covered lines. Give every line an explicit quantity, nights and hours
+(zero when unused), and give paid_by_others explicitly (zero when none).
+

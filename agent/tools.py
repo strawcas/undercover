@@ -12,6 +12,7 @@ from agent.execution import AgentRunError, AttemptBudget
 from agent.financial import write
 from agent.http import request
 from backend.diagnostics import diagnose
+from backend.payouts import Benefit, PayoutLine
 
 
 class DecisionFields(BaseModel):
@@ -132,6 +133,21 @@ class ClaimTools:
         """Read the USD payout approval limit and company settings."""
         return self.call("Read payout approval limit", "GET", "/api/company")
 
+    def calculate_payout(
+        self, benefit: Benefit, lines: list[PayoutLine], paid_by_others: str
+    ) -> dict[str, JsonValue]:
+        """Calculate covered lines, deductibles and limits; exclude uncovered lines."""
+        return self.call(
+            "Calculate payout",
+            "POST",
+            f"{self.path}/payout-calculation",
+            {
+                "benefit": benefit,
+                "lines": [line.model_dump(mode="json") for line in lines],
+                "paid_by_others": paid_by_others,
+            },
+        )
+
     def record_decision(self, **decision: object) -> dict[str, JsonValue]:
         """Save the outcome, USD payout, calculation, reason and policy sections."""
         return self.call(
@@ -159,6 +175,7 @@ class ClaimTools:
                 self.search_references,
                 self.read_reference_section,
                 self.read_company,
+                self.calculate_payout,
             )
         ]
         tools.extend(

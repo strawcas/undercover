@@ -25,6 +25,7 @@ from backend.models import (
     PaymentInput,
     SignOffInput,
 )
+from backend.payouts import Payout, PayoutInput, calculate
 from backend.reference_models import InstructionsResponse
 
 router = APIRouter(
@@ -37,6 +38,17 @@ def service(request: Request) -> Claims:
 
 
 Service = Annotated[Claims, Depends(service)]
+
+
+@router.post(
+    "/claims/{claim_id}/payout-calculation",
+    operation_id="calculate_payout",
+    response_model=Payout,
+)
+def calculate_payout(claim_id: str, body: PayoutInput, claims: Service):
+    """Calculate the exact covered payout using stored business rules."""
+    claims.detail(claim_id)
+    return calculate(claims.store, claim_id, body)
 
 
 @router.get("/health", operation_id="health", response_model=Health)

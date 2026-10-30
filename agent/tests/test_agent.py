@@ -251,6 +251,7 @@ def test_tools_use_only_http(client, repository):
             "search_references",
             "read_reference_section",
             "read_company",
+            "calculate_payout",
             "record_decision",
             "pay_claim",
         }

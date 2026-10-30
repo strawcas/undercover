@@ -18,6 +18,7 @@ from agent.execution import AgentRunError, AttemptBudget
 from agent.http import request
 from agent.middleware import ProviderRetry
 from agent.tools import ClaimTools
+from agent.tracing import claim_trace
 from backend.reference_models import InstructionsResponse
 
 load_dotenv()
@@ -95,7 +96,7 @@ def run(
 ) -> str:
     """Run the agent on one claim and return its final reply."""
     limits = budget or AttemptBudget()
-    with backend() as client:
+    with backend() as client, claim_trace(claim_id, thread_id) as callbacks:
         response = request(client, "GET", "/api/agent-instructions", budget=limits)
         response.raise_for_status()
         instructions = InstructionsResponse.model_validate(response.json())
@@ -123,6 +124,7 @@ def run(
                     ]
                 },
                 config={
+                    "callbacks": callbacks,
                     "configurable": {"thread_id": thread_id},
                     "recursion_limit": 400,
                 },
