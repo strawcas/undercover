@@ -18,6 +18,13 @@ from sqlalchemy.engine import Connection as SAConnection
 from sqlalchemy.engine import CursorResult
 
 metadata = MetaData()
+usage = Table(
+    "attempt_usage",
+    metadata,
+    Column("thread_id", Text, primary_key=True),
+    Column("request_id", Text, primary_key=True),
+    Column("kind", Text, nullable=False),
+)
 records = Table(
     "records",
     metadata,

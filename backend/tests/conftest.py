@@ -16,7 +16,8 @@ from backend.storage import Store
 
 
 @pytest.fixture
-def repository(tmp_path):
+def repository(tmp_path, monkeypatch):
+    monkeypatch.setenv("UNDERCOVER_DB_PATH", str(tmp_path / "claims.db"))
     store = Store(tmp_path / "claims.db")
     store.initialize()
     return store

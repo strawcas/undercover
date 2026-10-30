@@ -6,7 +6,7 @@ Implement `docs/DURABLE.md` on top of the current harness. Move business records
 
 **Course sidenote:** For consistency with the course, read `labs/week2day3.ipynb` and build the solution in the same style as the lab. Where the lab and this brief differ, follow the brief. The notebook has been read for this plan, together with the payout and tracing examples in `labs/week2day1.ipynb` and `labs/week2day1_payout.py`. Read notebook source only; do not execute evaluation, cleanup or model-call cells.
 
-This is a plan only. All success criteria remain unchecked until implementation and verification. Leave `docs/PLAN.md` and `docs/PLAN_HARNESS.md` as historical plans. Preserve the student's existing notebook changes and `docs/DURABLE.md`.
+Implementation is in progress. Check criteria only after verification, retaining explicit pending live checks. Leave `docs/PLAN.md` and `docs/PLAN_HARNESS.md` as historical plans. Preserve the student's existing notebook changes and `docs/DURABLE.md`.
 
 ## Starting point and approach
 
@@ -108,13 +108,13 @@ Replace the claim `create_agent` call with named `StateGraph` nodes and conditio
 
 Success criteria:
 
-- [ ] Graph tests with a stub model cover approval below/equal/above the backend limit, decline, referral, a corrected refused decision/tool call, and missing evidence. All approvals reach `pay`; decline/referral never do. The model has no payment or sign-off tool.
-- [ ] An over-limit approval saves one decision and checkpointed interrupt, makes zero payments and releases execution capacity so another claim can proceed. The graph branches on backend state, not a copied limit.
+- [x] Graph tests with a stub model cover approval below/equal/above the backend limit, decline, referral, a corrected refused decision/tool call, and missing evidence. All approvals reach `pay`; decline/referral never do. The model has no payment or sign-off tool.
+- [x] An over-limit approval saves one decision and checkpointed interrupt, makes zero payments and releases execution capacity so another claim can proceed. The graph branches on backend state, not a copied limit.
 - [ ] After backend sign-off is saved, `Command(resume=...)` on the same thread pays once without another assessment/model decision, and payment includes handler identity and sign-off time. A forged/early resume cannot authorize payment.
-- [ ] File-backed SQLite checkpoint tests close/recreate the graph and saver between invocations and resume completed steps. Adapter tests verify synchronous `PostgresSaver` setup/settings and `durability="sync"` on initial, crash-resume and interrupt-resume invocation paths.
+- [x] File-backed SQLite checkpoint tests close/recreate the graph and saver between invocations and resume completed steps. Adapter tests verify synchronous `PostgresSaver` setup/settings and `durability="sync"` on initial, crash-resume and interrupt-resume invocation paths.
 - [ ] Persisted usage tests bound the assessment to thirty model requests across retries/resumes, count structured-decision calls, retain tool/history limits and provider timeouts, and ensure paused time does not exhaust active-work time. Exhausted budgets produce a real assessment failure.
-- [ ] Every graph step/refusal/retry is visible through claim activity. Observational event/tracing failures cannot stop committed decisions or payments; mandatory evidence and lifecycle failures remain visible. LangGraph interrupts are never caught as ordinary errors.
-- [ ] `npm run check:python` passes. Review nodes, routing, serialized state, tool adapters and all callers; update status and commit.
+- [x] Every graph step/refusal/retry is visible through claim activity. Observational event/tracing failures cannot stop committed decisions or payments; mandatory evidence and lifecycle failures remain visible. LangGraph interrupts are never caught as ordinary errors.
+- [x] `npm run check:python` passes. Review nodes, routing, serialized state, tool adapters and all callers; update status and commit.
 
 ## Phase 4: Resume attempts and make financial steps replay-safe
 

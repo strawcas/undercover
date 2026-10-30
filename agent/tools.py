@@ -3,6 +3,7 @@
 from http import HTTPStatus
 from threading import Lock
 from typing import Literal
+from uuid import uuid4
 
 import httpx
 from langchain_core.tools import BaseTool, StructuredTool
@@ -13,6 +14,7 @@ from agent.financial import write
 from agent.http import request
 from backend.diagnostics import diagnose
 from backend.payouts import Benefit, PayoutLine
+from backend.usage import Usage
 
 
 class DecisionFields(BaseModel):
@@ -43,7 +45,6 @@ class ClaimTools:
         self.lock = Lock()
 
     def event(self, action: str, status: str, detail: str) -> None:
-        self.budget.check()
         try:
             response = self.client.post(
                 f"{self.path}/events",
@@ -62,10 +63,34 @@ class ClaimTools:
     def model_retry(self, attempt: int) -> None:
         self.event("Retry model request", "started", f"Transport retry {attempt} of 2.")
 
+    def reserve_call(self, kind: Literal["model", "tool"]) -> Usage:
+        limit = (
+            min(self.budget.model_calls, 30)
+            if kind == "model"
+            else self.budget.tool_calls
+        )
+        response = request(
+            self.client,
+            "POST",
+            f"{self.path}/usage",
+            {
+                "thread_id": self.thread_id,
+                "request_id": str(uuid4()),
+                "kind": kind,
+                "limit": limit,
+            },
+            budget=self.budget,
+        )
+        if response.status_code == HTTPStatus.CONFLICT:
+            raise AgentRunError(response.json()["detail"])
+        response.raise_for_status()
+        return Usage.model_validate(response.json())
+
     def call(
         self, action: str, method: str, path: str, body: dict[str, object] | None = None
     ) -> dict[str, JsonValue]:
         self.budget.check()
+        self.reserve_call("tool")
         with self.lock:
             if self.calls >= self.budget.tool_calls:
                 raise AgentRunError("Assessment tool-call limit exceeded.")
@@ -178,12 +203,4 @@ class ClaimTools:
                 self.calculate_payout,
             )
         ]
-        tools.extend(
-            [
-                StructuredTool.from_function(
-                    self.record_decision, args_schema=DecisionFields
-                ),
-                StructuredTool.from_function(self.pay_claim),
-            ]
-        )
         return tools

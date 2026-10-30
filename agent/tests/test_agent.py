@@ -12,13 +12,20 @@ from agent import main
 from agent.tests.stubs import StubModel, api_client, scripted_model
 from agent.tools import ClaimTools
 from backend.claims import Claims
-from backend.tests.conftest import begin_claim
+from backend.models import DecisionInput
+from backend.tests.conftest import begin_claim, decide_fixture, decision_payload
 from backend.worker import execute
 
 
 @pytest.mark.parametrize(
     ("outcome", "payout"),
-    [("approve", "420.00"), ("approve", "1250.00"), ("decline", "0"), ("refer", "0")],
+    [
+        ("approve", "420.00"),
+        ("approve", "1000.00"),
+        ("approve", "1250.00"),
+        ("decline", "0"),
+        ("refer", "0"),
+    ],
 )
 def test_scripted_run(client, repository, monkeypatch, outcome, payout):
     monkeypatch.setattr(main, "backend", lambda: api_client(client))
@@ -44,7 +51,7 @@ def test_scripted_run(client, repository, monkeypatch, outcome, payout):
         assert detail["payment"] is None
         assert any(event["status"] == "blocked" for event in events)
     elif outcome == "approve":
-        assert detail["payment"]["amount"] == "420.00"
+        assert detail["payment"]["amount"] == payout
     else:
         assert detail["status"] == "decided"
         assert detail["payment"] is None
@@ -111,11 +118,16 @@ def test_truncated_response_has_actionable_failure(
     client, repository, monkeypatch, saved
 ):
     monkeypatch.setattr(main, "backend", lambda: api_client(client))
-    replies = list(scripted_model().messages)[:-1] if saved else []
-    replies.append(AIMessage(content="", response_metadata={"done_reason": "length"}))
+    replies = [AIMessage(content="", response_metadata={"done_reason": "length"})]
     llm = StubModel(messages=iter(replies))
     claims = Claims(repository)
     thread = begin_claim(repository)
+    if saved:
+        decide_fixture(
+            claims,
+            "CLM-1001",
+            DecisionInput.model_validate(decision_payload(thread, payout="420.00")),
+        )
     execute(
         claims,
         "CLM-1001",
@@ -127,6 +139,10 @@ def test_truncated_response_has_actionable_failure(
     assert detail["run_active"] is False
     assert bool(detail["decision"]) == saved
     assert bool(detail["payment"]) == saved
+    if saved:
+        assert llm.first_messages == []
+        assert claims.events("CLM-1001")[-1]["status"] == "completed"
+        return
     event = claims.events("CLM-1001")[-1]
     assert event["status"] == "failed"
     assert "context or generation limit" in event["detail"]
@@ -228,17 +244,13 @@ def test_backend_url(monkeypatch):
 
 def test_backend_instructions_are_used(client, repository, monkeypatch):
     monkeypatch.setattr(main, "backend", lambda: api_client(client))
-    original = main.create_agent
-    seen = []
-
-    def create(*args, **kwargs):
-        seen.append(kwargs["system_prompt"])
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(main, "create_agent", create)
     thread = begin_claim(repository)
-    main.run("CLM-1001", thread, scripted_model())
-    assert seen == [client.get("/api/agent-instructions").json()["text"]]
+    llm = scripted_model()
+    main.run("CLM-1001", thread, llm)
+    assert (
+        llm.first_messages[0].content
+        == client.get("/api/agent-instructions").json()["text"]
+    )
 
 
 def test_tools_use_only_http(client, repository):
@@ -252,8 +264,6 @@ def test_tools_use_only_http(client, repository):
             "read_reference_section",
             "read_company",
             "calculate_payout",
-            "record_decision",
-            "pay_claim",
         }
     source = inspect.getsource(main) + inspect.getsource(ClaimTools)
     assert "backend.storage" not in source

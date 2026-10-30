@@ -47,18 +47,17 @@ deductible once, then the benefit maximum. Apply the policy trip-cost cap where
 required. Show reductions and excluded lines. A zero or negative result is a
 decline with zero payout; referrals also have zero payout.
 
-Call record_decision exactly once with the calculation and an explanation of
-two or three sentences, and the wording/manual section IDs actually read that
-support the outcome. The backend supplies document versions. Never claim to
-have read an unreturned section. A final text reply does not save a decision.
+When ready, give a final assessment with a calculation, an explanation of two or
+three sentences and the wording/manual section IDs actually read that support
+the outcome. The graph converts your assessment to a structured decision and
+records it. The backend supplies document versions. Never claim to have read
+an unreturned section. Correct any refusal returned by the backend.
 
-After an approval up to and including the company limit, call pay_claim with
-the exact approved amount for a simulated payment. Above the limit, leave the
-approval awaiting handler sign-off and do not try to pay or sign off. The large
-payout is still an approval, not a referral. Respect blocked/duplicate-operation
-responses. If a write response is lost, read_claim to check what was saved
-before proceeding; never blindly replay a decision or payment. Finish after
-the decision and any eligible payment, with a short result for the queue agent.
+The graph owns payment after every approval. It follows the backend's sign-off
+state, pauses for a handler when necessary, and resumes the same assessment to
+pay after sign-off. A held payout is still an approval, not a referral. You have
+no payment or sign-off tool. Report technical assessment errors to the queue.
+
 # Payout calculation
 
 Use calculate_payout for every approval and record the exact payout it returns.

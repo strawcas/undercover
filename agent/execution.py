@@ -46,7 +46,7 @@ class AttemptBudget:
         default_factory=lambda: monotonic() + DEFAULT_ATTEMPT_SECONDS
     )
     cancelled: Event = field(default_factory=Event)
-    model_calls: int = 40
+    model_calls: int = 30
     tool_calls: int = 80
 
     def check(self) -> None:

@@ -1,23 +1,27 @@
 """The UnderCover Agent."""
 
 import os
+from contextlib import nullcontext
 from http import HTTPStatus
-from typing import Any
 
 import httpx
-from langchain.agents import create_agent
-from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddleware
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.types import Command
 from ollama import ResponseError
 from pydantic import SecretStr
 
+from agent.checkpoints import checkpointer
 from agent.execution import AgentRunError, AttemptBudget
+from agent.graph import ClaimState, ClaimWorkflow, build_graph
 from agent.http import request
-from agent.middleware import ProviderRetry
-from agent.tools import ClaimTools
+from agent.tools import ClaimTools, DecisionFields
 from agent.tracing import claim_trace
+from backend.claim_models import ClaimDetail
 from backend.reference_models import InstructionsResponse
 
 BACKEND_URL = "http://localhost:8000"
@@ -90,9 +94,12 @@ def run(
     llm: BaseChatModel | None = None,
     *,
     budget: AttemptBudget | None = None,
+    saver: BaseCheckpointSaver | None = None,
 ) -> str:
     """Run the agent on one claim and return its final reply."""
     limits = budget or AttemptBudget()
+    limits.check()
+    selected = llm or model()
     with backend() as client, claim_trace(claim_id, thread_id) as callbacks:
         response = request(client, "GET", "/api/agent-instructions", budget=limits)
         response.raise_for_status()
@@ -101,40 +108,53 @@ def run(
         tools.event(
             "Read agent instructions", "completed", "Loaded backend instructions."
         )
-        middleware: list[AgentMiddleware[Any, Any, Any]] = [
-            ProviderRetry(tools.model_retry, limits),
-            ModelCallLimitMiddleware(
-                run_limit=limits.model_calls, exit_behavior="error"
-            ),
-        ]
-        agent = create_agent(
-            llm or model(),
-            tools=tools.tools(),
-            system_prompt=instructions.text,
-            middleware=middleware,
-        )
-        try:
-            result = agent.invoke(
-                {
-                    "messages": [
-                        {"role": "user", "content": f"Decide claim {claim_id}."}
-                    ]
-                },
-                config={
-                    "callbacks": callbacks,
-                    "configurable": {"thread_id": thread_id},
-                    "recursion_limit": 400,
-                },
-            )
-        except ResponseError as error:
-            raise AgentRunError(ollama_failure(error.status_code)) from error
-    reply = result["messages"][-1]
-    if reply.response_metadata.get("done_reason") == "length":
-        raise AgentRunError(
-            "Ollama stopped at its context or generation limit. Increase "
-            "OLLAMA_NUM_CTX in .env. " + retry_advice()
-        )
-    return reply.text
+        with nullcontext(saver) if saver is not None else checkpointer() as checkpoints:
+            graph = build_graph(ClaimWorkflow(tools, selected), checkpoints)
+            config: RunnableConfig = {
+                "configurable": {"thread_id": thread_id},
+                "callbacks": callbacks,
+                "recursion_limit": 400,
+            }
+            snapshot = graph.get_state(config)
+            initial: ClaimState | Command | None
+            if snapshot.values:
+                claim = tools.read_claim()
+                if snapshot.interrupts and claim.get("sign_off"):
+                    initial = Command(resume={"claim_id": claim_id})
+                elif snapshot.interrupts:
+                    return "Assessment complete; waiting for handler sign-off."
+                else:
+                    initial = None
+            else:
+                existing = ClaimDetail.model_validate(tools.read_claim())
+                decision = (
+                    DecisionFields.model_validate(
+                        {
+                            key: getattr(existing.decision, key)
+                            for key in DecisionFields.model_fields
+                        }
+                    )
+                    if existing.decision
+                    else None
+                )
+                initial = ClaimState(
+                    messages=[HumanMessage(content=f"Decide claim {claim_id}.")],
+                    claim_id=claim_id,
+                    thread_id=thread_id,
+                    instructions=instructions.text,
+                    decision=decision.model_dump(mode="json") if decision else None,
+                    saved_claim=existing.model_dump(mode="json") if decision else None,
+                    model_calls=0,
+                )
+            try:
+                result = graph.invoke(initial, config=config, durability="sync")
+            except ResponseError as error:
+                raise AgentRunError(ollama_failure(error.status_code)) from error
+    return (
+        "Assessment complete; waiting for handler sign-off."
+        if result.get("__interrupt__")
+        else "The claim assessment is complete."
+    )
 
 
 def retry_advice() -> str:

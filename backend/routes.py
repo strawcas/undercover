@@ -27,6 +27,7 @@ from backend.models import (
 )
 from backend.payouts import Payout, PayoutInput, calculate
 from backend.reference_models import InstructionsResponse
+from backend.usage import Usage, UsageInput, reserve
 
 router = APIRouter(
     prefix="/api", responses={404: {"model": ApiError}, 409: {"model": ApiError}}
@@ -38,6 +39,16 @@ def service(request: Request) -> Claims:
 
 
 Service = Annotated[Claims, Depends(service)]
+
+
+@router.post(
+    "/claims/{claim_id}/usage",
+    operation_id="reserve_assessment_call",
+    response_model=Usage,
+)
+def reserve_assessment_call(claim_id: str, body: UsageInput, claims: Service):
+    """Reserve an assessment call before contacting a model or tool."""
+    return reserve(claims.store, claim_id, body)
 
 
 @router.post(

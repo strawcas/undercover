@@ -29,7 +29,7 @@ def request(
     safe = (
         method in {"GET", "PUT"}
         or path.startswith("/api/agent-runs")
-        or path.endswith(("/reference-search", "/reference-reads"))
+        or path.endswith(("/reference-search", "/reference-reads", "/usage"))
     )
     limit = MAX_RETRIES if safe else 0
     attempt = 0

@@ -1,5 +1,6 @@
 """Scripted tool-calling models and HTTP transport for automated tests."""
 
+import json
 from typing import Any
 
 import httpx
@@ -7,6 +8,7 @@ from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatResult
+from langchain_core.runnables import RunnableLambda
 from pydantic import Field
 
 
@@ -15,6 +17,13 @@ class StubModel(GenericFakeChatModel):
 
     def bind_tools(self, tools, **kwargs):
         return self
+
+    def with_structured_output(self, schema, **kwargs):
+        def structured(messages, config):
+            reply = self.invoke(messages, config=config)
+            return schema.model_validate_json(reply.text)
+
+        return RunnableLambda(structured)
 
     def _generate(
         self,
@@ -53,12 +62,6 @@ def scripted_model(
                 for name in ("read_claim", "read_company")
             ],
         ),
-        AIMessage(
-            content="",
-            tool_calls=[
-                {"name": "record_decision", "args": decision, "id": "decision"}
-            ],
-        ),
     ]
     replies[1:1] = [
         AIMessage(
@@ -87,16 +90,8 @@ def scripted_model(
             ],
         ),
     ]
-    if outcome == "approve":
-        replies.append(
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {"name": "pay_claim", "args": {"amount": payout}, "id": "payment"}
-                ],
-            )
-        )
-    replies.append(AIMessage(content="The claim assessment is complete."))
+    replies.append(AIMessage(content="The evidence supports the final assessment."))
+    replies.append(AIMessage(content=json.dumps(decision)))
     return StubModel(messages=iter(replies))
 
 
