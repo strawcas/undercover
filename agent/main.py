@@ -5,7 +5,6 @@ from http import HTTPStatus
 from typing import Any
 
 import httpx
-from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddleware
 from langchain_core.language_models import BaseChatModel
@@ -20,8 +19,6 @@ from agent.middleware import ProviderRetry
 from agent.tools import ClaimTools
 from agent.tracing import claim_trace
 from backend.reference_models import InstructionsResponse
-
-load_dotenv()
 
 BACKEND_URL = "http://localhost:8000"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"

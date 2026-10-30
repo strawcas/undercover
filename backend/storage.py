@@ -1,15 +1,22 @@
-"""SQLite records for the local claims pilot."""
+"""Business records on SQLAlchemy Core, using SQLite or hosted Postgres."""
 
 import json
-import sqlite3
-from contextlib import closing, contextmanager
+from contextlib import contextmanager
 from decimal import Decimal
 from pathlib import Path
+from threading import BoundedSemaphore
 from typing import Any
 
+from sqlalchemy import create_engine
+from sqlalchemy.engine import URL, make_url
+from sqlalchemy.pool import NullPool
+
+from backend.config import database_identity
+from backend.database import Connection
 from backend.diagnostics import preserve_primary
 from backend.harness_storage import migrate
 from backend.models import Claim, Company, Customer, Handler, Policy
+from backend.ownership import DatabaseOwner, PostgresOwner
 from backend.reference_index import install
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,65 +55,89 @@ def decode(value: Any) -> Any:
 
 
 class Store:
-    """Open short-lived connections to one SQLite database."""
+    """Bound connections and preserve a single portable business query surface."""
 
-    def __init__(self, path: Path):
-        self.path = path
+    def __init__(self, path: Path | str):
+        self.postgres = isinstance(path, str) and path.startswith(
+            ("postgres://", "postgresql://", "postgresql+psycopg://")
+        )
+        self.path = Path(path).resolve() if not self.postgres else ROOT / "postgres"
+        target = (
+            make_url(str(path).replace("postgres://", "postgresql://", 1)).set(
+                drivername="postgresql+psycopg"
+            )
+            if self.postgres
+            else URL.create("sqlite", database=str(self.path))
+        )
+        self.target = target
+        self.identity = database_identity(
+            target.render_as_string(hide_password=False) if self.postgres else self.path
+        )
+        self.slots = BoundedSemaphore(4)
+        options: dict[str, Any] = (
+            {"pool_size": 4, "max_overflow": 0}
+            if self.postgres
+            else {"poolclass": NullPool}
+        )
+        self.engine = create_engine(
+            target,
+            **options,
+            pool_pre_ping=True,
+            hide_parameters=True,
+            connect_args={"options": "-c search_path=undercover", "connect_timeout": 10}
+            if self.postgres
+            else {"timeout": 10, "check_same_thread": False},
+        )
 
     @contextmanager
     def connect(self):
-        with closing(sqlite3.connect(self.path, timeout=10)) as connection:
-            connection.row_factory = sqlite3.Row
-            yield connection
+        with self.slots, self.engine.connect() as raw:
+            yield Connection(raw)
 
     @contextmanager
     def transaction(self):
         with self.connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            if self.postgres:
+                connection.execute("SELECT pg_advisory_xact_lock(70914002)")
+            else:
+                connection.execute("BEGIN IMMEDIATE")
             try:
                 yield connection
                 connection.commit()
-            except Exception:
+            except BaseException:
                 with preserve_primary("Roll back database transaction"):
                     connection.rollback()
                 raise
 
     def initialize(self, data_dir: Path = ROOT / "data") -> None:
-        """Create storage and seed the explicit pilot file allowlist once."""
+        """Create storage and seed the explicit product file allowlist once."""
         with self.transaction() as connection:
-            connection.execute(
-                "CREATE TABLE IF NOT EXISTS records "
-                "(kind TEXT, id TEXT, body TEXT NOT NULL, PRIMARY KEY (kind, id))"
-            )
-            connection.execute(
-                "CREATE TABLE IF NOT EXISTS claims ("
-                "id TEXT PRIMARY KEY, state TEXT NOT NULL, thread_id TEXT, "
-                "active INTEGER NOT NULL DEFAULT 0, decision TEXT, "
-                "payout_cents INTEGER, sign_off TEXT, payment TEXT, "
-                "queue_position INTEGER)"
-            )
-            connection.execute(
-                "CREATE TABLE IF NOT EXISTS events ("
-                "id INTEGER PRIMARY KEY, claim_id TEXT NOT NULL, "
-                "thread_id TEXT NOT NULL, action TEXT NOT NULL, "
-                "status TEXT NOT NULL, detail TEXT NOT NULL, "
-                "created_at TEXT NOT NULL)"
-            )
-            self._migrate_positions(connection)
+            if self.postgres:
+                connection.execute("CREATE SCHEMA IF NOT EXISTS undercover")
             migrate(connection)
+            self._migrate_positions(connection)
             if not connection.execute("SELECT 1 FROM records LIMIT 1").fetchone():
                 self._seed(connection, data_dir)
             self._harness_documents(connection, data_dir)
 
-    def _harness_documents(
-        self, connection: sqlite3.Connection, data_dir: Path
-    ) -> None:
+    def dispose(self) -> None:
+        self.engine.dispose()
+
+    def owner(self, *, maintenance: bool = False):
+        return (
+            PostgresOwner(self.engine, maintenance=maintenance)
+            if self.postgres
+            else DatabaseOwner(self.path)
+        )
+
+    def _harness_documents(self, connection: Connection, data_dir: Path) -> None:
         for key, path in (
             ("instructions", ROOT / "agent/instructions.md"),
             ("queue_instructions", ROOT / "agent/queue_instructions.md"),
         ):
             connection.execute(
-                "INSERT OR REPLACE INTO records VALUES ('settings', ?, ?)",
+                "INSERT INTO records (kind,id,body) VALUES ('settings', ?, ?) "
+                "ON CONFLICT(kind,id) DO UPDATE SET body=excluded.body",
                 (key, json.dumps(path.read_text(encoding="utf-8"))),
             )
         if not connection.execute(
@@ -125,12 +156,7 @@ class Store:
             install(connection, source, json.loads(body))
 
     @staticmethod
-    def _migrate_positions(connection: sqlite3.Connection) -> None:
-        columns = {
-            row["name"] for row in connection.execute("PRAGMA table_info(claims)")
-        }
-        if "queue_position" not in columns:
-            connection.execute("ALTER TABLE claims ADD COLUMN queue_position INTEGER")
+    def _migrate_positions(connection: Connection) -> None:
         position = connection.execute(
             "SELECT COALESCE(MAX(queue_position), 0) FROM claims"
         ).fetchone()[0]
@@ -155,7 +181,7 @@ class Store:
         with self.transaction() as connection:
             self._enqueue(connection, claim)
 
-    def _enqueue(self, connection: sqlite3.Connection, claim: dict[str, Any]) -> None:
+    def _enqueue(self, connection: Connection, claim: dict[str, Any]) -> None:
         record = Claim.model_validate(claim | {"status": "waiting"}).model_dump()
         self._insert(connection, "claim", record["claim_id"], record)
         connection.execute(
@@ -164,7 +190,7 @@ class Store:
             (record["claim_id"],),
         )
 
-    def _seed(self, connection: sqlite3.Connection, data_dir: Path) -> None:
+    def _seed(self, connection: Connection, data_dir: Path) -> None:
         sources: dict[str, Any] = {}
         for name in SEED_FILES:
             content = (data_dir / name).read_text(encoding="utf-8")
@@ -219,7 +245,7 @@ class Store:
                 raise ValueError(f"Unknown plan or add-on for {claim['claim_id']}.")
 
     @staticmethod
-    def _insert(connection: sqlite3.Connection, kind: str, key: str, body: Any):
+    def _insert(connection: Connection, kind: str, key: str, body: Any):
         connection.execute(
             "INSERT INTO records (kind, id, body) VALUES (?, ?, ?)",
             (kind, key, json.dumps(encode(body))),

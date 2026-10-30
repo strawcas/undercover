@@ -1,7 +1,8 @@
 """A section index for the two permitted business documents."""
 
 import re
-import sqlite3
+
+from backend.database import Connection
 
 
 def sections(text: str) -> list[dict]:
@@ -42,7 +43,7 @@ def sections(text: str) -> list[dict]:
     return result
 
 
-def install(connection: sqlite3.Connection, source: str, text: str) -> None:
+def install(connection: Connection, source: str, text: str) -> None:
     """Replace one document index after validating its complete text."""
     entries = sections(text)
     connection.execute("DELETE FROM reference_sections WHERE source=?", (source,))

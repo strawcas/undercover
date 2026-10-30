@@ -64,4 +64,3 @@ the decision and any eligible payment, with a short result for the queue agent.
 Use calculate_payout for every approval and record the exact payout it returns.
 Select only covered lines. Give every line an explicit quantity, nights and hours
 (zero when unused), and give paid_by_others explicitly (zero when none).
-

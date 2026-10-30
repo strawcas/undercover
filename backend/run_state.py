@@ -1,9 +1,9 @@
 """Typed transactional views of stored queue runs."""
 
 import json
-import sqlite3
 
 from backend.claim_records import claim_row
+from backend.database import Connection, Row, runs
 from backend.errors import ClaimError
 from backend.harness_models import (
     Attempt,
@@ -19,7 +19,7 @@ from backend.harness_models import (
 MAX_FAILED_ATTEMPTS = 2
 
 
-def read_run(connection: sqlite3.Connection, run_id: str) -> StoredRun:
+def read_run(connection: Connection, run_id: str) -> StoredRun:
     row = connection.execute(
         "SELECT body FROM agent_runs WHERE id=?", (run_id,)
     ).fetchone()
@@ -28,12 +28,20 @@ def read_run(connection: sqlite3.Connection, run_id: str) -> StoredRun:
     return StoredRun.model_validate_json(row["body"])
 
 
-def save_run(connection: sqlite3.Connection, data: StoredRun) -> None:
-    connection.execute(
-        "INSERT INTO agent_runs VALUES (?, ?) "
-        "ON CONFLICT(id) DO UPDATE SET body=excluded.body",
-        (data.run_id, data.model_dump_json()),
-    )
+def save_run(connection: Connection, data: StoredRun) -> None:
+    prior = connection.execute(
+        "SELECT id FROM agent_runs WHERE id=?", (data.run_id,)
+    ).fetchone()
+    if prior:
+        connection.execute(
+            "UPDATE agent_runs SET body=? WHERE id=?",
+            (data.model_dump_json(), data.run_id),
+        )
+    else:
+        connection.execute(
+            "INSERT INTO agent_runs (id,body,position) VALUES (?,?,?)",
+            (data.run_id, data.model_dump_json(), connection.next_position(runs)),
+        )
 
 
 def require_running(data: StoredRun) -> None:
@@ -41,7 +49,7 @@ def require_running(data: StoredRun) -> None:
         raise ClaimError(409, "Agent run is already finished.")
 
 
-def eligible(row: sqlite3.Row) -> bool:
+def eligible(row: Row) -> bool:
     return (
         row["state"] == "waiting"
         and not row["active"]
@@ -50,7 +58,7 @@ def eligible(row: sqlite3.Row) -> bool:
     )
 
 
-def progress(row: sqlite3.Row) -> tuple[TodoStatus, Handoff | None]:
+def progress(row: Row) -> tuple[TodoStatus, Handoff | None]:
     decision = json.loads(row["decision"]) if row["decision"] else {}
     conditions: tuple[tuple[bool, TodoStatus, Handoff | None], ...] = (
         (bool(row["active"]), "in_progress", None),
@@ -70,23 +78,24 @@ def progress(row: sqlite3.Row) -> tuple[TodoStatus, Handoff | None]:
     return "done", None
 
 
-def sync_todos(connection: sqlite3.Connection, data: StoredRun) -> None:
+def sync_todos(connection: Connection, data: StoredRun) -> None:
     for item in data.todos:
         item.status, item.handoff_reason = progress(
             claim_row(connection, item.claim_id)
         )
 
 
-def attempts(connection: sqlite3.Connection, run_id: str) -> list[Attempt]:
+def attempts(connection: Connection, run_id: str) -> list[Attempt]:
     return [
         Attempt.model_validate_json(row["body"])
         for row in connection.execute(
-            "SELECT body FROM agent_attempts WHERE run_id=? ORDER BY rowid", (run_id,)
+            "SELECT body FROM agent_attempts WHERE run_id=? ORDER BY position",
+            (run_id,),
         )
     ]
 
 
-def claim_result(row: sqlite3.Row) -> ClaimResult:
+def claim_result(row: Row) -> ClaimResult:
     decision = json.loads(row["decision"]) if row["decision"] else {}
     payment = "unavailable"
     if decision.get("outcome") == "approve":
@@ -102,7 +111,7 @@ def claim_result(row: sqlite3.Row) -> ClaimResult:
     )
 
 
-def counts(connection: sqlite3.Connection, data: StoredRun) -> Counts:
+def counts(connection: Connection, data: StoredRun) -> Counts:
     entries = attempts(connection, data.run_id)
     result = Counts(
         worked=len(data.admitted_claim_ids),
@@ -125,7 +134,7 @@ def counts(connection: sqlite3.Connection, data: StoredRun) -> Counts:
     return result
 
 
-def view(connection: sqlite3.Connection, data: StoredRun) -> Run:
+def view(connection: Connection, data: StoredRun) -> Run:
     entries = attempts(connection, data.run_id)
     totals = data.counts
     if data.status == "running":
@@ -149,7 +158,7 @@ def view(connection: sqlite3.Connection, data: StoredRun) -> Run:
     )
 
 
-def completion(connection: sqlite3.Connection, data: StoredRun) -> CompletionCheck:
+def completion(connection: Connection, data: StoredRun) -> CompletionCheck:
     if data.status != "running":
         if data.final_check is None:
             raise RuntimeError("Finished run has no completion check.")

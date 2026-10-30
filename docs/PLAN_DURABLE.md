@@ -94,13 +94,13 @@ Convert the entire backend query surface and migration/rebuild paths together, p
 
 Success criteria:
 
-- [ ] Existing seed, queue, references, runs, API, ownership, financial and reset regressions pass on temporary SQLite databases using SQLAlchemy Core. No duplicate SQLite/Postgres business-query implementations remain.
-- [ ] Migration fixtures containing old decisions, sign-offs, payments, failures, to-dos and evidence retain their exact values and ordering over repeated initialization. No invented reference provenance or silent reseed occurs.
-- [ ] Configuration tests prove injected SQLite storage overrides ambient settings, imports do not read `.env`, configured Postgres never falls back silently, and backend/service identities match the actual target without exposing URLs/passwords.
-- [ ] Pool tests assert at most four connections per database-using process and no unbounded overflow; disposal releases them. Concurrent admission/financial/reset tests retain atomic behavior and stale-owner rejection. Review the corresponding Postgres locking strategy explicitly; SQLite tests alone do not prove it.
+- [x] Existing seed, queue, references, runs, API, ownership, financial and reset regressions pass on temporary SQLite databases using SQLAlchemy Core. No duplicate SQLite/Postgres business-query implementations remain.
+- [x] Migration fixtures containing old decisions, sign-offs, payments, failures, to-dos and evidence retain their exact values and ordering over repeated initialization. No invented reference provenance or silent reseed occurs.
+- [x] Configuration tests prove injected SQLite storage overrides ambient settings, imports do not read `.env`, configured Postgres never falls back silently, and backend/service identities match the actual target without exposing URLs/passwords.
+- [x] Pool tests assert at most four connections per database-using process and no unbounded overflow; disposal releases them. Concurrent admission/financial/reset tests retain atomic behavior and stale-owner rejection. Review the corresponding Postgres locking strategy explicitly; SQLite tests alone do not prove it.
 - [ ] On Supabase, read-only MCP inspection verifies business tables are confined to `undercover`; initialization and reseeding restore the permitted queue in source order. Repeated startup preserves stored records. Inspect schema, transaction and uniqueness behavior against the real database without model calls.
 - [ ] Reset tests validate before destructive changes, preserve the existing database on invalid seed data, reject active owners, and clear business state plus applicable checkpoints without affecting `lab`, other schemas, source files or another configured database.
-- [ ] `npm run check:python` passes. Review complete changed transactions and callers, including rollback/cleanup failures, update status and commit the phase.
+- [x] `npm run check:python` passes. Review complete changed transactions and callers, including rollback/cleanup failures, update status and commit the phase.
 
 ## Phase 3: Build the synchronous checkpointed claim graph
 

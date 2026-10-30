@@ -15,7 +15,7 @@ from agent.execution import AttemptResult, Execution, Runner
 from agent.main import AgentRunError
 from agent.queue import run_queue
 from backend.claim_models import ClaimDetail
-from backend.config import backend_url, database_path, run_scope
+from backend.config import backend_url, database_target, run_scope
 from backend.diagnostics import preserve_primary
 from backend.harness_models import Counts, Run
 from backend.local import agent_backend
@@ -123,7 +123,7 @@ def main(runner: Runner = default_runner, argv: Sequence[str] = ()) -> int:
     try:
         parsed = arguments(argv)
         scope = run_scope(parsed.max_claims, parsed.claim_id)
-        with agent_backend(Store(database_path()), runner, backend_url()) as claims:
+        with agent_backend(Store(database_target()), runner, backend_url()) as claims:
             try:
                 with interruptible(context):
                     result = run_queue(scope, runner, execution=context)

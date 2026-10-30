@@ -11,7 +11,6 @@ import httpx
 import uvicorn
 
 from backend.claims import Claims
-from backend.config import database_identity
 from backend.main import create_app
 from backend.storage import Store
 from backend.worker import Runner
@@ -89,9 +88,10 @@ def existing_backend(store: Store, url: str) -> bool:
         raise RuntimeError(
             "Backend address is occupied but its API is unavailable."
         ) from error
-    if not response.is_success or response.headers.get(
-        "X-UnderCover-Database"
-    ) != database_identity(store.path):
+    if (
+        not response.is_success
+        or response.headers.get("X-UnderCover-Database") != store.identity
+    ):
         raise RuntimeError(
             "Backend address is occupied by another service or database."
         )

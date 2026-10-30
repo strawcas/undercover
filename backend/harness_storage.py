@@ -1,38 +1,55 @@
-"""Additive SQLite migrations for the local harness."""
+"""Additive migrations preserving saved business records and ordering."""
 
-import sqlite3
+from sqlalchemy import inspect, literal_column, select
+
+from backend.database import Connection, metadata
 
 
-def migrate(connection: sqlite3.Connection) -> None:
-    """Add harness records without changing existing pilot work."""
-    columns = {row["name"] for row in connection.execute("PRAGMA table_info(claims)")}
-    for name, statement in (
-        ("run_id", "ALTER TABLE claims ADD COLUMN run_id TEXT"),
-        (
-            "failed_attempts",
-            "ALTER TABLE claims ADD COLUMN failed_attempts INTEGER NOT NULL DEFAULT 0",
-        ),
-        ("review_reason", "ALTER TABLE claims ADD COLUMN review_reason TEXT"),
-    ):
-        if name not in columns:
-            connection.execute(statement)
-    connection.execute(
-        "CREATE TABLE IF NOT EXISTS agent_runs "
-        "(id TEXT PRIMARY KEY, body TEXT NOT NULL)"
-    )
-    connection.execute(
-        "CREATE TABLE IF NOT EXISTS agent_attempts (thread_id TEXT PRIMARY KEY, "
-        "run_id TEXT NOT NULL, claim_id TEXT NOT NULL, "
-        "body TEXT NOT NULL, finish_input TEXT)"
-    )
-    connection.execute(
-        "CREATE TABLE IF NOT EXISTS reference_sections (source TEXT, section_id TEXT, "
-        "position INTEGER, parent_id TEXT, title TEXT, version TEXT, text TEXT, "
-        "PRIMARY KEY(source, section_id))"
-    )
-    connection.execute(
-        "CREATE TABLE IF NOT EXISTS evidence (id TEXT PRIMARY KEY, claim_id TEXT, "
-        "thread_id TEXT, source TEXT, version TEXT, section_id TEXT, "
-        "body TEXT NOT NULL, "
-        "UNIQUE(claim_id, thread_id, source, version, section_id))"
-    )
+def migrate(connection: Connection) -> None:
+    """Create portable tables and add columns missing in older SQLite databases."""
+    metadata.create_all(connection.raw)
+    for table_name, columns in {
+        "claims": {
+            "queue_position": "INTEGER",
+            "run_id": "TEXT",
+            "failed_attempts": "INTEGER NOT NULL DEFAULT 0",
+            "review_reason": "TEXT",
+        },
+        "agent_runs": {"position": "INTEGER"},
+        "agent_attempts": {"position": "INTEGER"},
+        "evidence": {"position": "INTEGER"},
+    }.items():
+        existing = {
+            column["name"] for column in inspect(connection.raw).get_columns(table_name)
+        }
+        for name, definition in columns.items():
+            if name not in existing:
+                connection.execute(
+                    f"ALTER TABLE {table_name} ADD COLUMN {name} {definition}"
+                )
+    for table, key in [
+        ("agent_runs", "id"),
+        ("agent_attempts", "thread_id"),
+        ("evidence", "id"),
+    ]:
+        definition = metadata.tables[table]
+        order = (
+            literal_column("rowid")
+            if connection.raw.dialect.name == "sqlite"
+            else definition.c[key]
+        )
+        ids = (
+            connection.raw.execute(
+                select(definition.c[key])
+                .where(definition.c.position.is_(None))
+                .order_by(order)
+            )
+            .scalars()
+            .all()
+        )
+        for position, identifier in enumerate(ids, 1):
+            connection.raw.execute(
+                definition.update()
+                .where(definition.c[key] == identifier)
+                .values(position=position)
+            )

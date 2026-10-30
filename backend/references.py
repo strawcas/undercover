@@ -2,11 +2,12 @@
 
 import json
 import re
-import sqlite3
 from uuid import uuid4
 
 from backend.attempt_guard import require_attempt
 from backend.claim_records import append_event, claim_row, now
+from backend.database import Connection, Row
+from backend.database import evidence as evidence_table
 from backend.errors import ClaimError
 from backend.models import DecisionInput, EventInput
 from backend.reference_models import ReadInput, SearchInput
@@ -16,9 +17,7 @@ SEARCH_LIMIT = 10
 SNIPPET_LENGTH = 240
 
 
-def find_section(
-    connection: sqlite3.Connection, source: str, section_id: str
-) -> sqlite3.Row:
+def find_section(connection: Connection, source: str, section_id: str) -> Row:
     row = connection.execute(
         "SELECT * FROM reference_sections WHERE source=? AND section_id=?",
         (source, section_id),
@@ -29,7 +28,7 @@ def find_section(
 
 
 def decision_versions(
-    connection: sqlite3.Connection, claim_id: str, decision: DecisionInput
+    connection: Connection, claim_id: str, decision: DecisionInput
 ) -> dict:
     versions = {}
     for source, ids, key in (
@@ -152,7 +151,8 @@ class References:
             )
             if old is None:
                 connection.execute(
-                    "INSERT INTO evidence VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO evidence (id,claim_id,thread_id,source,version,"
+                    "section_id,body,position) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         body["evidence_id"],
                         claim_id,
@@ -161,6 +161,7 @@ class References:
                         section["version"],
                         request.section_id,
                         json.dumps(body),
+                        connection.next_position(evidence_table),
                     ),
                 )
             append_event(
@@ -183,7 +184,7 @@ class References:
             reads = [
                 json.loads(row["body"])
                 for row in connection.execute(
-                    "SELECT body FROM evidence WHERE claim_id=? ORDER BY rowid",
+                    "SELECT body FROM evidence WHERE claim_id=? ORDER BY position",
                     (claim_id,),
                 )
             ]

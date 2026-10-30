@@ -1,12 +1,12 @@
 """Claim lifecycle and payment rules enforced in SQLite transactions."""
 
 import json
-import sqlite3
 from decimal import Decimal
 from typing import Any
 
 from backend.attempt_guard import require_attempt
 from backend.claim_records import append_event, claim_row, now, start_claim
+from backend.database import Connection, Row
 from backend.errors import ClaimError
 from backend.models import DecisionInput, EventInput, cents, dollars
 from backend.references import decision_versions
@@ -46,7 +46,7 @@ class Claims:
         }
 
     @staticmethod
-    def _decision(row: sqlite3.Row) -> dict | None:
+    def _decision(row: Row) -> dict | None:
         decision = json.loads(row["decision"]) if row["decision"] else None
         if not decision:
             return None
@@ -123,9 +123,7 @@ class Claims:
         return None
 
     @staticmethod
-    def _start(
-        connection: sqlite3.Connection, claim_id: str, thread_id: str = ""
-    ) -> str:
+    def _start(connection: Connection, claim_id: str, thread_id: str = "") -> str:
         return start_claim(connection, claim_id, thread_id)
 
     def decide(self, claim_id: str, decision: DecisionInput) -> dict[str, Any]:
@@ -240,7 +238,7 @@ class Claims:
         return result
 
     @staticmethod
-    def _check_payment(row: sqlite3.Row, amount: Decimal, limit: int) -> None:
+    def _check_payment(row: Row, amount: Decimal, limit: int) -> None:
         decision = json.loads(row["decision"]) if row["decision"] else {}
         if decision.get("outcome") != "approve":
             raise ClaimError(409, "Only an approved claim can be paid.")

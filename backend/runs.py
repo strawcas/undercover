@@ -1,9 +1,10 @@
 """Scoped admission, retries and completion of local agent runs."""
 
-import sqlite3
 from datetime import UTC, datetime, timedelta
 
 from backend.claim_records import append_event, claim_row, now, start_claim
+from backend.database import Connection, Row
+from backend.database import attempts as attempts_table
 from backend.errors import ClaimError
 from backend.harness_models import (
     Attempt,
@@ -52,7 +53,7 @@ class Runs:
     def current(self) -> dict | None:
         with self.store.connect() as connection:
             row = connection.execute(
-                "SELECT body FROM agent_runs ORDER BY rowid DESC LIMIT 1"
+                "SELECT body FROM agent_runs ORDER BY position DESC LIMIT 1"
             ).fetchone()
             if row is None:
                 return None
@@ -96,7 +97,7 @@ class Runs:
             return view(connection, data).model_dump(mode="json"), True
 
     @staticmethod
-    def _snapshot(connection: sqlite3.Connection, scope: Scope) -> list[str]:
+    def _snapshot(connection: Connection, scope: Scope) -> list[str]:
         if scope.mode == "claim":
             row = claim_row(connection, scope.claim_id)
             if not eligible(row):
@@ -130,9 +131,7 @@ class Runs:
             )
 
     @staticmethod
-    def _validate_todos(
-        connection: sqlite3.Connection, data: StoredRun, items: list[Todo]
-    ):
+    def _validate_todos(connection: Connection, data: StoredRun, items: list[Todo]):
         by_claim = {item.claim_id: item for item in items}
         for old in data.todos:
             if old.claim_id in data.admitted_claim_ids:
@@ -194,15 +193,22 @@ class Runs:
                 **claim_result(claim_row(connection, row["id"])).model_dump(),
             )
             connection.execute(
-                "INSERT INTO agent_attempts VALUES (?, ?, ?, ?, NULL)",
-                (thread, run_id, row["id"], entry.model_dump_json()),
+                "INSERT INTO agent_attempts (thread_id,run_id,claim_id,body,"
+                "finish_input,position) VALUES (?, ?, ?, ?, NULL, ?)",
+                (
+                    thread,
+                    run_id,
+                    row["id"],
+                    entry.model_dump_json(),
+                    connection.next_position(attempts_table),
+                ),
             )
             sync_todos(connection, data)
             save_run(connection, data)
             return entry.model_dump(mode="json"), True
 
     @staticmethod
-    def _admit(connection: sqlite3.Connection, data: StoredRun, row: sqlite3.Row):
+    def _admit(connection: Connection, data: StoredRun, row: Row):
         if row["id"] not in data.snapshot_claim_ids:
             raise ClaimError(409, "Claim is outside this run's scope.")
         if not eligible(row):
@@ -227,7 +233,7 @@ class Runs:
 
     @staticmethod
     def _finish_attempt(
-        connection: sqlite3.Connection, data: StoredRun, thread: str, error: str
+        connection: Connection, data: StoredRun, thread: str, error: str
     ) -> Attempt:
         stored = connection.execute(
             "SELECT * FROM agent_attempts WHERE thread_id=? AND run_id=?",
@@ -269,7 +275,7 @@ class Runs:
         return entry
 
     @staticmethod
-    def _close_claim(connection: sqlite3.Connection, row: sqlite3.Row, failure: str):
+    def _close_claim(connection: Connection, row: Row, failure: str):
         failures = row["failed_attempts"] + int(not row["decision"])
         state, reason = row["state"], None
         if not row["decision"]:

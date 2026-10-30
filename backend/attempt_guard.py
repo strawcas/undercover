@@ -1,15 +1,13 @@
 """Fence writes from expired or superseded claim helpers."""
 
 import json
-import sqlite3
 
 from backend.claim_records import now
+from backend.database import Connection, Row
 from backend.errors import ClaimError
 
 
-def require_attempt(
-    connection: sqlite3.Connection, row: sqlite3.Row, thread: str
-) -> dict:
+def require_attempt(connection: Connection, row: Row, thread: str) -> dict:
     stored = connection.execute(
         "SELECT body FROM agent_attempts WHERE thread_id=?", (thread,)
     ).fetchone()
