@@ -149,6 +149,30 @@ export interface Instructions {
   claim: string;
 }
 
+export type EvaluationSet = "evaluation" | "held_out";
+export interface Scores {
+  decision_accuracy: number;
+  accuracy: number;
+  cost_of_mistakes: number;
+  straight_through: number;
+  model_cost_per_claim: number | null;
+  seconds_per_claim: number;
+}
+export interface Evaluation extends Run {
+  scores: Scores;
+}
+export interface Comparison extends RunMember {
+  source_id: string;
+  handler_decision: DecisionKind;
+  handler_payout: number;
+  right_decision: boolean;
+  right: boolean;
+  mistake_cost: number;
+}
+export interface EvaluationDetail extends Evaluation {
+  comparisons: Comparison[];
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -197,6 +221,19 @@ export const api = {
   getActiveRun: () => request<Run | null>("/api/runs/active"),
   startDispatch: (concurrency: number) =>
     post<{ status: string }>("/api/dispatches", { concurrency }),
+  startEvaluation: (
+    setName: EvaluationSet,
+    tiny: boolean,
+    concurrency: number,
+  ) =>
+    post<{ status: string }>("/api/evaluations", {
+      set_name: setName,
+      tiny,
+      concurrency,
+    }),
+  listEvaluations: () => request<Evaluation[]>("/api/evaluations"),
+  getEvaluation: (runId: string) =>
+    request<EvaluationDetail>(`/api/evaluations/${encodeURIComponent(runId)}`),
   signOff: (claimId: string, handlerId: string) =>
     post<Claim>(`${claimPath(claimId)}/sign-off`, { handler_id: handlerId }),
 };

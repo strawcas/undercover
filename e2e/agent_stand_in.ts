@@ -4,6 +4,7 @@ import { createServer, type ServerResponse } from "node:http";
 
 const resumed: string[] = [];
 const starts: unknown[] = [];
+let busy = false;
 
 function reply(response: ServerResponse, status: number, body: unknown) {
   response.writeHead(status, { "Content-Type": "application/json" });
@@ -15,7 +16,17 @@ createServer((request, response) => {
   if (request.method === "POST" && resume) {
     resumed.push(decodeURIComponent(resume[1]));
     reply(response, 202, { status: "accepted" });
-  } else if (request.method === "POST" && request.url === "/api/dispatches") {
+  } else if (
+    request.method === "POST" &&
+    (request.url === "/api/dispatches" || request.url === "/api/evaluations")
+  ) {
+    if (busy) {
+      reply(response, 409, {
+        detail: "A dispatch or evaluation is already running",
+      });
+      return;
+    }
+    busy = true;
     let body = "";
     request.on("data", (chunk: Buffer) => {
       body += chunk.toString();
@@ -26,6 +37,9 @@ createServer((request, response) => {
     });
   } else if (request.url === "/api/starts") {
     reply(response, 200, starts);
+  } else if (request.method === "POST" && request.url === "/api/release") {
+    busy = false;
+    reply(response, 200, { status: "released" });
   } else if (request.url === "/api/resumed") {
     reply(response, 200, resumed);
   } else if (request.url === "/api/health") {

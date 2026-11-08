@@ -2,7 +2,13 @@ import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { vi } from "vitest";
 import { App } from "./App";
-import type { Claim, ClaimSummary, Policy, PreviousClaim } from "./api";
+import type {
+  Claim,
+  ClaimSummary,
+  EvaluationDetail,
+  Policy,
+  PreviousClaim,
+} from "./api";
 
 // Stands in for the backend: answers "METHOD /path" with the JSON given, or
 // with the status and detail given as an error, and a 404 for anything else.
@@ -119,3 +125,67 @@ export const history: PreviousClaim[] = [
     amount_paid: 140,
   },
 ];
+
+const comparisonFixtures: EvaluationDetail["comparisons"] = [
+  {
+    claim_id: "EVAL-1",
+    source_id: "CLM-1001",
+    status: "finished",
+    error: null,
+    claim_status: "decided",
+    decision: "decline",
+    payout: 0,
+    reason: "The policy excludes this event.",
+    llm_cost: 0.001,
+    active_seconds: 20,
+    handler_decision: "approve",
+    handler_payout: 420,
+    right_decision: false,
+    right: false,
+    mistake_cost: 1500,
+  },
+  {
+    claim_id: "EVAL-2",
+    source_id: "CLM-1002",
+    status: "selected",
+    error: "Interrupted",
+    claim_status: "waiting",
+    decision: null,
+    payout: null,
+    reason: null,
+    llm_cost: null,
+    active_seconds: 0,
+    handler_decision: "refer",
+    handler_payout: 0,
+    right_decision: true,
+    right: true,
+    mistake_cost: 0,
+  },
+];
+
+export const evaluation: EvaluationDetail = {
+  run_id: "eval-1",
+  kind: "evaluation",
+  concurrency: 5,
+  model: "openai/gpt-6-luna",
+  reasoning_effort: null,
+  set_name: "held_out",
+  tiny: true,
+  status: "finished",
+  started_at: "2026-11-09T01:00:00Z",
+  finished_at: "2026-11-09T01:00:30Z",
+  summary: "Worked 2 claims",
+  llm_cost: 0.001,
+  active_seconds: 20,
+  seconds: 30,
+  members: comparisonFixtures,
+  scores: {
+    decision_accuracy: 0.5,
+    accuracy: 0.5,
+    cost_of_mistakes: 1500,
+    straight_through: 0.5,
+    model_cost_per_claim: 0.0005,
+    seconds_per_claim: 10,
+  },
+  comparisons: comparisonFixtures,
+};

@@ -168,14 +168,14 @@ Seed the two permitted answer sets into isolated tables, create evaluation copie
 
 Add the scoreboard start form, list and comparison page using the proven backend contracts. Reuse the normal claim page for copies, clearly identifying them as evaluation claims and suppressing sign-off controls.
 
-- [ ] `/scoreboard` is linked from the header. Its form selects evaluation/held-out, full/tiny and N from 1 to 25, initially 3. The shared admission rules prevent starting either kind of run while one is active.
-- [ ] Vitest covers empty/loading/error states, live refresh, pending and busy starts, unavailable service, newest-first evaluations, running/finished/stopped states and every required measure, model and reasoning effort (including None).
-- [ ] Evaluation detail tests show expected and actual decision/payout side by side, agent reason, per-claim cost/active time, missing-decision outcomes and readable miss indicators, with working links to each copy.
-- [ ] Claim-page tests and browser inspection show an evaluation label and no sign-off form on held copies. Original claims retain their existing sign-off form and payment messaging.
-- [ ] End-to-end tests start an evaluation from the scoreboard and verify the service stand-in receives set, tiny and N. The test plays out copied claims and measurements through the API; the scoreboard and comparison page then show the backend's calculated results without a reload.
-- [ ] End-to-end coverage also exercises a busy response across dispatch/evaluation starts, a stopped evaluation, a held copy with no sign-off and unchanged queue counts.
-- [ ] Through Playwright MCP, inspect scoreboard, detail and copied-claim pages with stand-in records in light/dark mode and at a narrow width. Fonts, surfaces, payout formatting and status colors follow `docs/BRAND.md`; misses remain understandable without color. No unexpected console errors occur.
-- [ ] `npm run check` passes; the phase is reviewed, documented in `docs/STATUS.md` and committed.
+- [x] `/scoreboard` is linked from the header. Its form selects evaluation/held-out, full/tiny and N from 1 to 25, initially 3. The shared admission rules prevent starting either kind of run while one is active.
+- [x] Vitest covers empty/loading/error states, live refresh, pending and busy starts, unavailable service, newest-first evaluations, running/finished/stopped states and every required measure, model and reasoning effort (including None).
+- [x] Evaluation detail tests show expected and actual decision/payout side by side, agent reason, per-claim cost/active time, missing-decision outcomes and readable miss indicators, with working links to each copy.
+- [x] Claim-page tests and browser inspection show an evaluation label and no sign-off form on held copies. Original claims retain their existing sign-off form and payment messaging.
+- [x] End-to-end tests start an evaluation from the scoreboard and verify the service stand-in receives set, tiny and N. The test plays out copied claims and measurements through the API; the scoreboard and comparison page then show the backend's calculated results without a reload.
+- [x] End-to-end coverage also exercises a busy response across dispatch/evaluation starts, a stopped evaluation, a held copy with no sign-off and unchanged queue counts.
+- [x] Through Playwright MCP, inspect scoreboard, detail and copied-claim pages with stand-in records in light/dark mode and at a narrow width. Fonts, surfaces, payout formatting and status colors follow `docs/BRAND.md`; misses remain understandable without color. No unexpected console errors occur.
+- [x] `npm run check` passes; the phase is reviewed, documented in `docs/STATUS.md` and committed.
 
 ## Phase 6: Live recovery, concurrency and operational handover
 
@@ -202,3 +202,5 @@ Phase 2 checkpoint-pool verification: distinct per-execution savers, setup-once 
 Phase 3 browser evidence: isolated SQLite/agent stand-in preview at localhost:5173; default N=3, accepted start, busy disable, member links and record summary checked at 1280px light and 390px dark. Simulated service503 displayed the expected message. No unexpected console errors; screenshots in ignored .playwright-mcp/. Review fixed plain-text upstream errors and verified responsiveness on a single ASGI event loop.
 
 Phase4 verification: all seven claim tools exercised with sentinel handler labels absent from model prompts; successful held copies, exhausted transients, two ordinary failures and startup-stopped copies delete all checkpoint attempts while retaining backend records. Hand-calculated scores include missing/unstarted copies, failed-attempt cost/time, inclusive dollar tolerance and zero-work selection. Run reads use a fixed query count at1 and25 members. Fresh review found no code blockers and requested the added cleanup regressions.
+
+Phase5 browser evidence: scoreboard, comparisons and held copied-claim pages inspected at1280px light and390px dark with a SQLite stand-in evaluation. All measures visible; queue records identical before/after; held copy has zero sign-off controls. InstrumentSans/black panels confirmed in dark mode; document width390px at390px viewport. Fresh review requested and verified in-place polling assertions and a consistent two-member fixture.

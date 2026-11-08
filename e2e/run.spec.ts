@@ -48,6 +48,7 @@ test("the queue shows dispatch members and a records-built summary", async ({
   ).toBeVisible();
   await panel.getByRole("link", { name: "CLM-1013" }).click();
   await expect(page).toHaveURL("/claims/CLM-1013");
+  await post(request, `${AGENT_STAND_IN}/api/release`, {});
 });
 
 test("a claim that fails twice is left for a handler", async ({
@@ -90,4 +91,120 @@ test("a claim that fails twice is left for a handler", async ({
     /Failed RuntimeError: The model timed out$/,
     /Failed RuntimeError: The model timed out again$/,
   ]);
+});
+
+test("evaluations show scores, copied decisions and stopped runs without changing the queue", async ({
+  page,
+  request,
+}) => {
+  const queueBefore = await request.get("/api/claims");
+  const original = (await queueBefore.json()) as { claim_id: string }[];
+  await page.goto("/scoreboard");
+  await page.getByLabel("Claim set").selectOption("held_out");
+  await page.getByLabel("Selection").selectOption("tiny");
+  await page.getByLabel("Agents at once").fill("5");
+  await page.getByRole("button", { name: "Start evaluation" }).click();
+  await expect(page.getByText("Evaluation accepted.")).toBeVisible();
+  const starts = await request.get(`${AGENT_STAND_IN}/api/starts`);
+  expect(await starts.json()).toContainEqual({
+    set_name: "held_out",
+    tiny: true,
+    concurrency: 5,
+  });
+  const busy = await request.post("/api/dispatches", {
+    data: { concurrency: 25 },
+  });
+  expect(busy.status()).toBe(409);
+  const response = await post(request, "/api/runs", {
+    kind: "evaluation",
+    set_name: "held_out",
+    tiny: true,
+    concurrency: 5,
+    model: "stub",
+    reasoning_effort: null,
+  });
+  const run = (await response.json()) as {
+    run_id: string;
+    members: { claim_id: string }[];
+  };
+  const claimId = run.members[0].claim_id;
+  await page.getByRole("link", { name: "Queue", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Start dispatch" }),
+  ).toBeDisabled();
+  await page.getByRole("link", { name: "Scoreboard", exact: true }).click();
+  await expect(page.getByText("Running", { exact: true })).toBeVisible();
+  await page
+    .getByRole("list", { name: "Evaluations" })
+    .getByRole("link")
+    .first()
+    .click();
+  await expect(
+    page.getByRole("table").getByText("No decision (scored as referred)"),
+  ).toHaveCount(5);
+  await post(request, `/api/claims/${claimId}/start`, {
+    thread_id: "eval-e2e",
+  });
+  await post(request, `/api/claims/${claimId}/decision`, {
+    decision: "approve",
+    payout: 1350,
+    section: "3",
+    reason: "Evaluation rationale",
+  });
+  await post(request, `/api/claims/${claimId}/model-calls`, {
+    run_id: run.run_id,
+    reply_id: "reply",
+    input_tokens: 10,
+    output_tokens: 5,
+    total_tokens: 15,
+    cost: 0.001,
+  });
+  await put(request, `/api/claims/${claimId}/work-slices/work`, {
+    run_id: run.run_id,
+    seconds: 10,
+  });
+  await expect(page.getByText("Evaluation rationale")).toBeVisible();
+  await expect(
+    page.getByRole("table").getByText("No decision (scored as referred)"),
+  ).toHaveCount(4);
+  await page
+    .getByRole("link", { name: "Scoreboard", exact: true })
+    .first()
+    .click();
+  await expect(page.getByText("Running", { exact: true })).toBeVisible();
+  await post(request, `/api/runs/${run.run_id}/finish`, {});
+  await post(request, `${AGENT_STAND_IN}/api/release`, {});
+  const evaluations = page.getByRole("list", { name: "Evaluations" });
+  await expect(
+    evaluations.getByText("Finished", { exact: true }),
+  ).toBeVisible();
+  await expect(evaluations.getByText("$0.000200")).toBeVisible();
+  await evaluations.getByRole("link").first().click();
+  await expect(
+    page.getByRole("heading", { name: "Evaluation results" }),
+  ).toBeVisible();
+  await expect(page.getByText("Evaluation rationale")).toBeVisible();
+  const comparison = page.getByRole("table");
+  await expect(
+    comparison.getByText("No decision (scored as referred)"),
+  ).toHaveCount(4);
+  await comparison.getByRole("link").first().click();
+  await expect(page.getByText(/Evaluation claim/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sign off" })).toHaveCount(0);
+  await expect(page.getByText(/complete without sign-off/)).toBeVisible();
+  const queueAfter = await request.get("/api/claims");
+  const after = (await queueAfter.json()) as { claim_id: string }[];
+  expect(after.map((c) => c.claim_id)).toEqual(original.map((c) => c.claim_id));
+  const stopped = await post(request, "/api/runs", {
+    kind: "evaluation",
+    set_name: "evaluation",
+    tiny: true,
+    concurrency: 3,
+    model: "stub",
+    reasoning_effort: null,
+  });
+  expect(stopped.ok()).toBe(true);
+  await post(request, "/api/runs/stop", {});
+  await page.getByRole("link", { name: "Scoreboard", exact: true }).click();
+  await expect(page.getByText("Stopped", { exact: true })).toBeVisible();
 });

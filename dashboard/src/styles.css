@@ -246,6 +246,47 @@ p {
 .run-start input {
   width: 7rem;
 }
+
+.evaluations {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 20px;
+}
+.evaluation-measures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 14px;
+  margin: 18px 0 0;
+}
+.evaluation-measures dd {
+  margin: 2px 0 0;
+  font-size: 1.2rem;
+}
+.evaluation-measures dt {
+  font-size: 0.87rem;
+  color: var(--muted);
+}
+.evaluation-notice {
+  margin-bottom: 20px;
+}
+.claim-heading .mono {
+  overflow-wrap: anywhere;
+}
+.comparisons {
+  margin-top: 16px;
+}
+.comparisons td:last-child {
+  min-width: 240px;
+}
+.match {
+  background: var(--sea-green);
+  color: var(--midnight);
+}
+.miss {
+  background: var(--raspberry);
+  color: #fff;
+}
 .run-start p {
   flex-basis: 100%;
   margin: 0;

@@ -316,3 +316,23 @@ it("shows why a sign-off was refused", async () => {
     "Claim CLM-1002 is not waiting for sign-off",
   );
 });
+
+it("labels an evaluation copy and suppresses sign-off", async () => {
+  const { fetchMock } = showClaim({
+    ...held,
+    evaluation_id: "eval-1",
+    source_id: "CLM-1002",
+  });
+  expect(await screen.findByText(/Evaluation claim/)).toBeDefined();
+  const view = await decisionPanel();
+  expect(view.getByText(/complete without sign-off/)).toBeDefined();
+  expect(view.queryByRole("button", { name: "Sign off" })).toBeNull();
+  expect(
+    screen
+      .getByRole("link", { name: "View evaluation results" })
+      .getAttribute("href"),
+  ).toBe("/scoreboard/eval-1");
+  expect(fetchMock.mock.calls.some(([path]) => path === "/api/handlers")).toBe(
+    false,
+  );
+});

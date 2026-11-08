@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { useParams } from "react-router";
+import { Link, useParams } from "react-router";
 import { ApiError, api, type Claim } from "../api";
 import { StatusChip } from "../components/Chips";
 import { DecisionPanel } from "../components/DecisionPanel";
@@ -8,6 +8,7 @@ import { HistoryPanel, PolicyPanel } from "../components/PolicyPanels";
 import { StepList } from "../components/StepList";
 import { date, label, money } from "../format";
 import { REFRESH_MS, useLoad } from "../useLoad";
+import { evaluationPage } from "../paths";
 
 export function ClaimPage() {
   const { claimId = "" } = useParams();
@@ -22,6 +23,14 @@ export function ClaimPage() {
 
   return (
     <>
+      {claim.evaluation_id && (
+        <aside className="panel evaluation-notice">
+          Evaluation claim · Source {claim.source_id}.{" "}
+          <Link to={evaluationPage(claim.evaluation_id)}>
+            View evaluation results
+          </Link>
+        </aside>
+      )}
       <div className="claim-heading">
         <p className="mono muted">{claim.claim_id}</p>
         <h1>{claim.summary}</h1>

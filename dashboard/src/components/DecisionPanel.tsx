@@ -60,15 +60,36 @@ export function DecisionPanel({
           </p>
         )}
       {decision && claim.status === "waiting_for_sign_off" && (
-        <div className="sign-off">
-          <p>
-            The payment of{" "}
-            <span className="mono">{money(decision.payout)}</span> is over the
-            approval limit and waits for a handler's sign-off.
-          </p>
-          <SignOffForm claimId={claim.claim_id} onSignedOff={onSignedOff} />
-        </div>
+        <HeldPayment
+          claim={claim}
+          payout={decision.payout}
+          onSignedOff={onSignedOff}
+        />
       )}
     </section>
+  );
+}
+
+function HeldPayment({
+  claim,
+  payout,
+  onSignedOff,
+}: Readonly<{ claim: Claim; payout: number; onSignedOff: () => void }>) {
+  return (
+    <div className="sign-off">
+      <p>
+        The payment of <span className="mono">{money(payout)}</span> is over the
+        approval limit
+        {claim.evaluation_id ? "." : " and waits for a handler's sign-off."}
+      </p>
+      {claim.evaluation_id ? (
+        <p>
+          This evaluation is complete without sign-off. No payment is made for
+          this held copy.
+        </p>
+      ) : (
+        <SignOffForm claimId={claim.claim_id} onSignedOff={onSignedOff} />
+      )}
+    </div>
   );
 }

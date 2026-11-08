@@ -2,7 +2,9 @@ import { Link, NavLink, Route, Routes } from "react-router";
 import { ClaimPage } from "./pages/ClaimPage";
 import { InstructionsPage } from "./pages/InstructionsPage";
 import { QueuePage } from "./pages/QueuePage";
-import { CLAIM_PAGE } from "./paths";
+import { ScoreboardPage } from "./pages/ScoreboardPage";
+import { EvaluationPage } from "./pages/EvaluationPage";
+import { CLAIM_PAGE, EVALUATION_PAGE, SCOREBOARD_PAGE } from "./paths";
 
 export function App() {
   return (
@@ -16,6 +18,7 @@ export function App() {
             Queue
           </NavLink>
           <NavLink to="/instructions">Instructions</NavLink>
+          <NavLink to={SCOREBOARD_PAGE}>Scoreboard</NavLink>
         </nav>
       </header>
       <main className="page">
@@ -23,6 +26,8 @@ export function App() {
           <Route path="/" element={<QueuePage />} />
           <Route path={CLAIM_PAGE} element={<ClaimPage />} />
           <Route path="/instructions" element={<InstructionsPage />} />
+          <Route path={SCOREBOARD_PAGE} element={<ScoreboardPage />} />
+          <Route path={EVALUATION_PAGE} element={<EvaluationPage />} />
           <Route path="*" element={<p className="message">Page not found</p>} />
         </Routes>
       </main>

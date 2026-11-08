@@ -71,3 +71,19 @@ export function modelCost(amount: number | null): string {
 export function seconds(amount: number): string {
   return `${amount.toFixed(1)} s`;
 }
+
+export function percent(amount: number): string {
+  return `${(amount * 100).toFixed(1)}%`;
+}
+export function timestamp(iso: string): string {
+  return new Date(iso).toLocaleString("en-US", {
+    dateStyle: "medium",
+    timeStyle: "medium",
+  });
+}
+export function evaluationName(
+  setName: string | null,
+  tiny: boolean | null,
+): string {
+  return `${setName === "held_out" ? "Held-out" : "Evaluation"} · ${tiny ? "Tiny" : "Full"}`;
+}
