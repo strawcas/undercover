@@ -177,6 +177,10 @@ def get_run(run_id: str) -> dict[str, Any]:
     return _call("GET", f"/runs/{run_id}")
 
 
+def get_run_threads(run_id: str) -> list[str]:
+    return _call("GET", f"/runs/{run_id}/threads")
+
+
 def record_run_claim(
     run_id: str, claim_id: str, status: str, error: str | None
 ) -> dict[str, Any]:

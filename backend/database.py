@@ -95,7 +95,7 @@ claims = Table(
     Column("status", Text, nullable=False),
     Column("thread_id", Text),
     Column("attempts", Integer, nullable=False),
-    Column("evaluation_id", Text),
+    Column("evaluation_id", Text, ForeignKey("runs.run_id")),
     Column("source_id", Text),
 )
 decisions = Table(
@@ -175,6 +175,21 @@ work_slices = Table(
     Column("seconds", Float, nullable=False),
     Column("started_at", Text, nullable=False),
     Column("updated_at", Text, nullable=False),
+)
+evaluation_sources = Table(
+    "evaluation_sources",
+    metadata,
+    Column("set_name", Text, primary_key=True),
+    Column("source_id", Text, primary_key=True),
+    Column("record", JSON, nullable=False),
+)
+evaluation_labels = Table(
+    "evaluation_labels",
+    metadata,
+    Column("set_name", Text, primary_key=True),
+    Column("source_id", Text, primary_key=True),
+    Column("tiny", Boolean, nullable=False),
+    Column("record", JSON, nullable=False),
 )
 
 claim_view = (
@@ -320,6 +335,33 @@ def seed(db: Engine) -> dict[str, int]:
                 for c in claim_rows
             ],
         )
+        for set_name, sources, labels in (
+            ("evaluation", claim_rows, load("evals/decisions.json")),
+            (
+                "held_out",
+                load("evals/held_out_claims.json"),
+                load("evals/held_out_decisions.json"),
+            ),
+        ):
+            connection.execute(
+                insert(evaluation_sources),
+                [
+                    {"set_name": set_name, "source_id": row["claim_id"], "record": row}
+                    for row in sources
+                ],
+            )
+            connection.execute(
+                insert(evaluation_labels),
+                [
+                    {
+                        "set_name": set_name,
+                        "source_id": row["claim_id"],
+                        "tiny": row["tiny"],
+                        "record": row,
+                    }
+                    for row in labels
+                ],
+            )
     return {
         "claims": len(claim_rows),
         "policies": len(policy_rows),

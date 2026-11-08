@@ -6,7 +6,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from threading import Lock
-from typing import Annotated
+from typing import Annotated, Any, Literal
 
 import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
@@ -46,6 +46,11 @@ class DispatchRequest(BaseModel):
     concurrency: int = Field(ge=1, le=25)
 
 
+class EvaluationRequest(DispatchRequest):
+    set_name: Literal["evaluation", "held_out"]
+    tiny: bool
+
+
 async def recover() -> None:
     """Wait for the concurrently started backend, then close abandoned runs."""
     while True:
@@ -58,8 +63,9 @@ async def recover() -> None:
     await run_in_threadpool(harness.clear_threads, threads)
 
 
-def work_run(selection: dict) -> None:
+def work_run(selection: dict[str, Any]) -> None:
     """Create the accepted run in background and always release its admission slot."""
+    run = None
     try:
         run = api.start_run(selection | harness.model_settings())
         dispatcher.dispatch(run["run_id"], run["concurrency"])
@@ -71,10 +77,17 @@ def work_run(selection: dict) -> None:
         except Exception:
             log.exception("Run recovery will be retried at service startup")
     finally:
+        if run is not None and run["kind"] == "evaluation":
+            try:
+                harness.clear_threads(api.get_run_threads(run["run_id"]))
+            except Exception:
+                log.exception("Evaluation checkpoints will be cleared at startup")
         run_slot.release()
 
 
-def accept_run(selection: dict, background: BackgroundTasks) -> dict[str, str]:
+def accept_run(
+    selection: dict[str, Any], background: BackgroundTasks
+) -> dict[str, str]:
     """Reserve the single dispatch/evaluation slot before scheduling any work."""
     if not run_slot.acquire(blocking=False):
         raise HTTPException(409, "A dispatch or evaluation is already running")
@@ -96,6 +109,14 @@ def start_dispatch(
         },
         background,
     )
+
+
+@app.post("/api/evaluations", operation_id="start_evaluation", status_code=202)
+def start_evaluation(
+    request: EvaluationRequest, background: BackgroundTasks
+) -> dict[str, str]:
+    """Accept an evaluation in the same single admission slot as dispatches."""
+    return accept_run({"kind": "evaluation", **request.model_dump()}, background)
 
 
 @app.exception_handler(api.Refused)

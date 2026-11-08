@@ -75,6 +75,8 @@ export const claim: Claim = {
   attempts: 0,
   decision: null,
   payment: null,
+  evaluation_id: null,
+  source_id: null,
 };
 
 export const summary: ClaimSummary = {

@@ -84,6 +84,8 @@ class Claim(BaseModel):
     attempts: int
     decision: Decision | None
     payment: Payment | None
+    evaluation_id: str | None
+    source_id: str | None
 
 
 class Trip(BaseModel):
@@ -330,3 +332,29 @@ class ModelCallRequest(BaseModel):
 class WorkSliceRequest(BaseModel):
     run_id: str | None
     seconds: float = Field(ge=0, allow_inf_nan=False)
+
+
+class Scores(BaseModel):
+    decision_accuracy: float
+    accuracy: float
+    cost_of_mistakes: float
+    straight_through: float
+    model_cost_per_claim: float | None
+    seconds_per_claim: float
+
+
+class Comparison(RunMember):
+    source_id: str
+    handler_decision: DecisionKind
+    handler_payout: float
+    right_decision: bool
+    right: bool
+    mistake_cost: float
+
+
+class Evaluation(Run):
+    scores: Scores
+
+
+class EvaluationDetail(Evaluation):
+    comparisons: list[Comparison]

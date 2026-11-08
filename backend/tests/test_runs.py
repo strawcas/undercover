@@ -2,6 +2,9 @@
 
 from concurrent.futures import ThreadPoolExecutor
 
+from sqlalchemy import event
+
+from backend.database import engine
 from backend.tests.run_requests import configuration
 
 
@@ -100,3 +103,25 @@ def test_running_members_are_live_and_closed_measurements_are_refused(client):
     assert (
         client.put("/api/claims/CLM-1001/work-slices/new", json=body).status_code == 409
     )
+
+
+def test_run_read_query_count_does_not_grow_with_swarm_size(client):
+    counts = []
+    for size in (1, 25):
+        run_id = start(client).json()["run_id"]
+        for claim in client.get("/api/claims").json()[:size]:
+            member(client, run_id, claim["claim_id"])
+        queries = []
+
+        def record_query(*args, recorded=queries):
+            recorded.append(args[2])
+
+        db_engine = engine()
+        event.listen(db_engine, "before_cursor_execute", record_query)
+        try:
+            assert client.get(f"/api/runs/{run_id}").status_code == 200
+        finally:
+            event.remove(db_engine, "before_cursor_execute", record_query)
+        counts.append(len(queries))
+    assert counts[0] == counts[1]
+    assert counts[1] <= 6

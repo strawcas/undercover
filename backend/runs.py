@@ -15,6 +15,7 @@ from backend.database import (
     model_calls,
     run_claims,
     runs,
+    steps,
     work_slices,
 )
 from backend.models import (
@@ -49,70 +50,98 @@ def running(db: Connection, run_id: str) -> Any:
     return row
 
 
-def measurements(
-    db: Connection, run_id: str, claim_id: str | None = None
-) -> dict[str, Any]:
-    """Sum only the work attributed to this run, including failed attempts."""
-    calls = select(model_calls.c.cost).where(model_calls.c.run_id == run_id)
-    slices = select(func.coalesce(func.sum(work_slices.c.seconds), 0)).where(
-        work_slices.c.run_id == run_id
+def measured_work(db: Connection, run_id: str) -> dict[str, dict[str, Any]]:
+    """Aggregate costs and active seconds in two queries regardless of swarm size."""
+    work: dict[str, dict[str, Any]] = {}
+    calls = select(
+        model_calls.c.claim_id,
+        func.count().label("received"),
+        func.count(model_calls.c.cost).label("known"),
+        func.sum(model_calls.c.cost).label("cost"),
     )
-    if claim_id is not None:
-        calls = calls.where(model_calls.c.claim_id == claim_id)
-        slices = slices.where(work_slices.c.claim_id == claim_id)
-    costs = list(db.execute(calls).scalars())
-    return {
-        "llm_cost": None if None in costs else sum(costs),
-        "active_seconds": db.execute(slices).scalar_one(),
-    }
+    for row in db.execute(
+        calls.where(model_calls.c.run_id == run_id).group_by(model_calls.c.claim_id)
+    ).mappings():
+        work[row["claim_id"]] = {
+            "llm_cost": row["cost"] if row["known"] == row["received"] else None,
+            "active_seconds": 0.0,
+        }
+    slices = select(
+        work_slices.c.claim_id, func.sum(work_slices.c.seconds).label("seconds")
+    )
+    for row in db.execute(
+        slices.where(work_slices.c.run_id == run_id).group_by(work_slices.c.claim_id)
+    ).mappings():
+        work.setdefault(row["claim_id"], {"llm_cost": 0.0})["active_seconds"] = row[
+            "seconds"
+        ]
+    return work
+
+
+def claim_results(db: Connection, claim_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """Read actual outcomes in one query without claim payloads or expected labels."""
+    query = claim_view.with_only_columns(
+        claims.c.claim_id,
+        claims.c.status.label("claim_status"),
+        claim_view.selected_columns.decision,
+        claim_view.selected_columns.payout,
+        claim_view.selected_columns.reason,
+    ).where(claims.c.claim_id.in_(claim_ids))
+    return {row["claim_id"]: dict(row) for row in db.execute(query).mappings()}
 
 
 def member_result(db: Connection, claim_id: str) -> dict[str, Any]:
-    """Read a claim's actual outcome without any expected evaluation label."""
-    row = db.execute(claim_view.where(claims.c.claim_id == claim_id)).mappings().first()
-    if row is None:
+    """Read a single outcome or refuse an unknown claim."""
+    result = claim_results(db, [claim_id]).get(claim_id)
+    if result is None:
         raise HTTPException(404, f"Claim {claim_id} not found")
-    return {
-        "claim_status": row["status"],
-        "decision": row["decision"],
-        "payout": row["payout"],
-        "reason": row["reason"],
-    }
+    return result
 
 
-def members(db: Connection, row: Any) -> list[RunMember]:
-    """Read current progress, or frozen results once the run finishes."""
+def members(
+    db: Connection, row: Any, work: dict[str, dict[str, Any]]
+) -> list[RunMember]:
+    """Read current outcomes in bulk or use frozen results for a closed run."""
     query = (
         select(run_claims)
         .where(run_claims.c.run_id == row["run_id"])
         .order_by(run_claims.c.position)
     )
+    records = list(db.execute(query).mappings())
+    live = (
+        claim_results(db, [member["claim_id"] for member in records])
+        if row["status"] == "running"
+        else {}
+    )
     return [
         RunMember(
             **dict(member)
             | (
-                member["result"]
-                if row["status"] != "running"
-                else member_result(db, member["claim_id"])
+                live[member["claim_id"]]
+                if row["status"] == "running"
+                else member["result"]
             )
-            | measurements(db, row["run_id"], member["claim_id"])
+            | work.get(member["claim_id"], {"llm_cost": 0.0, "active_seconds": 0.0})
         )
-        for member in db.execute(query).mappings()
+        for member in records
     ]
 
 
 def get_run(db: Connection, run_id: str) -> Run:
-    """Build a run's read contract from records and attributed measurements."""
+    """Build a run's contract with a fixed query count as the swarm grows."""
     row = run_row(db, run_id)
+    work = measured_work(db, run_id)
+    costs = [item["llm_cost"] for item in work.values()]
     seconds = (
         datetime.fromisoformat(row["finished_at"] or now())
         - datetime.fromisoformat(row["started_at"])
     ).total_seconds()
     return Run(
         **dict(row),
-        members=members(db, row),
+        members=members(db, row, work),
         seconds=max(0, seconds),
-        **measurements(db, run_id),
+        llm_cost=None if None in costs else sum(costs),
+        active_seconds=sum(item["active_seconds"] for item in work.values()),
     )
 
 
@@ -236,13 +265,30 @@ def stop_runs(db: Connection) -> list[str]:
     )
     for run_id in ids:
         finish_run(db, run_id, "stopped")
-    return list(
-        db.execute(
-            select(claims.c.thread_id).where(
-                claims.c.evaluation_id.in_(ids), claims.c.thread_id.is_not(None)
-            )
-        ).scalars()
+    return evaluation_threads(db, None)
+
+
+def evaluation_threads(db: Connection, run_id: str | None) -> list[str]:
+    """Include every attempt, even an old failed thread or a pending cleanup."""
+    selection = (
+        claims.c.evaluation_id == run_id
+        if run_id
+        else claims.c.evaluation_id.is_not(None)
     )
+    current = select(claims.c.thread_id).where(
+        selection, claims.c.thread_id.is_not(None)
+    )
+    slices = (
+        select(work_slices.c.thread_id)
+        .join(claims, claims.c.claim_id == work_slices.c.claim_id)
+        .where(selection)
+    )
+    history = (
+        select(steps.c.thread_id)
+        .join(claims, claims.c.claim_id == steps.c.claim_id)
+        .where(selection)
+    )
+    return list(db.execute(current.union(slices, history)).scalars())
 
 
 def validate_run(db: Connection, run_id: str | None) -> None:

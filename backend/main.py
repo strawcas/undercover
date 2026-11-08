@@ -9,7 +9,7 @@ from typing import Annotated
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from sqlalchemy import Connection, RowMapping, insert, select, update
 
-from backend import agent_service
+from backend import agent_service, evaluations
 from backend import runs as run_records
 from backend.database import (
     claim_view,
@@ -33,6 +33,9 @@ from backend.models import (
     DecisionRequest,
     DispatchRequest,
     DocumentName,
+    Evaluation,
+    EvaluationDetail,
+    EvaluationRequest,
     FailureRequest,
     Handler,
     Instructions,
@@ -79,6 +82,14 @@ def start_dispatch(request: DispatchRequest) -> dict[str, str]:
     return agent_service.start_dispatch(request.concurrency)
 
 
+@app.post("/api/evaluations", operation_id="start_evaluation", status_code=202)
+def start_evaluation(request: EvaluationRequest) -> dict[str, str]:
+    """Ask the agent service to accept an isolated evaluation."""
+    return agent_service.start_evaluation(
+        request.set_name, request.tiny, request.concurrency
+    )
+
+
 def database() -> Iterator[Connection]:
     """Open the database for one request, in a transaction committed at its end."""
     with engine().begin() as connection:
@@ -87,6 +98,18 @@ def database() -> Iterator[Connection]:
 
 # Committed before the response is sent and before any background task runs.
 Database = Annotated[Connection, Depends(database, scope="function")]
+
+
+@app.get("/api/evaluations", operation_id="list_evaluations")
+def list_evaluations(db: Database) -> list[Evaluation]:
+    """List newest-first evaluations with backend-calculated scores."""
+    return evaluations.list_evaluations(db)
+
+
+@app.get("/api/evaluations/{run_id}", operation_id="get_evaluation")
+def get_evaluation(run_id: str, db: Database) -> EvaluationDetail:
+    """Compare the agent's results with handler labels on isolated copies."""
+    return evaluations.get_evaluation(db, run_id)
 
 
 def now() -> str:
@@ -166,6 +189,8 @@ def to_claim(row: RowMapping) -> Claim:
             "attempts": row["attempts"],
             "decision": decision,
             "payment": payment,
+            "evaluation_id": row["evaluation_id"],
+            "source_id": row["source_id"],
         }
     )
 
@@ -361,6 +386,8 @@ def sign_off_claim(
 ) -> Claim:
     """Sign off a held payout as a handler, so the agent picks the claim up and pays."""
     claim = find_claim(db, claim_id, lock=True)
+    if claim["evaluation_id"] is not None:
+        raise HTTPException(409, "Evaluation claims cannot be signed off")
     if claim["status"] != "waiting_for_sign_off":
         raise HTTPException(409, f"Claim {claim_id} is not waiting for sign-off")
     query = select(handlers).where(handlers.c.handler_id == request.handler_id)
@@ -400,7 +427,10 @@ def fail_claim(claim_id: str, request: FailureRequest, db: Database) -> Claim:
 @app.post("/api/runs", operation_id="start_run")
 def start_run(request: RunRequest, db: Database) -> Run:
     """Create a run recording its execution configuration."""
-    return run_records.start_run(db, request)
+    run = run_records.start_run(db, request)
+    if request.kind == "evaluation":
+        evaluations.create_copies(db, run.run_id, request)
+    return run_records.get_run(db, run.run_id)
 
 
 @app.get("/api/runs/latest", operation_id="get_latest_run")
@@ -425,6 +455,13 @@ def get_active_run(db: Database) -> Run | None:
 def get_run(run_id: str, db: Database) -> Run:
     """Read a run with its own measurements and member results."""
     return run_records.get_run(db, run_id)
+
+
+@app.get("/api/runs/{run_id}/threads", operation_id="get_run_threads")
+def get_run_threads(run_id: str, db: Database) -> list[str]:
+    """List evaluation checkpoint threads without reading expected outcomes."""
+    run_records.run_row(db, run_id)
+    return run_records.evaluation_threads(db, run_id)
 
 
 @app.put("/api/runs/{run_id}/claims/{claim_id}", operation_id="record_run_claim")

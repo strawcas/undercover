@@ -37,6 +37,13 @@ def start_dispatch(concurrency: int) -> dict[str, str]:
     return _start("/dispatches", {"concurrency": concurrency})
 
 
+def start_evaluation(set_name: str, tiny: bool, concurrency: int) -> dict[str, str]:
+    """Ask the agent service to evaluate copies from a selected labelled set."""
+    return _start(
+        "/evaluations", {"set_name": set_name, "tiny": tiny, "concurrency": concurrency}
+    )
+
+
 def resume_claim(claim_id: str) -> None:
     """Ask the agent to pick a claim back up after its sign-off."""
     try:

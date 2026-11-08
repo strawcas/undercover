@@ -41,3 +41,17 @@ def test_busy_and_unavailable_create_nothing(client, agent_answers):
 @pytest.mark.parametrize("n", [0, 26])
 def test_backend_concurrency_limits(client, n):
     assert client.post("/api/dispatches", json={"concurrency": n}).status_code == 422
+
+
+def test_evaluation_forwarding_is_state_free(client, agent_answers):
+    calls = []
+
+    def accept(request):
+        calls.append((request.url.path, json.loads(request.content)))
+        return httpx.Response(202, json={"status": "accepted"})
+
+    agent_answers(accept)
+    body = {"set_name": "held_out", "tiny": True, "concurrency": 5}
+    assert client.post("/api/evaluations", json=body).status_code == 202
+    assert calls == [("/api/evaluations", body)]
+    assert client.get("/api/evaluations").json() == []

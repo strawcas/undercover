@@ -70,6 +70,8 @@ export interface Claim {
   attempts: number;
   decision: Decision | null;
   payment: Payment | null;
+  evaluation_id: string | null;
+  source_id: string | null;
 }
 
 export interface Policy {
