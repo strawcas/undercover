@@ -26,6 +26,7 @@ from sqlalchemy import (
     insert,
     inspect,
     select,
+    text,
 )
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -94,6 +95,8 @@ claims = Table(
     Column("status", Text, nullable=False),
     Column("thread_id", Text),
     Column("attempts", Integer, nullable=False),
+    Column("evaluation_id", Text),
+    Column("source_id", Text),
 )
 decisions = Table(
     "decisions",
@@ -129,19 +132,26 @@ runs = Table(
     metadata,
     Column("number", Integer, primary_key=True),
     Column("run_id", Text, nullable=False, unique=True),
-    Column("cap", Integer, nullable=False),
+    Column("kind", Text, nullable=False),
+    Column("concurrency", Integer, nullable=False),
+    Column("model", Text, nullable=False),
+    Column("reasoning_effort", Text),
+    Column("set_name", Text),
+    Column("tiny", Boolean),
     Column("status", Text, nullable=False),
     Column("started_at", Text, nullable=False),
     Column("finished_at", Text),
     Column("summary", Text),
 )
-todos = Table(
-    "todos",
+run_claims = Table(
+    "run_claims",
     metadata,
     Column("run_id", Text, ForeignKey("runs.run_id"), primary_key=True),
-    Column("position", Integer, primary_key=True),
-    Column("content", Text, nullable=False),
+    Column("claim_id", Text, ForeignKey("claims.claim_id"), primary_key=True),
+    Column("position", Integer, nullable=False),
     Column("status", Text, nullable=False),
+    Column("error", Text),
+    Column("result", JSON),
 )
 model_calls = Table(
     "model_calls",
@@ -174,6 +184,8 @@ claim_view = (
         claims.c.status,
         claims.c.thread_id,
         claims.c.attempts,
+        claims.c.evaluation_id,
+        claims.c.source_id,
         customers.c.name.label("customer_name"),
         decisions.c.decision,
         decisions.c.payout,
@@ -249,6 +261,7 @@ def seed(db: Engine) -> dict[str, int]:
     with db.begin() as connection:
         if on_postgres(db.url):
             connection.execute(CreateSchema(SCHEMA, if_not_exists=True))
+        connection.execute(text("DROP TABLE IF EXISTS todos"))
         metadata.drop_all(connection)
         metadata.create_all(connection)
         connection.execute(

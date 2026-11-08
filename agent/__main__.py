@@ -1,4 +1,4 @@
-"""Work the queue with the UnderCover Agent: uv run -m agent [--cap 5 | CLM-1001]"""
+"""Work one claim with the UnderCover Agent: uv run -m agent CLM-1001"""
 
 import argparse
 import sys
@@ -7,31 +7,18 @@ from dotenv import load_dotenv
 
 from agent import api
 from agent.console import show_reports
-from agent.harness import checkpointer, claim_graph, model, run_queue, work_claim
-
-
-def positive(text: str) -> int:
-    """Read a whole number of at least 1."""
-    number = int(text)
-    if number < 1:
-        raise argparse.ArgumentTypeError("must be at least 1")
-    return number
+from agent.harness import checkpointer, claim_graph, model, work_claim
 
 
 def main(args: list[str]) -> None:
-    """Work the claim named on the command line, or the queue up to a cap."""
+    """Work one claim; dispatches start from the dashboard."""
     parser = argparse.ArgumentParser(
-        prog="uv run -m agent", description="Work the claims queue."
+        prog="uv run -m agent", description="Work one claim."
     )
-    choice = parser.add_mutually_exclusive_group()
-    choice.add_argument("claim_id", nargs="?", help="work this one claim")
-    choice.add_argument("--cap", type=positive, help="the most claims the run works")
+    parser.add_argument("claim_id", help="work this one claim")
     options = parser.parse_args(args)
     with checkpointer() as saver:
         graph = claim_graph(model(), saver)
-        if not options.claim_id:
-            run_queue(options.cap, model(), graph)
-            return
         try:
             work_claim(options.claim_id, graph)
         except api.Refused as refusal:

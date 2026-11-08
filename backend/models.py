@@ -9,7 +9,6 @@ Status = Literal[
 ]
 DecisionKind = Literal["approve", "decline", "refer"]
 StepKind = Literal["tool_call", "tool_result", "message", "reading", "error"]
-TodoStatus = Literal["to_do", "in_progress", "done", "left_for_handler"]
 DocumentName = Literal["policy_wording", "claims_manual"]
 Benefit = Literal[
     "trip_cancellation",
@@ -132,7 +131,6 @@ class Step(BaseModel):
 
 
 class Instructions(BaseModel):
-    queue: str
     claim: str
 
 
@@ -252,31 +250,72 @@ class FailureRequest(BaseModel):
     reason: str = Field(min_length=1, description="What went wrong")
 
 
-class Todo(BaseModel):
-    content: str = Field(min_length=1)
-    status: TodoStatus
+RunKind = Literal["dispatch", "evaluation"]
+SetName = Literal["evaluation", "held_out"]
+MemberStatus = Literal["selected", "finished", "skipped", "in_progress"]
+
+
+class RunMember(BaseModel):
+    claim_id: str
+    status: MemberStatus
+    error: str | None
+    claim_status: Status
+    decision: DecisionKind | None
+    payout: float | None
+    reason: str | None
+    llm_cost: float | None
+    active_seconds: float
 
 
 class Run(BaseModel):
     run_id: str
-    cap: int
-    status: Literal["running", "finished"]
+    kind: RunKind
+    concurrency: int
+    model: str
+    reasoning_effort: str | None
+    set_name: SetName | None
+    tiny: bool | None
+    status: Literal["running", "finished", "stopped"]
     started_at: str
     finished_at: str | None
     summary: str | None
-    todos: list[Todo]
+    members: list[RunMember]
+    llm_cost: float | None
+    active_seconds: float
+    seconds: float
+
+
+class DispatchRequest(BaseModel):
+    concurrency: int = Field(ge=1, le=25)
+
+
+class EvaluationRequest(DispatchRequest):
+    set_name: SetName
+    tiny: bool
 
 
 class RunRequest(BaseModel):
-    cap: int = Field(ge=1, description="The most claims the run can work")
+    kind: RunKind
+    concurrency: int = Field(ge=1, le=25)
+    model: str = Field(min_length=1)
+    reasoning_effort: str | None
+    set_name: SetName | None
+    tiny: bool | None
+
+    @model_validator(mode="after")
+    def check_selection(self) -> Self:
+        if self.kind == "evaluation" and (self.set_name is None or self.tiny is None):
+            raise ValueError("An evaluation needs a set and tiny/full selection")
+        if self.kind == "dispatch" and (
+            self.set_name is not None or self.tiny is not None
+        ):
+            raise ValueError("A dispatch has no evaluation selection")
+        return self
 
 
-class TodosRequest(BaseModel):
-    todos: list[Todo]
-
-
-class FinishRequest(BaseModel):
-    summary: str = Field(min_length=1, description="The summary for the handlers")
+class RunClaimRequest(BaseModel):
+    status: MemberStatus
+    error: str | None
 
 
 class ModelCallRequest(BaseModel):

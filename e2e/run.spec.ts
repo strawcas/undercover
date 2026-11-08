@@ -1,11 +1,11 @@
 import { expect, test } from "@playwright/test";
 import { post, put } from "./api";
 
-// These tests stand in for the queue agent and a claim agent by calling the
+// These tests stand in for the dispatcher and a claim agent by calling the
 // API through the dashboard's proxy, and watch the pages update without a
 // reload. Only this file starts runs, and it uses claims no other test touches.
 
-test("the queue shows the agent's to-do list as it works", async ({
+test("the queue shows dispatch members and a records-built summary", async ({
   page,
   request,
 }) => {
@@ -13,40 +13,35 @@ test("the queue shows the agent's to-do list as it works", async ({
   const panel = page.locator("section", {
     has: page.getByRole("heading", { name: "Current run" }),
   });
-  await expect(panel).toBeVisible();
-
-  const response = await post(request, "/api/runs", { cap: 2 });
-  const { run_id } = (await response.json()) as { run_id: string };
-  const write = (first: string, second: string) =>
-    put(request, `/api/runs/${run_id}/todos`, {
-      todos: [
-        { content: "CLM-1013 Seven hour delay leaving Chicago", status: first },
-        { content: "CLM-1014 Duffel bag lost", status: second },
-      ],
-    });
-  const items = panel.getByRole("listitem");
-
-  await write("to_do", "to_do");
-  await expect(panel.getByText("Running", { exact: true })).toBeVisible();
-  await expect(items).toHaveText([/^To do.*CLM-1013/, /^To do.*CLM-1014/]);
-
-  await write("in_progress", "to_do");
-  await expect(items).toHaveText([
-    /^In progress.*CLM-1013/,
-    /^To do.*CLM-1014/,
-  ]);
-
-  await write("done", "in_progress");
-  await expect(items).toHaveText([/^Done.*CLM-1013/, /^In progress.*CLM-1014/]);
-
-  await post(request, `/api/runs/${run_id}/finish`, {
-    summary: "Worked 2 claims: 2 approved.",
+  const response = await post(request, "/api/runs", {
+    kind: "dispatch",
+    concurrency: 3,
+    model: "stub",
+    reasoning_effort: null,
+    set_name: null,
+    tiny: null,
   });
+  const { run_id } = (await response.json()) as { run_id: string };
+  await put(request, `/api/runs/${run_id}/claims/CLM-1013`, {
+    status: "selected",
+    error: null,
+  });
+  await expect(panel.getByRole("link", { name: "CLM-1013" })).toBeVisible();
+  await post(request, "/api/claims/CLM-1013/start", {
+    thread_id: "dispatch-e2e",
+  });
+  await post(request, "/api/claims/CLM-1013/decision", {
+    decision: "refer",
+    payout: 0,
+    section: "3",
+    reason: "Needs a handler",
+  });
+  await post(request, `/api/runs/${run_id}/finish`, {});
   await expect(panel.getByText("Finished", { exact: true })).toBeVisible();
-  await expect(panel.getByText("Summary for the handlers")).toBeVisible();
-  await expect(panel.getByText("Worked 2 claims: 2 approved.")).toBeVisible();
-
-  await items.first().getByRole("link", { name: "CLM-1013" }).click();
+  await expect(
+    panel.getByText("Worked 1 claims: 0 approved, 0 declined, 1 referred."),
+  ).toBeVisible();
+  await panel.getByRole("link", { name: "CLM-1013" }).click();
   await expect(page).toHaveURL("/claims/CLM-1013");
 });
 

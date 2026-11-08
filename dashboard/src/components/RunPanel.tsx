@@ -1,13 +1,10 @@
-import { Fragment } from "react";
 import { Link } from "react-router";
 import { api, type Run } from "../api";
-import { time } from "../format";
+import { modelCost, seconds, time } from "../format";
 import { claimPage } from "../paths";
 import { REFRESH_MS, useLoad } from "../useLoad";
-import { RunChip, TodoChip } from "./Chips";
+import { RunChip, StatusChip } from "./Chips";
 import { Message } from "./Message";
-
-const CLAIM_ID = /(CLM-\d+)/;
 
 export function RunPanel() {
   const { data: run, error } = useLoad(api.getLatestRun, REFRESH_MS);
@@ -29,21 +26,28 @@ function RunDetails({ run }: Readonly<{ run: Run }>) {
   return (
     <>
       <p className="muted small">
-        Started at {time(run.started_at)}, up to {run.cap}{" "}
-        {run.cap === 1 ? "claim" : "claims"}
+        Started at {time(run.started_at)}, {run.concurrency} agents at once
         {run.finished_at && `, finished at ${time(run.finished_at)}`}
       </p>
-      <h3>To-do list</h3>
-      {run.todos.length === 0 ? (
-        <p className="muted">The agent hasn't written its to-do list yet.</p>
+      <p>
+        Model cost: {modelCost(run.llm_cost)} · Active claim time:{" "}
+        {seconds(run.active_seconds)} · Elapsed: {seconds(run.seconds)}
+      </p>
+      <h3>Claims in this dispatch</h3>
+      {run.members.length === 0 ? (
+        <p className="muted">No claims selected.</p>
       ) : (
-        <ol className="todos">
-          {run.todos.map((todo, index) => (
-            <li className="todo" key={`${String(index)}-${todo.content}`}>
-              <TodoChip status={todo.status} />
-              <span>
-                <LinkedClaims text={todo.content} />
-              </span>
+        <ol className="run-members">
+          {run.members.map((member) => (
+            <li key={member.claim_id}>
+              <Link className="mono" to={claimPage(member.claim_id)}>
+                {member.claim_id}
+              </Link>{" "}
+              <StatusChip status={member.claim_status} />
+              {member.status === "skipped" && (
+                <span> Already being resumed</span>
+              )}
+              {member.error && <span> {member.error}</span>}
             </li>
           ))}
         </ol>
@@ -55,17 +59,5 @@ function RunDetails({ run }: Readonly<{ run: Run }>) {
         </>
       )}
     </>
-  );
-}
-
-function LinkedClaims({ text }: Readonly<{ text: string }>) {
-  return text.split(CLAIM_ID).map((part, index) =>
-    CLAIM_ID.test(part) ? (
-      <Link className="mono" key={index} to={claimPage(part)}>
-        {part}
-      </Link>
-    ) : (
-      <Fragment key={index}>{part}</Fragment>
-    ),
   );
 }

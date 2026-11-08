@@ -8,10 +8,11 @@ from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy import select
 
-from agent import api, harness
+from agent import api, dispatcher, harness
 from agent.tests.queue_setup import leave_waiting
-from agent.tests.stubs import call, graph_on, record, stub
+from agent.tests.stubs import graph_on, record, stub
 from backend.database import engine, model_calls, work_slices
+from backend.tests.run_requests import configuration
 
 
 def rows(table):
@@ -67,8 +68,8 @@ def test_model_node_records_usage_and_missing_metadata():
 def test_active_slices_exclude_wait_and_split_run_attribution(client, monkeypatch):
     clock = itertools.count()
     monkeypatch.setattr(harness, "monotonic", lambda: next(clock))
-    first = api.start_run(1)["run_id"]
-    second = api.start_run(1)["run_id"]
+    first = api.start_run(configuration())["run_id"]
+    second = api.start_run(configuration())["run_id"]
     saver = InMemorySaver()
     harness.work_claim(
         "CLM-1001", graph_on(stub(record("approve", 1350)), saver), first
@@ -113,16 +114,14 @@ def test_slice_cannot_change_owner_or_shrink(client):
     assert response.status_code == 409
 
 
-def test_current_queue_attributes_its_measurements():
+def test_dispatch_attributes_its_measurements(monkeypatch):
     leave_waiting("CLM-1001")
-    harness.run_queue(
-        1,
-        stub(call("work_claim", claim_id="CLM-1001"), "Done"),
-        graph_on(stub(record("refer", 0))),
+    monkeypatch.setattr(
+        harness, "execution_graph", lambda: graph_on(stub(record("refer", 0)))
     )
-    run = api.get_latest_run()
-    assert run is not None
-    run_id = run["run_id"]
+    run_id = api.start_run(configuration())["run_id"]
+    dispatcher.dispatch(run_id, 1)
+    api.finish_run(run_id)
     assert {row["run_id"] for row in rows(model_calls)} == {run_id}
     assert {row["run_id"] for row in rows(work_slices)} == {run_id}
 

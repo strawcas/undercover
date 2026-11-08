@@ -9,13 +9,12 @@ export function InstructionsPage() {
     <>
       <h1>Agent instructions</h1>
       <p className="lead">
-        What the agent reads before it starts: its instructions for running the
-        queue, and for working each claim, which end with the contents of the
-        policy wording and the claims manual. This page is read only.
+        What the agent reads before it starts: its instructions for working each
+        claim, which end with the contents of the policy wording and the claims
+        manual. This page is read only.
       </p>
       {data ? (
         <div className="column">
-          <Instructions title="Running the queue" text={data.queue} />
           <Instructions title="Working a claim" text={data.claim} />
         </div>
       ) : (

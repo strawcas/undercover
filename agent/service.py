@@ -10,7 +10,15 @@ from fastapi.responses import JSONResponse
 
 from agent import api
 from agent.console import show_reports
-from agent.harness import ClaimGraph, carry_on, checkpointer, claim_graph, model
+from agent.harness import (
+    ClaimGraph,
+    carry_on,
+    checkpointer,
+    execution_graph,
+    queue_resume,
+    release_claim,
+    take_resume,
+)
 
 
 @asynccontextmanager
@@ -33,10 +41,21 @@ def refused(_: Request, error: api.Refused) -> JSONResponse:
 
 def build_graph(request: Request) -> ClaimGraph:
     """Build the claim graph for one request, on the service's checkpointer."""
-    return claim_graph(model(), request.app.state.saver)
+    return execution_graph()
 
 
 Graph = Annotated[ClaimGraph, Depends(build_graph)]
+
+
+def resume_owned(claim_id: str, graph: ClaimGraph) -> None:
+    """Resume an already reserved claim and always release ownership."""
+    try:
+        take_resume(claim_id)
+        claim = api.get_claim(claim_id)
+        if claim["status"] == api.Status.IN_PROGRESS:
+            carry_on(claim_id, graph)
+    finally:
+        release_claim(claim_id)
 
 
 @app.get("/api/health", operation_id="health")
@@ -54,5 +73,7 @@ def resume_claim(
     signed_off = claim["decision"] and claim["decision"]["signed_off_by"]
     if claim["status"] != api.Status.IN_PROGRESS or not signed_off:
         raise HTTPException(409, f"Claim {claim_id} has no sign-off waiting to be paid")
-    background.add_task(carry_on, claim_id, graph)
+    if not queue_resume(claim_id):
+        raise HTTPException(409, f"Claim {claim_id} is already being worked")
+    background.add_task(resume_owned, claim_id, graph)
     return {"status": "accepted"}

@@ -105,12 +105,7 @@ def test_model_name(monkeypatch):
     assert harness.model().reasoning_effort is None
 
 
-def test_command_line_works_the_queue(monkeypatch, graph):
-    runs = []
-    monkeypatch.setattr(cli, "run_queue", lambda *args: runs.append(args))
-    cli.main([])
-    cli.main(["--cap", "5"])
-    assert runs == [(None, "model", graph), (5, "model", graph)]
-    for args in (["--cap", "0"], ["--cap", "five"], ["CLM-1001", "--cap", "5"]):
+def test_command_line_requires_a_claim_id(graph):
+    for args in ([], ["--cap", "5"], ["CLM-1001", "--cap", "5"]):
         with pytest.raises(SystemExit):
             cli.main(args)

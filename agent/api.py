@@ -2,7 +2,7 @@
 
 import os
 from enum import StrEnum
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal
 
 import httpx
 from pydantic import BaseModel, Field
@@ -14,7 +14,7 @@ backend = httpx.Client(base_url=f"{BACKEND_URL}/api", timeout=30)
 DecisionKind = Literal["approve", "decline", "refer"]
 APPROVE: DecisionKind = "approve"
 DocumentName = Literal["policy_wording", "claims_manual"]
-StepKind = Literal["tool_call", "tool_result", "message", "reading"]
+StepKind = Literal["tool_call", "tool_result", "message", "reading", "error"]
 Benefit = Literal[
     "trip_cancellation",
     "trip_interruption",
@@ -37,15 +37,11 @@ class Status(StrEnum):
 
 
 class RunStatus(StrEnum):
-    """Where a run of the queue agent stands."""
+    """Where a dispatch or evaluation stands."""
 
     RUNNING = "running"
     FINISHED = "finished"
-
-
-class Todo(TypedDict):
-    content: str
-    status: Literal["to_do", "in_progress", "done", "left_for_handler"]
+    STOPPED = "stopped"
 
 
 LineKind = Literal[
@@ -169,20 +165,38 @@ def fail_claim(claim_id: str, reason: str) -> dict[str, Any]:
     return _call("POST", f"/claims/{claim_id}/failure", json={"reason": reason})
 
 
-def start_run(cap: int) -> dict[str, Any]:
-    return _call("POST", "/runs", json={"cap": cap})
+def start_run(configuration: dict[str, Any]) -> dict[str, Any]:
+    return _call("POST", "/runs", json=configuration)
 
 
 def get_latest_run() -> dict[str, Any] | None:
     return _call("GET", "/runs/latest")
 
 
-def write_todos(run_id: str, todos: list[Todo]) -> dict[str, Any]:
-    return _call("PUT", f"/runs/{run_id}/todos", json={"todos": todos})
+def get_run(run_id: str) -> dict[str, Any]:
+    return _call("GET", f"/runs/{run_id}")
 
 
-def finish_run(run_id: str, summary: str) -> dict[str, Any]:
-    return _call("POST", f"/runs/{run_id}/finish", json={"summary": summary})
+def record_run_claim(
+    run_id: str, claim_id: str, status: str, error: str | None
+) -> dict[str, Any]:
+    return _call(
+        "PUT",
+        f"/runs/{run_id}/claims/{claim_id}",
+        json={"status": status, "error": error},
+    )
+
+
+def finish_run(run_id: str) -> dict[str, Any]:
+    return _call("POST", f"/runs/{run_id}/finish")
+
+
+def stop_runs() -> list[str]:
+    return _call("POST", "/runs/stop")
+
+
+def health() -> dict[str, str]:
+    return _call("GET", "/health")
 
 
 def record_model_call(claim_id: str, measurement: dict[str, Any]) -> dict[str, str]:

@@ -1,100 +1,102 @@
-import pytest
+"""Run membership and summaries come from backend records."""
 
-from backend import main
+from concurrent.futures import ThreadPoolExecutor
 
-
-def start_run(client, cap=5):
-    return client.post("/api/runs", json={"cap": cap})
+from backend.tests.run_requests import configuration
 
 
-def write(client, run_id, *todos):
+def start(client, **overrides):
+    return client.post("/api/runs", json=configuration(**overrides))
+
+
+def member(client, run_id, claim_id, status="selected", error=None):
     return client.put(
-        f"/api/runs/{run_id}/todos",
-        json={"todos": [{"content": c, "status": s} for c, s in todos]},
+        f"/api/runs/{run_id}/claims/{claim_id}", json={"status": status, "error": error}
     )
 
 
-def test_no_run_yet(client):
-    response = client.get("/api/runs/latest")
-    assert response.status_code == 200
-    assert response.json() is None
-
-
-def test_start_a_run(client):
-    run = start_run(client).json()
-    assert run["cap"] == 5
-    assert run["status"] == "running"
-    assert run["started_at"]
-    assert (run["finished_at"], run["summary"], run["todos"]) == (None, None, [])
-    assert client.get("/api/runs/latest").json() == run
-
-
-@pytest.mark.parametrize("cap", [0, -1])
-def test_a_run_needs_a_cap(client, cap):
-    assert start_run(client, cap).status_code == 422
-
-
-def test_write_todos_replaces_the_list(client):
-    run_id = start_run(client).json()["run_id"]
-    write(client, run_id, ("CLM-1001", "to_do"), ("CLM-1002", "to_do"))
-    run = write(
-        client,
-        run_id,
-        ("CLM-1001", "done"),
-        ("CLM-1002", "in_progress"),
-        ("Write the summary", "to_do"),
-    ).json()
-    assert run["todos"] == [
-        {"content": "CLM-1001", "status": "done"},
-        {"content": "CLM-1002", "status": "in_progress"},
-        {"content": "Write the summary", "status": "to_do"},
-    ]
-    assert client.get("/api/runs/latest").json()["todos"] == run["todos"]
-
-
-def test_invalid_todos(client):
-    run_id = start_run(client).json()["run_id"]
-    assert write(client, run_id, ("CLM-1001", "blocked")).status_code == 422
-    assert write(client, run_id, ("", "to_do")).status_code == 422
-    assert write(client, "RUN-9", ("CLM-1001", "to_do")).status_code == 404
-
-
-def test_finish_a_run(client):
-    run_id = start_run(client).json()["run_id"]
-    write(client, run_id, ("CLM-1001", "done"))
-    finish = client.post(
-        f"/api/runs/{run_id}/finish", json={"summary": "Worked 1 claim."}
+def test_run_lifecycle_and_frozen_results(client):
+    assert client.get("/api/runs/latest").json() is None
+    run = start(client).json()
+    run_id = run["run_id"]
+    assert run["members"] == []
+    assert run["llm_cost"] == run["active_seconds"] == 0
+    member(client, run_id, "CLM-1001")
+    member(client, run_id, "CLM-1001")
+    client.post("/api/claims/CLM-1001/start", json={"thread_id": "thread"})
+    client.post(
+        "/api/claims/CLM-1001/decision",
+        json={
+            "decision": "approve",
+            "payout": 1350,
+            "section": "3",
+            "reason": "Covered",
+        },
     )
-    run = finish.json()
-    assert (run["status"], run["summary"]) == ("finished", "Worked 1 claim.")
-    assert run["finished_at"]
-    assert run["todos"] == [{"content": "CLM-1001", "status": "done"}]
-    assert write(client, run_id, ("CLM-1001", "to_do")).status_code == 409
-    again = client.post(f"/api/runs/{run_id}/finish", json={"summary": "Again."})
-    assert again.status_code == 409
-
-    newer = start_run(client, 2).json()
-    assert client.get("/api/runs/latest").json()["run_id"] == newer["run_id"]
-
-
-def test_finish_needs_a_summary_and_a_known_run(client):
-    run_id = start_run(client).json()["run_id"]
-    empty = client.post(f"/api/runs/{run_id}/finish", json={"summary": ""})
-    assert empty.status_code == 422
-    unknown = client.post("/api/runs/RUN-9/finish", json={"summary": "Done."})
-    assert unknown.status_code == 404
-    assert unknown.json()["detail"] == "Run RUN-9 not found"
+    member(client, run_id, "CLM-1001", "finished")
+    finished = client.post(f"/api/runs/{run_id}/finish").json()
+    assert len(finished["members"]) == 1
+    assert "1 approved" in finished["summary"]
+    assert "CLM-1001: $1,350.00 waiting for sign-off." in finished["summary"]
+    client.post("/api/claims/CLM-1001/sign-off", json={"handler_id": "HND-01"})
+    assert client.get(f"/api/runs/{run_id}").json() == finished
+    assert member(client, run_id, "CLM-1001").status_code == 409
+    assert client.post(f"/api/runs/{run_id}/finish").status_code == 409
 
 
-def test_runs_started_in_the_same_second_keep_their_order(client, monkeypatch):
-    monkeypatch.setattr(main, "now", lambda: "2026-10-02T12:00:00+00:00")
-    first = start_run(client).json()
-    client.post(f"/api/runs/{first['run_id']}/finish", json={"summary": "Done."})
-    second = start_run(client).json()
+def test_unknowns_and_membership_validation(client):
+    assert client.get("/api/runs/unknown").status_code == 404
+    assert member(client, "unknown", "CLM-1001").status_code == 404
+    run_id = start(client).json()["run_id"]
+    assert member(client, run_id, "unknown").status_code == 404
+    assert member(client, run_id, "CLM-1001", "finished").status_code == 409
+    for n in (0, 26):
+        assert start(client, concurrency=n).status_code == 422
+    assert start(client, kind="evaluation").status_code == 422
+    assert start(client, set_name="evaluation").status_code == 422
+
+
+def test_summary_and_startup_recovery(client):
+    run_id = start(client).json()["run_id"]
+    for claim_id in ("CLM-1001", "CLM-1002"):
+        member(client, run_id, claim_id)
+    client.post("/api/claims/CLM-1001/start", json={"thread_id": "keep"})
+    assert client.post("/api/runs/stop").json() == []
+    run = client.get(f"/api/runs/{run_id}").json()
+    assert run["status"] == "stopped"
+    assert "CLM-1001: in progress." in run["summary"]
+    assert client.get("/api/claims/CLM-1001").json()["thread_id"] == "keep"
+    second = start(client).json()
     assert client.get("/api/runs/latest").json()["run_id"] == second["run_id"]
 
 
-def test_an_empty_to_do_list_clears_it(client):
-    run_id = start_run(client).json()["run_id"]
-    write(client, run_id, ("CLM-1001", "to_do"))
-    assert write(client, run_id).json()["todos"] == []
+def test_membership_is_atomic_across_concurrent_workers(client):
+    run_id = start(client).json()["run_id"]
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        responses = list(
+            pool.map(lambda _: member(client, run_id, "CLM-1001"), range(4))
+        )
+    assert all(r.status_code == 200 for r in responses)
+    assert len(client.get(f"/api/runs/{run_id}").json()["members"]) == 1
+
+
+def test_running_members_are_live_and_closed_measurements_are_refused(client):
+    run_id = start(client).json()["run_id"]
+    member(client, run_id, "CLM-1001")
+    client.post("/api/claims/CLM-1001/start", json={"thread_id": "thread"})
+    member(client, run_id, "CLM-1001", "finished")
+    client.post(
+        "/api/claims/CLM-1001/decision",
+        json={
+            "decision": "refer",
+            "payout": 0,
+            "section": "3",
+            "reason": "Needs review",
+        },
+    )
+    assert client.get(f"/api/runs/{run_id}").json()["members"][0]["decision"] == "refer"
+    client.post(f"/api/runs/{run_id}/finish")
+    body = {"run_id": run_id, "seconds": 99}
+    assert (
+        client.put("/api/claims/CLM-1001/work-slices/new", json=body).status_code == 409
+    )

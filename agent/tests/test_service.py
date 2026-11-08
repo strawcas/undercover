@@ -1,4 +1,5 @@
 import pytest
+from fastapi import BackgroundTasks, HTTPException
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
 
@@ -87,3 +88,21 @@ def test_an_unknown_claim(serve):
     response = resume(serve(graph_on(stub())), "CLM-9999")
     assert response.status_code == 404
     assert response.json()["detail"] == "Claim CLM-9999 not found"
+
+
+def test_sign_off_is_queued_before_current_worker_releases(client):
+    graph = graph_on(stub(*decide("approve", 1350)))
+    harness.work_claim("CLM-1002", graph)
+    client.post("/api/claims/CLM-1002/sign-off", json={"handler_id": "HND-01"})
+    assert harness.reserve_claim("CLM-1002")
+    background = BackgroundTasks()
+    assert service.resume_claim("CLM-1002", graph, background) == {"status": "accepted"}
+    with pytest.raises(HTTPException) as duplicate:
+        service.resume_claim("CLM-1002", graph, BackgroundTasks())
+    assert duplicate.value.status_code == 409
+    harness.release_claim("CLM-1002")
+    assert harness.execute_claim("CLM-1002", "other-run").startswith("Skipped:")
+    task = background.tasks[0]
+    task.func(*task.args, **task.kwargs)
+    assert not harness.is_reserved("CLM-1002")
+    assert client.get("/api/claims/CLM-1002").json()["payment"]["amount"] == 1350

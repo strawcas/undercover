@@ -3,15 +3,13 @@ tests stop it with KeyboardInterrupt, which the harness doesn't catch, so the cl
 left as a crash leaves it."""
 
 import itertools
-import logging
 
 import pytest
 from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
 from agent import api, harness
-from agent.tests.queue_setup import leave_waiting
-from agent.tests.records import claim_of, latest, steps_of
+from agent.tests.records import claim_of, steps_of
 from agent.tests.stubs import StubModel, call, decide, graph_on, record, stub
 
 
@@ -211,65 +209,3 @@ def test_a_claim_that_fails_while_carried_on_starts_afresh_next_time(client):
     claim = claim_of(client, "CLM-1004")
     assert claim["attempts"] == 2
     assert claim["thread_id"] != stopped["thread_id"]
-
-
-def test_a_run_first_carries_on_the_claims_left_in_progress(
-    client, caplog, agent_calls
-):
-    caplog.set_level(logging.INFO, logger="agent")
-    leave_waiting("CLM-1001", "CLM-1002", "CLM-1003")
-    saver = InMemorySaver()
-    stop_while_working("CLM-1001", saver, call("get_claim"))
-    harness.work_claim("CLM-1002", graph_on(stub(*decide("approve", 1350.0)), saver))
-    client.post("/api/claims/CLM-1002/sign-off", json={"handler_id": "HND-01"})
-    assert agent_calls == ["/api/claims/CLM-1002/resume"]
-    caplog.clear()
-
-    queue_model = stub(call("work_claim", claim_id="CLM-1003"), "Worked one claim.")
-    claim_model = stub(record("decline", 0), *decide("refer", 0))
-    harness.run_queue(1, queue_model, graph_on(claim_model, saver))
-
-    assert caplog.messages == [
-        "CLM-1001  decline  $0.00",
-        "CLM-1002  approve  $1,350.00",
-        "CLM-1003  refer  $0.00",
-        "Worked one claim.",
-    ]
-    assert claim_of(client, "CLM-1001")["attempts"] == 1
-    assert claim_of(client, "CLM-1002")["payment"]["signed_off_by"] == "Dana Whitfield"
-    assert latest(client)["cap"] == 1
-
-
-def test_an_approval_whose_payment_failed_is_paid_by_the_next_run(client, monkeypatch):
-    leave_waiting("CLM-1001")
-    saver = InMemorySaver()
-    fail_once(monkeypatch, api, "pay_claim", RuntimeError("The connection was lost"))
-    harness.work_claim("CLM-1001", graph_on(stub(*decide("approve", 420.0)), saver))
-    assert claim_of(client, "CLM-1001")["status"] == "in_progress"
-
-    harness.run_queue(None, stub(), graph_on(stub(), saver))
-    claim = claim_of(client, "CLM-1001")
-    assert (claim["status"], claim["payment"]["amount"]) == ("decided", 420.0)
-
-
-def test_a_run_that_stopped_is_finished_by_the_next(client, monkeypatch):
-    leave_waiting("CLM-1001")
-    stopped = client.post("/api/runs", json={"cap": 1}).json()["run_id"]
-    finished = calls_to(monkeypatch, "finish_run")
-    queue_model = stub(call("work_claim", claim_id="CLM-1001"), "Done.")
-    harness.run_queue(None, queue_model, graph_on(stub(*decide("refer", 0))))
-
-    new = latest(client)["run_id"]
-    assert finished == [(stopped, harness.RUN_STOPPED), (new, "Done.")]
-    assert new != stopped
-
-
-def test_with_nothing_waiting_a_run_still_carries_on(client, caplog):
-    caplog.set_level(logging.INFO, logger="agent")
-    leave_waiting("CLM-1001")
-    saver = InMemorySaver()
-    stop_while_working("CLM-1001", saver, call("get_claim"))
-    caplog.clear()
-    harness.run_queue(None, stub(), graph_on(stub(record("refer", 0)), saver))
-    assert caplog.messages == ["CLM-1001  refer  $0.00", "No claims are waiting"]
-    assert latest(client) is None

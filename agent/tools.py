@@ -1,14 +1,11 @@
-"""The agents' tools. The claim agent's tools, list_claims and write_todos call the
-backend operations they are named after, and work_claim hands a claim to a claim agent.
-"""
+"""The claim agent tools and their runtime context and durable state."""
 
 import json
 import operator
-from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Annotated, Any, TypedDict
 
-from langchain.tools import ToolException, ToolRuntime, tool
+from langchain.tools import ToolRuntime, tool
 from langchain_core.messages import AnyMessage, ToolMessage
 from langgraph.graph.message import add_messages
 from langgraph.types import Command
@@ -38,16 +35,6 @@ class ClaimState(TypedDict):
     model_calls: Annotated[int, operator.add]
     decision: Annotated[dict[str, Any], keep_last]
     status: Annotated[str, keep_last]
-
-
-@dataclass
-class RunContext:
-    """A queue agent's run: its cap, how to work a claim, and the claims started."""
-
-    run_id: str
-    cap: int
-    work_claim: Callable[[str], str]
-    started: set[str] = field(default_factory=set)
 
 
 @tool
@@ -122,32 +109,6 @@ def record_decision(
     return Command(update=update)
 
 
-@tool
-def list_claims() -> str:
-    """List every claim in the queue, in id order, with its status and decision."""
-    return json.dumps(api.list_claims())
-
-
-@tool
-def write_todos(todos: list[api.Todo], runtime: ToolRuntime[RunContext]) -> str:
-    """Replace the run's to-do list, sending every item with its current status."""
-    return json.dumps(api.write_todos(runtime.context.run_id, todos))
-
-
-@tool
-def work_claim(claim_id: str, runtime: ToolRuntime[RunContext]) -> str:
-    """Hand one claim to a new claim agent, which reports back in one line."""
-    run = runtime.context
-    if claim_id not in run.started and len(run.started) >= run.cap:
-        started = ", ".join(sorted(run.started))
-        raise ToolException(
-            f"this run can work {run.cap} claims, and has started {started}"
-        )
-    report = run.work_claim(claim_id)
-    run.started.add(claim_id)
-    return report
-
-
 CLAIM_TOOLS = [
     get_claim,
     get_policy,
@@ -157,4 +118,3 @@ CLAIM_TOOLS = [
     calculate_payout,
     record_decision,
 ]
-QUEUE_TOOLS = [list_claims, write_todos, work_claim]

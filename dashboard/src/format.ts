@@ -1,4 +1,4 @@
-import type { DecisionKind, RunStatus, Status, TodoStatus } from "./api";
+import type { DecisionKind, RunStatus, Status } from "./api";
 
 const dollars = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -43,16 +43,10 @@ export const statusLabels: Record<Status, string> = {
   left_for_handler: "Left for a handler",
 };
 
-export const todoLabels: Record<TodoStatus, string> = {
-  to_do: "To do",
-  in_progress: "In progress",
-  done: "Done",
-  left_for_handler: "Left for a handler",
-};
-
 export const runLabels: Record<RunStatus, string> = {
   running: "Running",
   finished: "Finished",
+  stopped: "Stopped",
 };
 
 export const decisionLabels: Record<DecisionKind, string> = {
@@ -69,4 +63,11 @@ const addOnNames: Record<string, string> = {
 
 export function addOnName(code: string): string {
   return addOnNames[code] ?? label(code);
+}
+
+export function modelCost(amount: number | null): string {
+  return amount === null ? "Unavailable" : `$${amount.toFixed(6)}`;
+}
+export function seconds(amount: number): string {
+  return `${amount.toFixed(1)} s`;
 }

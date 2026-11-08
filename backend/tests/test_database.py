@@ -1,8 +1,9 @@
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import inspect, text
 from sqlalchemy.pool import QueuePool
 
-from backend.database import engine, location
+from backend.database import engine, location, seed
 from backend.main import app
 
 SUPABASE = "postgresql://postgres.ref:secret@pooler.example.com:5432/db"
@@ -41,3 +42,10 @@ def test_startup_seeds_a_missing_or_empty_database(database, empty):
         database.touch()
     with TestClient(app) as client:
         assert len(client.get("/api/claims").json()) == 25
+
+
+def test_seed_drops_the_retired_table_before_parent_tables():
+    with engine().begin() as db:
+        db.execute(text("CREATE TABLE todos (run_id TEXT REFERENCES runs(run_id))"))
+    seed(engine())
+    assert "todos" not in inspect(engine()).get_table_names()

@@ -114,26 +114,36 @@ export interface Step {
   created_at: string;
 }
 
-export type TodoStatus = "to_do" | "in_progress" | "done" | "left_for_handler";
-export type RunStatus = "running" | "finished";
-
-export interface Todo {
-  content: string;
-  status: TodoStatus;
+export type RunStatus = "running" | "finished" | "stopped";
+export interface RunMember {
+  claim_id: string;
+  status: "selected" | "finished" | "skipped" | "in_progress";
+  error: string | null;
+  claim_status: Status;
+  decision: DecisionKind | null;
+  payout: number | null;
+  reason: string | null;
+  llm_cost: number | null;
+  active_seconds: number;
 }
-
 export interface Run {
   run_id: string;
-  cap: number;
+  kind: "dispatch" | "evaluation";
+  concurrency: number;
+  model: string;
+  reasoning_effort: string | null;
+  set_name: "evaluation" | "held_out" | null;
+  tiny: boolean | null;
   status: RunStatus;
   started_at: string;
   finished_at: string | null;
   summary: string | null;
-  todos: Todo[];
+  members: RunMember[];
+  llm_cost: number | null;
+  active_seconds: number;
+  seconds: number;
 }
-
 export interface Instructions {
-  queue: string;
   claim: string;
 }
 

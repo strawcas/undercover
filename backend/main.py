@@ -1,6 +1,5 @@
 """The UnderCover backend."""
 
-import uuid
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -8,7 +7,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
-from sqlalchemy import Connection, RowMapping, delete, insert, select, update
+from sqlalchemy import Connection, RowMapping, insert, select, update
 
 from backend import agent_service
 from backend import runs as run_records
@@ -22,11 +21,9 @@ from backend.database import (
     is_seeded,
     payments,
     policies,
-    runs,
     seed,
     settings,
     steps,
-    todos,
 )
 from backend.documents import contents, search, sections, titles
 from backend.models import (
@@ -36,7 +33,6 @@ from backend.models import (
     DecisionRequest,
     DocumentName,
     FailureRequest,
-    FinishRequest,
     Handler,
     Instructions,
     ModelCallRequest,
@@ -48,6 +44,7 @@ from backend.models import (
     Policy,
     PreviousClaim,
     Run,
+    RunClaimRequest,
     RunRequest,
     Section,
     SectionMatch,
@@ -56,8 +53,6 @@ from backend.models import (
     Status,
     Step,
     StepRequest,
-    Todo,
-    TodosRequest,
     WorkSliceRequest,
 )
 from backend.payout import needs_sign_off, work_out_payout
@@ -107,9 +102,11 @@ def plans(db: Connection) -> Plans:
     return Plans(**db.execute(select(settings.c.plans)).scalar_one())
 
 
-def find_claim(db: Connection, claim_id: str) -> RowMapping:
+def find_claim(db: Connection, claim_id: str, lock: bool = False) -> RowMapping:
     """Return one claim's row, or raise a 404."""
     query = claim_view.where(claims.c.claim_id == claim_id)
+    if lock:
+        query = query.with_for_update(of=claims)
     row = db.execute(query).mappings().first()
     if row is None:
         raise HTTPException(404, f"Claim {claim_id} not found")
@@ -184,28 +181,6 @@ def add_step(
     return Step(**db.execute(query).mappings().one())
 
 
-def find_run(db: Connection, run_id: str) -> Run:
-    """Return one run with its to-do list, or raise a 404."""
-    row = db.execute(select(runs).where(runs.c.run_id == run_id)).mappings().first()
-    if row is None:
-        raise HTTPException(404, f"Run {run_id} not found")
-    query = (
-        select(todos.c.content, todos.c.status)
-        .where(todos.c.run_id == run_id)
-        .order_by(todos.c.position)
-    )
-    items = [Todo(**todo) for todo in db.execute(query).mappings()]
-    return Run(**row, todos=items)
-
-
-def running_run(db: Connection, run_id: str) -> Run:
-    """Return a run that is still running, or raise a 404 or a 409."""
-    run = find_run(db, run_id)
-    if run.status != "running":
-        raise HTTPException(409, f"Run {run_id} has finished")
-    return run
-
-
 @app.get("/api/health", operation_id="health")
 def health() -> dict[str, str]:
     """Check that the backend is running."""
@@ -215,7 +190,9 @@ def health() -> dict[str, str]:
 @app.get("/api/claims", operation_id="list_claims")
 def list_claims(db: Database) -> list[ClaimSummary]:
     """List every claim in the queue, in id order."""
-    rows = db.execute(claim_view.order_by(claims.c.claim_id)).mappings()
+    rows = db.execute(
+        claim_view.where(claims.c.evaluation_id.is_(None)).order_by(claims.c.claim_id)
+    ).mappings()
     return [to_summary(row) for row in rows]
 
 
@@ -243,10 +220,9 @@ def get_claim_history(customer_id: str, db: Database) -> list[PreviousClaim]:
 
 @app.get("/api/instructions", operation_id="get_instructions")
 def get_instructions(db: Database) -> Instructions:
-    """Get the agent's instructions for running the queue and for working a claim."""
-    queue = (INSTRUCTIONS / "queue.md").read_text(encoding="utf-8")
+    """Get the claim agent's instructions and the document contents."""
     claim = (INSTRUCTIONS / "claim.md").read_text(encoding="utf-8")
-    return Instructions(queue=queue, claim=f"{claim}\n{contents(db)}")
+    return Instructions(claim=f"{claim}\n{contents(db)}")
 
 
 @app.get("/api/documents/search", operation_id="search_documents")
@@ -277,7 +253,7 @@ def list_handlers(db: Database) -> list[Handler]:
 @app.post("/api/claims/{claim_id}/start", operation_id="start_claim")
 def start_claim(claim_id: str, request: StartRequest, db: Database) -> Claim:
     """Start work on a waiting claim, which moves it to in progress."""
-    if find_claim(db, claim_id)["status"] != "waiting":
+    if find_claim(db, claim_id, lock=True)["status"] != "waiting":
         raise HTTPException(409, f"Claim {claim_id} is not waiting")
     db.execute(
         update(claims)
@@ -311,7 +287,7 @@ def list_steps(claim_id: str, db: Database) -> list[Step]:
 @app.post("/api/claims/{claim_id}/decision", operation_id="record_decision")
 def record_decision(claim_id: str, request: DecisionRequest, db: Database) -> Claim:
     """Record a claim's decision once; an approval waits to be paid or signed off."""
-    claim = find_claim(db, claim_id)
+    claim = find_claim(db, claim_id, lock=True)
     payout = round(request.payout, 2)
     if claim["decision"] is not None:
         if (claim["decision"], claim["payout"]) == (request.decision, payout):
@@ -346,7 +322,7 @@ def calculate_payout(claim_id: str, request: PayoutRequest, db: Database) -> Pay
 @app.post("/api/claims/{claim_id}/payment", operation_id="pay_claim")
 def pay_claim(claim_id: str, request: PaymentRequest, db: Database) -> Claim:
     """Pay an approved claim its payout once, unless it needs a handler's sign-off."""
-    claim = find_claim(db, claim_id)
+    claim = find_claim(db, claim_id, lock=True)
     if claim["decision"] != "approve":
         raise HTTPException(409, f"Claim {claim_id} has not been approved")
     amount = round(request.amount, 2)
@@ -377,7 +353,7 @@ def sign_off_claim(
     claim_id: str, request: SignOffRequest, db: Database, background: BackgroundTasks
 ) -> Claim:
     """Sign off a held payout as a handler, so the agent picks the claim up and pays."""
-    claim = find_claim(db, claim_id)
+    claim = find_claim(db, claim_id, lock=True)
     if claim["status"] != "waiting_for_sign_off":
         raise HTTPException(409, f"Claim {claim_id} is not waiting for sign-off")
     query = select(handlers).where(handlers.c.handler_id == request.handler_id)
@@ -403,7 +379,7 @@ def sign_off_claim(
 @app.post("/api/claims/{claim_id}/failure", operation_id="fail_claim")
 def fail_claim(claim_id: str, request: FailureRequest, db: Database) -> Claim:
     """Put a failed claim back in the queue, or leave it for a handler after two."""
-    claim = find_claim(db, claim_id)
+    claim = find_claim(db, claim_id, lock=True)
     if claim["status"] != "in_progress":
         raise HTTPException(409, f"Claim {claim_id} is not in progress")
     if claim["decision"] is not None:
@@ -416,50 +392,40 @@ def fail_claim(claim_id: str, request: FailureRequest, db: Database) -> Claim:
 
 @app.post("/api/runs", operation_id="start_run")
 def start_run(request: RunRequest, db: Database) -> Run:
-    """Start a run of the agent on the queue, with an empty to-do list."""
-    run_id = str(uuid.uuid4())
-    db.execute(
-        insert(runs).values(
-            run_id=run_id, cap=request.cap, status="running", started_at=now()
-        )
-    )
-    return find_run(db, run_id)
+    """Create a run recording its execution configuration."""
+    return run_records.start_run(db, request)
 
 
 @app.get("/api/runs/latest", operation_id="get_latest_run")
 def get_latest_run(db: Database) -> Run | None:
-    """Get the newest run with its to-do list, or nothing before the first run."""
-    query = select(runs.c.run_id).order_by(runs.c.number.desc()).limit(1)
-    run_id = db.execute(query).scalar_one_or_none()
-    return None if run_id is None else find_run(db, run_id)
+    """Get the newest dispatch and its member progress."""
+    return run_records.latest(db)
 
 
-@app.put("/api/runs/{run_id}/todos", operation_id="write_todos")
-def write_todos(run_id: str, request: TodosRequest, db: Database) -> Run:
-    """Replace the to-do list of a running run."""
-    running_run(db, run_id)
-    db.execute(delete(todos).where(todos.c.run_id == run_id))
-    if request.todos:
-        db.execute(
-            insert(todos),
-            [
-                {"run_id": run_id, "position": position, **todo.model_dump()}
-                for position, todo in enumerate(request.todos)
-            ],
-        )
-    return find_run(db, run_id)
+@app.post("/api/runs/stop", operation_id="stop_runs")
+def stop_runs(db: Database) -> list[str]:
+    """Mark abandoned runs stopped and return evaluation threads for cleanup."""
+    return run_records.stop_runs(db)
+
+
+@app.get("/api/runs/{run_id}", operation_id="get_run")
+def get_run(run_id: str, db: Database) -> Run:
+    """Read a run with its own measurements and member results."""
+    return run_records.get_run(db, run_id)
+
+
+@app.put("/api/runs/{run_id}/claims/{claim_id}", operation_id="record_run_claim")
+def record_run_claim(
+    run_id: str, claim_id: str, request: RunClaimRequest, db: Database
+) -> Run:
+    """Record selected membership or a worker's progress once per claim."""
+    return run_records.record_member(db, run_id, claim_id, request)
 
 
 @app.post("/api/runs/{run_id}/finish", operation_id="finish_run")
-def finish_run(run_id: str, request: FinishRequest, db: Database) -> Run:
-    """Finish a run with the agent's summary for the handlers."""
-    running_run(db, run_id)
-    db.execute(
-        update(runs)
-        .where(runs.c.run_id == run_id)
-        .values(status="finished", finished_at=now(), summary=request.summary)
-    )
-    return find_run(db, run_id)
+def finish_run(run_id: str, db: Database) -> Run:
+    """Finish a run with a summary built entirely from backend records."""
+    return run_records.finish_run(db, run_id)
 
 
 @app.post("/api/claims/{claim_id}/model-calls", operation_id="record_model_call")
