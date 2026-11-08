@@ -21,6 +21,7 @@ class ClaimContext:
     """The claim a claim agent is working on."""
 
     claim_id: str
+    run_id: str | None = None
 
 
 def keep_last(_: Any, new: Any) -> Any:

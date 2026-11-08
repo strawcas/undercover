@@ -11,6 +11,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from sqlalchemy import Connection, RowMapping, delete, insert, select, update
 
 from backend import agent_service
+from backend import runs as run_records
 from backend.database import (
     claim_view,
     claims,
@@ -38,6 +39,7 @@ from backend.models import (
     FinishRequest,
     Handler,
     Instructions,
+    ModelCallRequest,
     Payment,
     PaymentRequest,
     Payout,
@@ -56,6 +58,7 @@ from backend.models import (
     StepRequest,
     Todo,
     TodosRequest,
+    WorkSliceRequest,
 )
 from backend.payout import needs_sign_off, work_out_payout
 
@@ -457,3 +460,29 @@ def finish_run(run_id: str, request: FinishRequest, db: Database) -> Run:
         .values(status="finished", finished_at=now(), summary=request.summary)
     )
     return find_run(db, run_id)
+
+
+@app.post("/api/claims/{claim_id}/model-calls", operation_id="record_model_call")
+def record_model_call(
+    claim_id: str, request: ModelCallRequest, db: Database
+) -> dict[str, str]:
+    """Record the provider's usage and cost for one received model reply."""
+    claim = find_claim(db, claim_id)
+    if claim["thread_id"] is None:
+        raise HTTPException(409, "Claim has not been started")
+    run_records.record_model_call(db, claim_id, claim["thread_id"], request)
+    return {"status": "recorded"}
+
+
+@app.put(
+    "/api/claims/{claim_id}/work-slices/{slice_id}", operation_id="record_work_slice"
+)
+def record_work_slice(
+    claim_id: str, slice_id: str, request: WorkSliceRequest, db: Database
+) -> dict[str, str]:
+    """Record cumulative active seconds for one execution of a claim."""
+    claim = find_claim(db, claim_id)
+    if claim["thread_id"] is None:
+        raise HTTPException(409, "Claim has not been started")
+    run_records.record_work_slice(db, claim_id, claim["thread_id"], slice_id, request)
+    return {"status": "recorded"}

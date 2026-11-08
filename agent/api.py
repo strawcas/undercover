@@ -183,3 +183,17 @@ def write_todos(run_id: str, todos: list[Todo]) -> dict[str, Any]:
 
 def finish_run(run_id: str, summary: str) -> dict[str, Any]:
     return _call("POST", f"/runs/{run_id}/finish", json={"summary": summary})
+
+
+def record_model_call(claim_id: str, measurement: dict[str, Any]) -> dict[str, str]:
+    return _call("POST", f"/claims/{claim_id}/model-calls", json=measurement)
+
+
+def record_work_slice(
+    claim_id: str, slice_id: str, run_id: str | None, seconds: float
+) -> dict[str, str]:
+    return _call(
+        "PUT",
+        f"/claims/{claim_id}/work-slices/{slice_id}",
+        json={"run_id": run_id, "seconds": seconds},
+    )

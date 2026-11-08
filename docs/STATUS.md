@@ -1,5 +1,7 @@
 # Status
 
+Swarm phase 1 is built: the default is now `openai/gpt-6-luna` with low reasoning effort; any explicit `MODEL_NAME` has no effort set. Each received model reply records provider tokens/cost (missing values remain null), and cumulative monotonic work slices record active claim time with the current run or null. Waits and downtime are excluded. Queue replacement follows in phase 2. The phase review found and fixed missing queue attribution, measurement errors bypassing settlement and non-atomic replay writes. Validation: full checks passed; regression checks rerun after the fixes.
+
 The claims pilot in `docs/PLAN.md`, the harness in `docs/PLAN_HARNESS.md` and durable state in `docs/PLAN_DURABLE.md` are built: all six phases of each are done.
 
 ## Running it

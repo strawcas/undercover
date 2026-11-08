@@ -277,3 +277,17 @@ class TodosRequest(BaseModel):
 
 class FinishRequest(BaseModel):
     summary: str = Field(min_length=1, description="The summary for the handlers")
+
+
+class ModelCallRequest(BaseModel):
+    reply_id: str = Field(min_length=1)
+    run_id: str | None
+    input_tokens: int | None = Field(ge=0)
+    output_tokens: int | None = Field(ge=0)
+    total_tokens: int | None = Field(ge=0)
+    cost: float | None = Field(ge=0)
+
+
+class WorkSliceRequest(BaseModel):
+    run_id: str | None
+    seconds: float = Field(ge=0, allow_inf_nan=False)

@@ -218,13 +218,13 @@ def test_a_claim_is_traced_in_the_session_of_its_thread(client, traces):
 def test_working_a_claim_saves_each_step_on_its_thread(client, monkeypatch):
     graph = graph_on(stub(*decide("refer", 0)))
     runs = []
-    invoke = graph.invoke
+    invoke = graph.stream
 
     def spy(start, config, **kwargs):
         runs.append((config, kwargs))
         return invoke(start, config, **kwargs)
 
-    monkeypatch.setattr(graph, "invoke", spy)
+    monkeypatch.setattr(graph, "stream", spy)
     harness.work_claim("CLM-1003", graph)
     [(config, kwargs)] = runs
     assert kwargs["durability"] == "sync"

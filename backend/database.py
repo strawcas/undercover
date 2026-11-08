@@ -14,6 +14,7 @@ from sqlalchemy import (
     JSON,
     Boolean,
     Column,
+    Connection,
     Engine,
     Float,
     ForeignKey,
@@ -26,6 +27,8 @@ from sqlalchemy import (
     inspect,
     select,
 )
+from sqlalchemy.dialects.postgresql import insert as postgres_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.pool import NullPool
 from sqlalchemy.schema import CreateSchema
@@ -37,6 +40,15 @@ SCHEMA = "undercover"
 CONNECTIONS = 4
 
 metadata = MetaData()
+
+
+def insert_once(db: Connection, table: Table, values: dict[str, Any]) -> None:
+    """Atomically insert a record unless its primary key was already saved."""
+    dialect_insert = (
+        postgres_insert if db.dialect.name == "postgresql" else sqlite_insert
+    )
+    db.execute(dialect_insert(table).values(**values).on_conflict_do_nothing())
+
 
 settings = Table(
     "settings",
@@ -130,6 +142,29 @@ todos = Table(
     Column("position", Integer, primary_key=True),
     Column("content", Text, nullable=False),
     Column("status", Text, nullable=False),
+)
+model_calls = Table(
+    "model_calls",
+    metadata,
+    Column("claim_id", Text, ForeignKey("claims.claim_id"), primary_key=True),
+    Column("thread_id", Text, primary_key=True),
+    Column("reply_id", Text, primary_key=True),
+    Column("run_id", Text, ForeignKey("runs.run_id")),
+    Column("input_tokens", Integer),
+    Column("output_tokens", Integer),
+    Column("total_tokens", Integer),
+    Column("cost", Float),
+)
+work_slices = Table(
+    "work_slices",
+    metadata,
+    Column("slice_id", Text, primary_key=True),
+    Column("claim_id", Text, ForeignKey("claims.claim_id"), nullable=False),
+    Column("thread_id", Text, nullable=False),
+    Column("run_id", Text, ForeignKey("runs.run_id")),
+    Column("seconds", Float, nullable=False),
+    Column("started_at", Text, nullable=False),
+    Column("updated_at", Text, nullable=False),
 )
 
 claim_view = (

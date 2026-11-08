@@ -8,6 +8,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from functools import partial
+from time import monotonic
 from typing import Any, cast
 
 from langchain.agents import create_agent
@@ -53,7 +54,7 @@ Messages = dict[str, list[BaseMessage]]
 Start = Messages | Command | None
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash"
+DEFAULT_MODEL = "openai/gpt-6-luna"
 SCHEMA = "undercover"
 CONNECTIONS = 4
 CLAIM_MODEL_CALLS = 30
@@ -75,14 +76,18 @@ class TooManyModelCalls(Exception):
     """The claim agent made as many model calls as it may without finishing."""
 
 
-def model() -> ChatOpenAI:
-    """Return the model named in MODEL_NAME, or DeepSeek V4.1 Flash by default."""
+def model_settings() -> dict[str, Any]:
+    """Resolve the model and reasoning effort once for execution and run records."""
     name = os.getenv("MODEL_NAME")
+    return {"model": name or DEFAULT_MODEL, "reasoning_effort": None if name else "low"}
+
+
+def model() -> ChatOpenAI:
+    """Return the configured model through OpenRouter."""
     return ChatOpenAI(
-        model=name or DEFAULT_MODEL,
+        **model_settings(),
         base_url=OPENROUTER_BASE_URL,
         api_key=SecretStr(os.environ["OPENROUTER_API_KEY"]),
-        reasoning_effort=None if name else "low",
         timeout=120,
         max_retries=5,
     )
@@ -162,6 +167,19 @@ def call_model(
         message = f"The claim agent made {calls} model calls without finishing"
         raise TooManyModelCalls(message)
     reply = llm.invoke([instructions, *state["messages"]])
+    usage = reply.usage_metadata if isinstance(reply, AIMessage) else None
+    reported = reply.response_metadata.get("token_usage", {})
+    api.record_model_call(
+        runtime.context.claim_id,
+        {
+            "reply_id": reply.id or str(uuid.uuid4()),
+            "run_id": runtime.context.run_id,
+            "input_tokens": usage.get("input_tokens") if usage else None,
+            "output_tokens": usage.get("output_tokens") if usage else None,
+            "total_tokens": usage.get("total_tokens") if usage else None,
+            "cost": reported.get("cost"),
+        },
+    )
     record_reply(runtime.context.claim_id, reply)
     return {"messages": [reply], "model_calls": 1}
 
@@ -267,23 +285,46 @@ def report(claim: dict[str, Any], reason: str) -> str:
 
 
 def run_claim_graph(
-    graph: ClaimGraph, start: Start, claim: dict[str, Any], name: str
+    graph: ClaimGraph,
+    start: Start,
+    claim: dict[str, Any],
+    name: str,
+    run_id: str | None = None,
 ) -> str | None:
     """Run the claim graph on the claim's thread, saving each step, and say what went
     wrong, if anything."""
+    slice_id, started = str(uuid.uuid4()), monotonic()
+
+    def progress() -> None:
+        api.record_work_slice(
+            claim["claim_id"], slice_id, run_id, monotonic() - started
+        )
+
+    error = None
     try:
+        progress()
+
         # A fresh context makes this a root run even inside the queue agent's tool,
         # which Langfuse needs to put it in the claim's session.
-        contextvars.Context().run(
-            graph.invoke,
-            start,
-            claim_config(claim, name),
-            context=ClaimContext(claim["claim_id"]),
-            durability="sync",
-        )
-    except Exception as error:  # a claim that fails must not stop the run
-        return describe(error)
-    return None
+        def execute() -> None:
+            for _ in graph.stream(
+                start,
+                claim_config(claim, name),
+                context=ClaimContext(claim["claim_id"], run_id),
+                durability="sync",
+                stream_mode="updates",
+            ):
+                progress()
+
+        contextvars.Context().run(execute)
+    except Exception as problem:  # a claim that fails must not stop the run
+        error = describe(problem)
+    finally:
+        try:
+            progress()
+        except Exception as problem:
+            error = error or describe(problem)
+    return error
 
 
 def settle(claim_id: str, error: str | None) -> str:
@@ -300,14 +341,14 @@ def settle(claim_id: str, error: str | None) -> str:
     return line
 
 
-def work_claim(claim_id: str, graph: ClaimGraph) -> str:
+def work_claim(claim_id: str, graph: ClaimGraph, run_id: str | None = None) -> str:
     """Work one claim from a clean start, as a new attempt, and report how it ended."""
     claim = api.start_claim(claim_id, str(uuid.uuid4()))
-    error = run_claim_graph(graph, begin(claim_id), claim, WORK_CLAIM)
+    error = run_claim_graph(graph, begin(claim_id), claim, WORK_CLAIM, run_id)
     return settle(claim_id, error)
 
 
-def carry_on(claim_id: str, graph: ClaimGraph) -> str:
+def carry_on(claim_id: str, graph: ClaimGraph, run_id: str | None = None) -> str:
     """Carry a claim in progress on from its saved progress, as the same attempt, and
     report how it ended. A claim at the pause has been signed off, so it resumes past
     it. One with nothing saved, stopped before its first step, starts on its own
@@ -319,7 +360,7 @@ def carry_on(claim_id: str, graph: ClaimGraph) -> str:
         start = Command(resume=True)
     elif saved.created_at is None and claim["decision"] is None:
         start = begin(claim_id)
-    error = run_claim_graph(graph, start, claim, CARRY_ON)
+    error = run_claim_graph(graph, start, claim, CARRY_ON, run_id)
     return settle(claim_id, error)
 
 
@@ -401,7 +442,7 @@ def run_queue(cap: int | None, llm: BaseChatModel, graph: ClaimGraph) -> None:
         return
     cap = min(cap or count, count)
     run_id = api.start_run(cap)["run_id"]
-    run = RunContext(run_id, cap, partial(work_claim, graph=graph))
+    run = RunContext(run_id, cap, partial(work_claim, graph=graph, run_id=run_id))
     try:
         summary = work_queue(run, queue_agent(llm, cap))
     except Exception as error:
