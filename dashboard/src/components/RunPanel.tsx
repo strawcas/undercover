@@ -5,6 +5,7 @@ import { claimPage } from "../paths";
 import { REFRESH_MS, useLoad } from "../useLoad";
 import { RunChip, StatusChip } from "./Chips";
 import { Message } from "./Message";
+import { RunStartForm } from "./RunStartForm";
 
 export function RunPanel() {
   const { data: run, error } = useLoad(api.getLatestRun, REFRESH_MS);
@@ -15,6 +16,7 @@ export function RunPanel() {
         <h2 id="run-title">Current run</h2>
         {run && <RunChip status={run.status} />}
       </div>
+      <RunStartForm name="Dispatch" start={api.startDispatch} />
       {run === undefined && <Message error={error} />}
       {run === null && <p className="muted">No run yet.</p>}
       {run && <RunDetails run={run} />}

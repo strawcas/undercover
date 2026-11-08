@@ -192,6 +192,9 @@ export const api = {
   getInstructions: () => request<Instructions>("/api/instructions"),
   listHandlers: () => request<Handler[]>("/api/handlers"),
   getLatestRun: () => request<Run | null>("/api/runs/latest"),
+  getActiveRun: () => request<Run | null>("/api/runs/active"),
+  startDispatch: (concurrency: number) =>
+    post<{ status: string }>("/api/dispatches", { concurrency }),
   signOff: (claimId: string, handlerId: string) =>
     post<Claim>(`${claimPath(claimId)}/sign-off`, { handler_id: handlerId }),
 };

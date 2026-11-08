@@ -127,6 +127,17 @@ def latest(db: Connection) -> Run | None:
     return get_run(db, run_id) if run_id else None
 
 
+def active(db: Connection) -> Run | None:
+    """Read any running kind so both dashboard forms share admission state."""
+    run_id = db.execute(
+        select(runs.c.run_id)
+        .where(runs.c.status == "running")
+        .order_by(runs.c.number.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    return get_run(db, run_id) if run_id else None
+
+
 def start_run(db: Connection, request: RunRequest) -> Run:
     """Persist the service's accepted configuration."""
     run_id = str(uuid.uuid4())
@@ -187,7 +198,8 @@ def summary(items: list[RunMember]) -> str:
             ("refer", "referred"),
         ]
     ]
-    lines = [f"Worked {len(items)} claims: {', '.join(counts)}."]
+    noun = "claim" if len(items) == 1 else "claims"
+    lines = [f"Worked {len(items)} {noun}: {', '.join(counts)}."]
     for item in items:
         if item.claim_status == "waiting_for_sign_off":
             lines.append(f"{item.claim_id}: ${item.payout:,.2f} waiting for sign-off.")

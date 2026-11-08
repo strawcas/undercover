@@ -31,6 +31,7 @@ from backend.models import (
     ClaimSummary,
     Decision,
     DecisionRequest,
+    DispatchRequest,
     DocumentName,
     FailureRequest,
     Handler,
@@ -70,6 +71,12 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="UnderCover", lifespan=lifespan)
+
+
+@app.post("/api/dispatches", operation_id="start_dispatch", status_code=202)
+def start_dispatch(request: DispatchRequest) -> dict[str, str]:
+    """Ask the agent service to accept a dispatch without creating a run first."""
+    return agent_service.start_dispatch(request.concurrency)
 
 
 def database() -> Iterator[Connection]:
@@ -406,6 +413,12 @@ def get_latest_run(db: Database) -> Run | None:
 def stop_runs(db: Database) -> list[str]:
     """Mark abandoned runs stopped and return evaluation threads for cleanup."""
     return run_records.stop_runs(db)
+
+
+@app.get("/api/runs/active", operation_id="get_active_run")
+def get_active_run(db: Database) -> Run | None:
+    """Read the running dispatch or evaluation for shared dashboard busy controls."""
+    return run_records.active(db)
 
 
 @app.get("/api/runs/{run_id}", operation_id="get_run")

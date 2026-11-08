@@ -232,6 +232,29 @@ p {
   margin-bottom: 20px;
 }
 
+.run-start {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  margin: 16px 0;
+}
+.run-start label {
+  display: grid;
+  gap: 6px;
+}
+.run-start input {
+  width: 7rem;
+}
+.run-start p {
+  flex-basis: 100%;
+  margin: 0;
+}
+.run-stopped {
+  background: var(--raspberry);
+  color: #fff;
+}
+
 .run-heading {
   display: flex;
   align-items: center;
@@ -451,6 +474,9 @@ p {
   color: var(--muted);
 }
 
+.run-start input,
+.run-start select,
+.run-start button,
 .sign-off-form select,
 .sign-off-form button {
   font: inherit;
@@ -460,12 +486,15 @@ p {
   border: none;
 }
 
+.run-start input,
+.run-start select,
 .sign-off-form select {
   background: var(--panel);
   color: var(--ink);
   min-width: 200px;
 }
 
+.run-start button,
 .sign-off-form button {
   background: var(--sea-green);
   color: var(--midnight);
@@ -473,6 +502,7 @@ p {
   cursor: pointer;
 }
 
+.run-start button:disabled,
 .sign-off-form button:disabled {
   opacity: 0.5;
   cursor: default;

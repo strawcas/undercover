@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { post, put } from "./api";
+import { post, put, AGENT_STAND_IN } from "./api";
 
 // These tests stand in for the dispatcher and a claim agent by calling the
 // API through the dashboard's proxy, and watch the pages update without a
@@ -13,6 +13,11 @@ test("the queue shows dispatch members and a records-built summary", async ({
   const panel = page.locator("section", {
     has: page.getByRole("heading", { name: "Current run" }),
   });
+  await page.getByLabel("Agents at once").fill("25");
+  await page.getByRole("button", { name: "Start dispatch" }).click();
+  await expect(panel.getByText("Dispatch accepted.")).toBeVisible();
+  const starts = await request.get(`${AGENT_STAND_IN}/api/starts`);
+  expect(await starts.json()).toContainEqual({ concurrency: 25 });
   const response = await post(request, "/api/runs", {
     kind: "dispatch",
     concurrency: 3,
@@ -39,7 +44,7 @@ test("the queue shows dispatch members and a records-built summary", async ({
   await post(request, `/api/runs/${run_id}/finish`, {});
   await expect(panel.getByText("Finished", { exact: true })).toBeVisible();
   await expect(
-    panel.getByText("Worked 1 claims: 0 approved, 0 declined, 1 referred."),
+    panel.getByText("Worked 1 claim: 0 approved, 0 declined, 1 referred."),
   ).toBeVisible();
   await panel.getByRole("link", { name: "CLM-1013" }).click();
   await expect(page).toHaveURL("/claims/CLM-1013");

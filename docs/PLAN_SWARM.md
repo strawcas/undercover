@@ -139,15 +139,15 @@ Introduce backend run membership and deterministic summaries, the model-free gra
 
 Add the service's admission/lifecycle handling and the backend forwarding route, then expose a start form on the queue. This puts run creation behind the service that owns execution and makes recovery and unavailable-service behavior visible to handlers.
 
-- [ ] API/service tests accept N=1 and N=25, reject N=0 and N=26 with 422, and return 202 without waiting for claim work. The backend forwards exactly N and writes no run before the service accepts.
-- [ ] Concurrent start tests prove only one dispatch/evaluation slot can be reserved, including before backend run creation. A second start gets 409; completion and background failure release the slot.
-- [ ] An unreachable service produces a clear 503 and no new backend run. A backend run-creation failure in background releases the slot and is logged rather than leaving the service permanently busy.
-- [ ] Startup tests mark all abandoned runs stopped, preserve ordinary claims' attempts/threads for the next dispatch and finalize their recorded measurements without counting downtime. Startup with the backend initially unavailable waits for readiness before recovery and admission.
-- [ ] Service tests show synchronous dispatch work runs away from the event loop; health and sign-off resumes remain responsive during a dispatch. Dev startup and restart work on Windows.
-- [ ] Vitest covers the default N=3, valid limits, pending/busy controls, 409 and 503 messages, refreshed member states, totals and the records-built completion summary.
-- [ ] End-to-end tests start a dispatch from the queue and assert the service stand-in receives N. Playing its run through backend APIs updates member links, progress, totals and summary without reloading the page.
-- [ ] Through Playwright MCP, inspect the queue with a stand-in run at `http://localhost:5173`: usable labeled controls, N=3 initially, busy/unavailable feedback, linked claims and summary, in light/dark mode and at a narrow width. There are no unexpected browser console errors.
-- [ ] `npm run check` passes; the phase is reviewed, documented in `docs/STATUS.md` and committed.
+- [x] API/service tests accept N=1 and N=25, reject N=0 and N=26 with 422, and return 202 without waiting for claim work. The backend forwards exactly N and writes no run before the service accepts.
+- [x] Concurrent start tests prove only one dispatch/evaluation slot can be reserved, including before backend run creation. A second start gets 409; completion and background failure release the slot.
+- [x] An unreachable service produces a clear 503 and no new backend run. A backend run-creation failure in background releases the slot and is logged rather than leaving the service permanently busy.
+- [x] Startup tests mark all abandoned runs stopped, preserve ordinary claims' attempts/threads for the next dispatch and finalize their recorded measurements without counting downtime. Startup with the backend initially unavailable waits for readiness before recovery and admission.
+- [x] Service tests show synchronous dispatch work runs away from the event loop; health and sign-off resumes remain responsive during a dispatch. Dev startup and restart work on Windows.
+- [x] Vitest covers the default N=3, valid limits, pending/busy controls, 409 and 503 messages, refreshed member states, totals and the records-built completion summary.
+- [x] End-to-end tests start a dispatch from the queue and assert the service stand-in receives N. Playing its run through backend APIs updates member links, progress, totals and summary without reloading the page.
+- [x] Through Playwright MCP, inspect the queue with a stand-in run at `http://localhost:5173`: usable labeled controls, N=3 initially, busy/unavailable feedback, linked claims and summary, in light/dark mode and at a narrow width. There are no unexpected browser console errors.
+- [x] `npm run check` passes; the phase is reviewed, documented in `docs/STATUS.md` and committed.
 
 ## Phase 4: Isolated evaluations and backend scoring
 
@@ -198,3 +198,5 @@ Update the product docs for the completed behavior, then carry out only the live
 Keep the existing claim decision tools, instructions, manual/policy interpretation, payout rules, sign-off limit and durable graph behavior. This build adds no sign-in, real payments, customer messages, new AWS resources, cloud agent transport or later-day features. Do not change course notebooks or copy later briefs into `docs/`. Implementation begins only when the student asks to implement this plan.
 
 Phase 2 checkpoint-pool verification: distinct per-execution savers, setup-once configuration and the four-connection limit are covered offline; the 25-worker Postgres wait/no-connection-failure observation remains part of phase 6. LangGraph 1.2.12 needs the narrowly guarded handled-future workaround for upstream issue https://github.com/langchain-ai/langgraph/issues/8277.
+
+Phase 3 browser evidence: isolated SQLite/agent stand-in preview at localhost:5173; default N=3, accepted start, busy disable, member links and record summary checked at 1280px light and 390px dark. Simulated service503 displayed the expected message. No unexpected console errors; screenshots in ignored .playwright-mcp/. Review fixed plain-text upstream errors and verified responsiveness on a single ASGI event loop.

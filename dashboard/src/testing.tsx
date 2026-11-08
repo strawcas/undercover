@@ -17,7 +17,9 @@ export class Refusal {
 
 export function stubApi(routes: Routes) {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
-    const answer = routes[`${init?.method ?? "GET"} ${path}`];
+    const key = `${init?.method ?? "GET"} ${path}`;
+    const answer =
+      key === "GET /api/runs/active" ? (routes[key] ?? null) : routes[key];
     if (answer === undefined)
       return Promise.resolve(
         Response.json({ detail: "Not found" }, { status: 404 }),
