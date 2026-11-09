@@ -19,23 +19,19 @@ Our goal is to handle claims straight through, as accurately as our handlers do.
 
 ## Working the queue on its own
 
-The agent works the queue in runs, organizing its own work:
-
-- One run works the whole queue. The agent chooses the order, then finishes with a short summary for the handlers. A run can be capped at a number of claims for a trial, with the rest left waiting, and the agent can also work one named claim.
-- The agent plans each run as a to-do list and keeps it up to date, with each item to do, in progress, done or left for a handler.
-- Each claim goes to a fresh helper that works that one claim from a clean start and reports back in a line: the decision and payout, or what went wrong. Every step on a claim is recorded on that claim.
-- For each claim the agent looks up the sections of the policy wording and the claims manual it needs, the way a handler would, rather than being handed whole documents. It works out an approval's payout with UnderCover's payout rules, which are part of our systems.
-- An approval over the sign-off limit pauses the agent's work on that claim, keeping everything it has worked out, until a handler signs off. As soon as a handler signs off, the agent picks the claim up from where it stopped and pays it, and between the sign-off and the payment the claim shows as in progress. If the agent isn't running at that moment, it picks the claim up the next time it runs. The payment records who signed off and when. For now a handler can only sign off.
-- Work survives a restart. If the agent is stopped partway through a claim, by a crash, a restart or Ctrl-C, it carries on with that claim from where it got to the next time it runs, and that doesn't count as a new attempt. A run that was stopped is finished by the next run.
-- Problems are put right automatically. One bad claim never stops the run or leaves a claim stuck in progress. A claim that fails with an error before it is decided goes back in the queue to be tried again from the start, and a claim that fails twice is left for a handler. No claim is ever decided or paid twice, even when a step runs again after a restart. Before it finishes, the agent checks that it hasn't missed a waiting claim within its cap.
+- A handler starts a dispatch from the dashboard, choosing from 1 to 25 claim agents at once, with 3 to start with. Only one dispatch or evaluation runs at a time. Code selects every waiting and in-progress claim, oldest submitted first, without a queue model.
+- Each claim has its own claim agent and saved thread. A restart carries unfinished work on from its last saved step as the same attempt. Decisions and payments happen once even if a step runs again.
+- An approval over the sign-off limit keeps its progress while it waits. When a handler signs off, the service resumes and pays it promptly, including during a dispatch. A signed-off claim remains in progress until paid. If the service is away, the next dispatch picks it up.
+- Rate limits and timeouts wait and resume the same attempt, up to three worker tries. An exhausted claim stays in progress for the next dispatch while other claims finish. Other errors before a decision start a fresh attempt in the same dispatch; after two failed attempts the claim is left for a handler. A decision already recorded is retained if payment fails.
+- The dispatch reports its members, cost, active claim time and elapsed time, then summarizes the backend records for handlers. Active time excludes waits for sign-off and process downtime.
+- Evaluations work fresh copies of a labelled set, full or its five tiny claims, through the same claim agents. Copies stay out of the queue, cannot be signed off, and keep their decisions and steps after saved progress is cleared. Stopped evaluations remain stopped.
 
 ## What the team needs to see
 
-- The queue, with where each claim stands: waiting, in progress, waiting for sign-off, decided or left for a handler.
-- The to-do list for the current run, so we can see what the agent means to do and how far it has got, and its summary when it finishes.
-- Each claim in full, with the agent's decision and its reasons.
-- What the agent is doing on a claim while it works, step by step, including the sections it read and any attempt that failed.
-- The agent's instructions for running the queue and for working a claim, read only.
+- The queue and each claim in full, with its status, decision, reasons and work recorded step by step, including failed attempts and sections read.
+- Controls to start a dispatch, its linked claims and progress, its own model cost and time, and a records-built summary naming held payouts and unresolved claims.
+- A Scoreboard to start evaluations on either labelled set and compare newest-first results: decision match, payout accuracy within a dollar, cost of mistakes, straight-through rate, model cost per claim, active time per claim and run elapsed time. Each result opens handler and agent decisions side by side and links to copied claims. Undecided copies count as referrals.
+- The claim agent's instructions and document contents, read only.
 
 ## Rules
 

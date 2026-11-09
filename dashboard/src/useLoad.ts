@@ -21,12 +21,17 @@ export function useLoad<T>(
 
   useEffect(() => {
     let active = true;
+    let loading = false;
     const fetchNow = () => {
+      if (loading) return;
+      loading = true;
       load().then(
         (data) => {
+          loading = false;
           if (active) setLoaded({ data });
         },
         (error: unknown) => {
+          loading = false;
           if (error instanceof ApiError && error.status === 404)
             clearInterval(timer);
           if (active)

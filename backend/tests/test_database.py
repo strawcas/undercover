@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import inspect, text
 from sqlalchemy.pool import QueuePool
 
+from backend import database as storage
 from backend.database import engine, location, seed
 from backend.main import app
 
@@ -25,6 +26,22 @@ def test_the_settings_in_database_url_are_kept(monkeypatch):
     assert (query["sslmode"], query["options"]) == (
         "require",
         "-c search_path=undercover",
+    )
+
+
+def test_backend_connections_identify_the_application_process(monkeypatch):
+    opened = []
+    create = storage.create_engine
+
+    def capture(url, **kwargs):
+        opened.append(kwargs)
+        return create(url, **kwargs)
+
+    monkeypatch.setattr(storage, "create_engine", capture)
+    monkeypatch.setenv("DATABASE_URL", f"{SUPABASE}?application_name=identity-test")
+    engine()
+    assert opened[0]["connect_args"]["application_name"].startswith(
+        "undercover-backend-"
     )
 
 

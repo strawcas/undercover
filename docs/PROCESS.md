@@ -44,7 +44,7 @@ The checks show that the code works, but not that it is fit to merge. Every code
 ## Rules
 
 - Add tests with each change. Tests never call a model; use a stub model.
-- Before a live run with the real model, reseed with `npm run seed`, and cap a queue run at five claims.
+- For real-model verification, follow the active brief. The Swarm sequence below replaces the retired five-claim queue cap.
 - Outside a plan, commit each change once you have checked and reviewed it.
 - Run `npm run check` before you hand work over.
 - Never use `git commit --no-verify`.
@@ -53,3 +53,13 @@ The checks show that the code works, but not that it is fit to merge. Every code
 - Never push.
 - Don't open `data/evals/` unless you're asked to.
 - Everything must work on Windows: write `package.json` scripts as `uv run` commands or `.mjs` files.
+
+## Swarm live verification
+
+Use the default model with MODEL_NAME unset in both `.env` and the launching shell (`$env:MODEL_NAME = $null` in PowerShell). Confirm the accepted run records `openai/gpt-6-luna` and low effort. After one `npm run seed`, start `npm run dev` and verify 25 waiting claims and an empty scoreboard. Do not reseed between these runs:
+
+1. Start N=3 through the queue, capture partial claim progress, then force-kill every verified agent process on 8002, including reloader and worker. On Windows use `Get-NetTCPConnection`, inspect process ancestry with `Get-CimInstance Win32_Process`, then `Stop-Process` on verified agent ids. Confirm the dev runner stops the other services.
+2. Restart dev and verify the abandoned dispatch is stopped. Start N=25; compare saved attempts/threads, overlapping work intervals, wall versus active time and per-claim speed. Keep at most 4 connections per process; observe at most 12 postgres-user sessions through the read-only Supabase MCP server. Sign off a held original and verify payment within 5 seconds.
+3. Run the full evaluation set at N=25 and held-out tiny set at N=5 through the Scoreboard. Queue counts must stay unchanged, held copies need no sign-off and their checkpoints are cleared. Check Langfuse's API for claim traces tagged with the N=25 dispatch id.
+
+Automated checks remain offline with stub models. For final verification temporarily move `.env` aside, run `npm run check`, and restore the file even if a check fails. Never claim unavailable external verification passed; record the exact remaining requirement in STATUS and the active plan.

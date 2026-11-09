@@ -2,9 +2,10 @@
 
 from concurrent.futures import ThreadPoolExecutor
 
-from sqlalchemy import event
+from sqlalchemy import event, update
 
-from backend.database import engine
+from backend import runs
+from backend.database import claims, engine
 from backend.tests.run_requests import configuration
 
 
@@ -125,3 +126,86 @@ def test_run_read_query_count_does_not_grow_with_swarm_size(client):
         counts.append(len(queries))
     assert counts[0] == counts[1]
     assert counts[1] <= 6
+
+
+def test_summary_and_members_use_the_same_frozen_outcomes(client, monkeypatch):
+    run_id = start(client).json()["run_id"]
+    member(client, run_id, "CLM-1001")
+    client.post("/api/claims/CLM-1001/start", json={"thread_id": "thread"})
+    client.post(
+        "/api/claims/CLM-1001/decision",
+        json={
+            "decision": "approve",
+            "payout": 1350,
+            "section": "3",
+            "reason": "Covered",
+        },
+    )
+    read = runs.get_run
+
+    def sign_off_after_snapshot(db, selected_run):
+        db.execute(
+            update(claims)
+            .where(claims.c.claim_id == "CLM-1001")
+            .values(status="in_progress")
+        )
+        return read(db, selected_run)
+
+    monkeypatch.setattr(runs, "get_run", sign_off_after_snapshot)
+    result = client.post(f"/api/runs/{run_id}/finish").json()
+    assert result["members"][0]["claim_status"] == "waiting_for_sign_off"
+    assert "CLM-1001: $1,350.00 waiting for sign-off." in result["summary"]
+
+
+def test_bulk_selection_is_ordered_idempotent_and_atomic(client):
+    run_id = start(client).json()["run_id"]
+    path = f"/api/runs/{run_id}/selection"
+    body = {"claim_ids": ["CLM-1002", "CLM-1001", "CLM-1002"]}
+    assert client.put(path, json=body).status_code == 200
+    assert client.put(path, json=body).status_code == 200
+    assert (
+        client.put(path, json={"claim_ids": ["CLM-1003", "missing"]}).status_code == 404
+    )
+    run = client.get(f"/api/runs/{run_id}").json()
+    assert [m["claim_id"] for m in run["members"]] == ["CLM-1002", "CLM-1001"]
+    client.post(f"/api/runs/{run_id}/finish")
+    assert client.put(path, json=body).status_code == 409
+    assert client.put("/api/runs/missing/selection", json=body).status_code == 404
+
+
+def test_bulk_selection_rejects_evaluation_copies_in_a_dispatch(client):
+    evaluation = start(client, kind="evaluation", set_name="held_out", tiny=True).json()
+    dispatch = start(client).json()
+    copied_id = evaluation["members"][0]["claim_id"]
+    response = client.put(
+        f"/api/runs/{dispatch['run_id']}/selection",
+        json={"claim_ids": ["CLM-1001", copied_id]},
+    )
+    assert response.status_code == 409
+    assert client.get(f"/api/runs/{dispatch['run_id']}").json()["members"] == []
+
+
+def test_bulk_selection_query_count_does_not_grow_with_claims(client):
+    counts = []
+    for size in (1, 25):
+        run_id = start(client).json()["run_id"]
+        ids = [c["claim_id"] for c in client.get("/api/claims").json()[:size]]
+        queries = []
+
+        def record_query(*args, recorded=queries):
+            recorded.append(args[2])
+
+        db_engine = engine()
+        event.listen(db_engine, "before_cursor_execute", record_query)
+        try:
+            assert (
+                client.put(
+                    f"/api/runs/{run_id}/selection", json={"claim_ids": ids}
+                ).status_code
+                == 200
+            )
+        finally:
+            event.remove(db_engine, "before_cursor_execute", record_query)
+        counts.append(len(queries))
+    assert counts[0] == counts[1]
+    assert counts[1] <= 4

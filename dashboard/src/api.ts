@@ -204,6 +204,8 @@ function post<T>(path: string, body: object): Promise<T> {
 const claimPath = (claimId: string) =>
   `/api/claims/${encodeURIComponent(claimId)}`;
 
+const evaluationsPath = "/api/evaluations";
+
 export const api = {
   listClaims: () => request<ClaimSummary[]>("/api/claims"),
   getClaim: (claimId: string) => request<Claim>(claimPath(claimId)),
@@ -226,14 +228,16 @@ export const api = {
     tiny: boolean,
     concurrency: number,
   ) =>
-    post<{ status: string }>("/api/evaluations", {
+    post<{ status: string }>(evaluationsPath, {
       set_name: setName,
       tiny,
       concurrency,
     }),
-  listEvaluations: () => request<Evaluation[]>("/api/evaluations"),
+  listEvaluations: () => request<Evaluation[]>(evaluationsPath),
   getEvaluation: (runId: string) =>
-    request<EvaluationDetail>(`/api/evaluations/${encodeURIComponent(runId)}`),
+    request<EvaluationDetail>(
+      `${evaluationsPath}/${encodeURIComponent(runId)}`,
+    ),
   signOff: (claimId: string, handlerId: string) =>
     post<Claim>(`${claimPath(claimId)}/sign-off`, { handler_id: handlerId }),
 };

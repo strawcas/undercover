@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from sqlalchemy import Connection, RowMapping, insert, select, update
@@ -50,6 +50,7 @@ from backend.models import (
     Run,
     RunClaimRequest,
     RunRequest,
+    RunSelectionRequest,
     Section,
     SectionMatch,
     SignOffRequest,
@@ -172,7 +173,7 @@ def to_summary(row: RowMapping) -> ClaimSummary:
     )
 
 
-def to_claim(row: RowMapping) -> Claim:
+def to_claim(row: RowMapping | dict[str, Any]) -> Claim:
     """Build a claim in full, with its decision and payment, from its row."""
     decision = None
     if row["decision"] is not None:
@@ -400,14 +401,22 @@ def sign_off_claim(
             403,
             f"{handler.name} can't sign off payouts over {dollars(approval_limit(db))}",
         )
+    signed_off_at = now()
     db.execute(
         update(decisions)
         .where(decisions.c.claim_id == claim_id)
-        .values(signed_off_by=handler.name, signed_off_at=now())
+        .values(signed_off_by=handler.name, signed_off_at=signed_off_at)
     )
     set_status(db, claim_id, "in_progress")
     background.add_task(agent_service.resume_claim, claim_id)
-    return to_claim(find_claim(db, claim_id))
+    return to_claim(
+        dict(claim)
+        | {
+            "status": "in_progress",
+            "signed_off_by": handler.name,
+            "signed_off_at": signed_off_at,
+        }
+    )
 
 
 @app.post("/api/claims/{claim_id}/failure", operation_id="fail_claim")
@@ -467,9 +476,19 @@ def get_run_threads(run_id: str, db: Database) -> list[str]:
 @app.put("/api/runs/{run_id}/claims/{claim_id}", operation_id="record_run_claim")
 def record_run_claim(
     run_id: str, claim_id: str, request: RunClaimRequest, db: Database
-) -> Run:
+) -> dict[str, str]:
     """Record selected membership or a worker's progress once per claim."""
-    return run_records.record_member(db, run_id, claim_id, request)
+    run_records.record_member(db, run_id, claim_id, request)
+    return {"status": "recorded"}
+
+
+@app.put("/api/runs/{run_id}/selection", operation_id="record_run_selection")
+def record_run_selection(
+    run_id: str, request: RunSelectionRequest, db: Database
+) -> dict[str, str]:
+    """Register the dispatcher's ordered selection in one transaction."""
+    run_records.select_members(db, run_id, request.claim_ids)
+    return {"status": "recorded"}
 
 
 @app.post("/api/runs/{run_id}/finish", operation_id="finish_run")

@@ -38,8 +38,7 @@ def list_work(state: Dispatch) -> dict[str, list[str]]:
             if c["status"] in (api.Status.WAITING, api.Status.IN_PROGRESS)
             and not harness.is_reserved(c["claim_id"])
         ]
-        for claim_id in ids:
-            api.record_run_claim(state["run_id"], claim_id, "selected", None)
+        api.record_run_selection(state["run_id"], ids)
     return {"claims": ids}
 
 

@@ -28,7 +28,9 @@ from sqlalchemy import (
     select,
     text,
 )
+from sqlalchemy.dialects.postgresql import Insert as PostgresInsert
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
+from sqlalchemy.dialects.sqlite import Insert as SQLiteInsert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.pool import NullPool
@@ -43,12 +45,19 @@ CONNECTIONS = 4
 metadata = MetaData()
 
 
-def insert_once(db: Connection, table: Table, values: dict[str, Any]) -> None:
-    """Atomically insert a record unless its primary key was already saved."""
+def conflict_insert(db: Connection, table: Table) -> PostgresInsert | SQLiteInsert:
+    """Build an insert with the database's native conflict handling."""
     dialect_insert = (
         postgres_insert if db.dialect.name == "postgresql" else sqlite_insert
     )
-    db.execute(dialect_insert(table).values(**values).on_conflict_do_nothing())
+    return dialect_insert(table)
+
+
+def insert_once(
+    db: Connection, table: Table, values: dict[str, Any] | list[dict[str, Any]]
+) -> None:
+    """Atomically insert a record unless its primary key was already saved."""
+    db.execute(conflict_insert(db, table).values(values).on_conflict_do_nothing())
 
 
 settings = Table(
@@ -239,7 +248,11 @@ def engine_for(url: URL) -> Engine:
     a connection for each request."""
     if on_postgres(url):
         return create_engine(
-            url, pool_size=CONNECTIONS, max_overflow=0, pool_pre_ping=True
+            url,
+            pool_size=CONNECTIONS,
+            max_overflow=0,
+            pool_pre_ping=True,
+            connect_args={"application_name": f"undercover-backend-{os.getpid()}"},
         )
     return create_engine(url, poolclass=NullPool)
 

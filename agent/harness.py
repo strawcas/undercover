@@ -8,7 +8,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from functools import partial
+from functools import cache, partial
 from threading import Condition
 from time import monotonic
 from typing import Any, cast
@@ -127,7 +127,7 @@ def execute_reserved_claim(claim_id: str, run_id: str | None) -> str:
             if claim["status"] == api.Status.WAITING:
                 line = work_claim(claim_id, None, run_id)
             elif claim["status"] == api.Status.IN_PROGRESS:
-                line = carry_on(claim_id, None, run_id)
+                line = carry_on(claim, None, run_id)
             else:
                 return "No eligible work"
             if api.get_claim(claim_id)["status"] != api.Status.WAITING:
@@ -182,6 +182,7 @@ def checkpointer() -> Iterator[PostgresSaver]:
         "prepare_threshold": 0,
         "row_factory": dict_row,
         "options": f"-c search_path={SCHEMA}",
+        "application_name": f"undercover-agent-{os.getpid()}",
     }
     with ConnectionPool[Connection[DictRow]](
         os.environ["DATABASE_URL"],
@@ -242,7 +243,7 @@ def call_model(
     state: ClaimState,
     runtime: Runtime[ClaimContext],
     llm: Runnable[LanguageModelInput, BaseMessage],
-    instructions: SystemMessage,
+    instructions: Callable[[], SystemMessage],
 ) -> dict[str, Any]:
     """Ask the model for its next step, up to CLAIM_MODEL_CALLS times in all, and
     record its reply on the claim."""
@@ -250,9 +251,9 @@ def call_model(
     if calls >= CLAIM_MODEL_CALLS:
         message = f"The claim agent made {calls} model calls without finishing"
         raise TooManyModelCalls(message)
-    reply = llm.invoke([instructions, *state["messages"]])
+    reply = llm.invoke([instructions(), *state["messages"]])
     usage = reply.usage_metadata if isinstance(reply, AIMessage) else None
-    reported = reply.response_metadata.get("token_usage", {})
+    reported = reply.response_metadata.get("token_usage") or {}
     api.record_model_call(
         runtime.context.claim_id,
         {
@@ -269,9 +270,9 @@ def call_model(
 
 
 def wait_for_sign_off(state: ClaimState, runtime: Runtime[ClaimContext]) -> None:
-    """Pause until a handler signs off the payout, which the backend records. On
-    resume this runs again from the top, so nothing comes before the interrupt."""
-    interrupt({"claim_id": runtime.context.claim_id})
+    """Pause unless this execution has the backend's recorded sign-off."""
+    if not runtime.context.signed_off:
+        interrupt({"claim_id": runtime.context.claim_id})
 
 
 def pay(state: ClaimState, runtime: Runtime[ClaimContext]) -> dict[str, Any]:
@@ -301,7 +302,11 @@ def after_tools(state: ClaimState) -> str:
 
 def claim_graph(llm: BaseChatModel, saver: BaseCheckpointSaver[Any]) -> ClaimGraph:
     """Build the claim agent's graph, which saves its progress after every step."""
-    instructions = SystemMessage(api.get_instructions()["claim"])
+
+    @cache
+    def instructions() -> SystemMessage:
+        return SystemMessage(api.get_instructions()["claim"])
+
     builder = StateGraph(ClaimState, context_schema=ClaimContext)
     builder.add_node(
         AGENT,
@@ -390,8 +395,10 @@ def run_claim_graph(
         )
 
     error = None
+    paying = bool(claim["decision"] and claim["decision"]["signed_off_by"])
     try:
-        progress()
+        if not paying:
+            progress()
         graph = graph or execution_graph()
         start = (
             begin(claim["claim_id"])
@@ -402,14 +409,15 @@ def run_claim_graph(
         # A fresh context gives every claim its own root trace,
         # which Langfuse needs to put it in the claim's session.
         def execute(ready: ClaimGraph) -> None:
-            for _ in ready.stream(
+            for update in ready.stream(
                 start,
                 claim_config(claim, name, run_id),
-                context=ClaimContext(claim["claim_id"], run_id),
+                context=ClaimContext(claim["claim_id"], run_id, signed_off=paying),
                 durability="sync",
                 stream_mode="updates",
             ):
-                progress()
+                if not paying or PAY in update:
+                    progress()
 
         contextvars.Context().run(execute, graph)
     except (ModelRateLimitError, ModelTimeoutError):
@@ -440,6 +448,8 @@ def settle(claim_id: str, error: str | None) -> str:
 
 def resume_input(graph: ClaimGraph, claim: dict[str, Any]) -> Start:
     """Resume a paused checkpoint or restart a thread with no saved first step."""
+    if claim["decision"] and claim["decision"]["signed_off_by"]:
+        return Command(resume=True)
     saved = graph.get_state(thread_of(claim))
     if saved.next == (PAUSE,):
         return Command(resume=True)
@@ -457,8 +467,9 @@ def work_claim(
     return settle(claim_id, error)
 
 
-def carry_on(claim_id: str, graph: ClaimGraph | None, run_id: str | None = None) -> str:
+def carry_on(
+    claim: dict[str, Any], graph: ClaimGraph | None, run_id: str | None = None
+) -> str:
     """Resume the existing thread and attempt, measuring checkpoint lookup too."""
-    claim = api.get_claim(claim_id)
     error = run_claim_graph(graph, claim, CARRY_ON, run_id)
-    return settle(claim_id, error)
+    return settle(claim["claim_id"], error)

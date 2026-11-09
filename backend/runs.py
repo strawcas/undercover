@@ -11,6 +11,7 @@ from backend.clock import now
 from backend.database import (
     claim_view,
     claims,
+    conflict_insert,
     insert_once,
     model_calls,
     run_claims,
@@ -180,41 +181,65 @@ def start_run(db: Connection, request: RunRequest) -> Run:
 
 def record_member(
     db: Connection, run_id: str, claim_id: str, request: RunClaimRequest
-) -> Run:
+) -> None:
     """Keep one membership record through retries and execution updates."""
+    if request.status == "selected":
+        select_members(db, run_id, [claim_id])
+        return
     row = running(db, run_id)
     result = member_result(db, claim_id)
     claim = (
         db.execute(select(claims).where(claims.c.claim_id == claim_id)).mappings().one()
     )
-    if (row["kind"] == "dispatch" and claim["evaluation_id"] is not None) or (
-        row["kind"] == "evaluation" and claim["evaluation_id"] != run_id
+    validate_scope(row, claim["evaluation_id"])
+    key = (run_claims.c.run_id == run_id) & (run_claims.c.claim_id == claim_id)
+    if db.execute(select(run_claims).where(key)).first() is None:
+        raise HTTPException(409, "Claim was not selected for this run")
+    db.execute(
+        update(run_claims).where(key).values(**request.model_dump(), result=result)
+    )
+
+
+def validate_scope(run: Any, evaluation_id: str | None) -> None:
+    """Keep dispatches and evaluations within their own claim population."""
+    if (run["kind"] == "dispatch" and evaluation_id is not None) or (
+        run["kind"] == "evaluation" and evaluation_id != run["run_id"]
     ):
         raise HTTPException(409, "Claim does not belong to this run's selection")
-    key = (run_claims.c.run_id == run_id) & (run_claims.c.claim_id == claim_id)
-    if request.status == "selected":
-        position = db.execute(
-            select(func.count())
-            .select_from(run_claims)
-            .where(run_claims.c.run_id == run_id)
-        ).scalar_one()
-        insert_once(
-            db,
-            run_claims,
-            {
-                "run_id": run_id,
-                "claim_id": claim_id,
-                "position": position,
-                **request.model_dump(),
-            },
-        )
-    else:
-        if db.execute(select(run_claims).where(key)).first() is None:
-            raise HTTPException(409, "Claim was not selected for this run")
+
+
+def select_members(db: Connection, run_id: str, claim_ids: list[str]) -> None:
+    """Register ordered membership with a fixed number of database round trips."""
+    run = running(db, run_id)
+    ids = list(dict.fromkeys(claim_ids))
+    selected = list(
         db.execute(
-            update(run_claims).where(key).values(**request.model_dump(), result=result)
-        )
-    return get_run(db, run_id)
+            select(claims.c.claim_id, claims.c.evaluation_id).where(
+                claims.c.claim_id.in_(ids)
+            )
+        ).mappings()
+    )
+    if len(selected) != len(ids):
+        raise HTTPException(404, "One or more selected claims do not exist")
+    for claim in selected:
+        validate_scope(run, claim["evaluation_id"])
+    existing = set(
+        db.execute(
+            select(run_claims.c.claim_id).where(run_claims.c.run_id == run_id)
+        ).scalars()
+    )
+    new_ids = [claim_id for claim_id in ids if claim_id not in existing]
+    records = [
+        {
+            "run_id": run_id,
+            "claim_id": claim_id,
+            "position": len(existing) + index,
+            "status": "selected",
+        }
+        for index, claim_id in enumerate(new_ids)
+    ]
+    if records:
+        insert_once(db, run_claims, records)
 
 
 def summary(items: list[RunMember]) -> str:
@@ -249,11 +274,14 @@ def finish_run(db: Connection, run_id: str, status: str = "finished") -> Run:
             .where(run_claims.c.run_id == run_id, run_claims.c.claim_id == claim_id)
             .values(result=member_result(db, claim_id))
         )
-    run = get_run(db, run_id)
     db.execute(
         update(runs)
         .where(runs.c.run_id == run_id)
-        .values(status=status, finished_at=now(), summary=summary(run.members))
+        .values(status=status, finished_at=now())
+    )
+    run = get_run(db, run_id)
+    db.execute(
+        update(runs).where(runs.c.run_id == run_id).values(summary=summary(run.members))
     )
     return get_run(db, run_id)
 
@@ -327,18 +355,30 @@ def record_work_slice(
     """Save cumulative elapsed work without counting downtime or handler waits."""
     validate_run(db, request.run_id)
     key = work_slices.c.slice_id == slice_id
-    insert_once(
-        db,
-        work_slices,
-        {
-            "claim_id": claim_id,
-            "thread_id": thread_id,
-            "slice_id": slice_id,
-            "started_at": now(),
-            "updated_at": now(),
-            **request.model_dump(),
-        },
+    query = (
+        conflict_insert(db, work_slices)
+        .values(
+            {
+                "claim_id": claim_id,
+                "thread_id": thread_id,
+                "slice_id": slice_id,
+                "started_at": now(),
+                "updated_at": now(),
+                **request.model_dump(),
+            }
+        )
+        .on_conflict_do_update(
+            index_elements=[work_slices.c.slice_id],
+            set_={"seconds": request.seconds, "updated_at": now()},
+            where=(work_slices.c.claim_id == claim_id)
+            & (work_slices.c.thread_id == thread_id)
+            & work_slices.c.run_id.is_not_distinct_from(request.run_id)
+            & (work_slices.c.seconds < request.seconds),
+        )
+        .returning(work_slices.c.slice_id)
     )
+    if db.execute(query).first() is not None:
+        return
     row = db.execute(select(work_slices).where(key)).mappings().one()
     if (row["claim_id"], row["thread_id"], row["run_id"]) != (
         claim_id,
@@ -346,8 +386,3 @@ def record_work_slice(
         request.run_id,
     ):
         raise HTTPException(409, "Work slice belongs to another execution")
-    db.execute(
-        update(work_slices)
-        .where(key, work_slices.c.seconds < request.seconds)
-        .values(seconds=request.seconds, updated_at=now())
-    )

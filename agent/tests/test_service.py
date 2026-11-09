@@ -10,15 +10,14 @@ from api_rules import rule_breaks
 
 
 @pytest.fixture
-def serve():
+def serve(monkeypatch):
     """Run the agent's service, without its lifespan, on a given claim graph."""
 
     def with_graph(graph):
-        service.app.dependency_overrides[service.build_graph] = lambda: graph
+        monkeypatch.setattr(harness, "execution_graph", lambda: graph)
         return TestClient(service.app)
 
-    yield with_graph
-    service.app.dependency_overrides.clear()
+    return with_graph
 
 
 def resume(agent, claim_id):
@@ -90,15 +89,16 @@ def test_an_unknown_claim(serve):
     assert response.json()["detail"] == "Claim CLM-9999 not found"
 
 
-def test_sign_off_is_queued_before_current_worker_releases(client):
+def test_sign_off_is_queued_before_current_worker_releases(client, monkeypatch):
     graph = graph_on(stub(*decide("approve", 1350)))
+    monkeypatch.setattr(harness, "execution_graph", lambda: graph)
     harness.work_claim("CLM-1002", graph)
     client.post("/api/claims/CLM-1002/sign-off", json={"handler_id": "HND-01"})
     assert harness.reserve_claim("CLM-1002")
     background = BackgroundTasks()
-    assert service.resume_claim("CLM-1002", graph, background) == {"status": "accepted"}
+    assert service.resume_claim("CLM-1002", background) == {"status": "accepted"}
     with pytest.raises(HTTPException) as duplicate:
-        service.resume_claim("CLM-1002", graph, BackgroundTasks())
+        service.resume_claim("CLM-1002", BackgroundTasks())
     assert duplicate.value.status_code == 409
     harness.release_claim("CLM-1002")
     assert harness.execute_claim("CLM-1002", "other-run").startswith("Skipped:")

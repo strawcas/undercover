@@ -6,10 +6,10 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from threading import Lock
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
 import httpx
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
@@ -17,10 +17,8 @@ from starlette.concurrency import run_in_threadpool
 from agent import api, dispatcher, harness
 from agent.console import show_reports
 from agent.harness import (
-    ClaimGraph,
     carry_on,
     checkpointer,
-    execution_graph,
     queue_resume,
     release_claim,
     take_resume,
@@ -125,21 +123,12 @@ def refused(_: Request, error: api.Refused) -> JSONResponse:
     return JSONResponse({"detail": error.detail}, status_code=error.status_code)
 
 
-def build_graph(request: Request) -> ClaimGraph:
-    """Build the claim graph for one request, on the service's checkpointer."""
-    return execution_graph()
-
-
-Graph = Annotated[ClaimGraph, Depends(build_graph)]
-
-
-def resume_owned(claim_id: str, graph: ClaimGraph) -> None:
+def resume_owned(claim: dict[str, Any]) -> None:
     """Resume an already reserved claim and always release ownership."""
+    claim_id = claim["claim_id"]
     try:
         take_resume(claim_id)
-        claim = api.get_claim(claim_id)
-        if claim["status"] == api.Status.IN_PROGRESS:
-            carry_on(claim_id, graph)
+        carry_on(claim, None)
     finally:
         release_claim(claim_id)
 
@@ -151,9 +140,7 @@ def health() -> dict[str, str]:
 
 
 @app.post("/api/claims/{claim_id}/resume", operation_id="resume_claim", status_code=202)
-def resume_claim(
-    claim_id: str, graph: Graph, background: BackgroundTasks
-) -> dict[str, str]:
+def resume_claim(claim_id: str, background: BackgroundTasks) -> dict[str, str]:
     """Pick a claim back up after a handler's sign-off, without waiting for it."""
     claim = api.get_claim(claim_id)
     signed_off = claim["decision"] and claim["decision"]["signed_off_by"]
@@ -161,5 +148,5 @@ def resume_claim(
         raise HTTPException(409, f"Claim {claim_id} has no sign-off waiting to be paid")
     if not queue_resume(claim_id):
         raise HTTPException(409, f"Claim {claim_id} is already being worked")
-    background.add_task(resume_owned, claim_id, graph)
+    background.add_task(resume_owned, claim)
     return {"status": "accepted"}

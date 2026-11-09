@@ -60,6 +60,7 @@ def test_the_checkpointer_settings(monkeypatch):
         assert (kwargs["autocommit"], kwargs["prepare_threshold"]) == (True, 0)
         assert kwargs["row_factory"] is harness.dict_row
         assert kwargs["options"] == "-c search_path=undercover"
+        assert kwargs["application_name"].startswith("undercover-agent-")
         assert "undercover" in repr(pool.statements[0])
 
 

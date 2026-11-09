@@ -75,7 +75,7 @@ def test_a_claim_stopped_partway_carries_on_from_its_last_step(client):
     before = steps_of(client, "CLM-1001")
 
     model = stub(record("approve", 420.0))
-    report = harness.carry_on("CLM-1001", graph_on(model, saver))
+    report = harness.carry_on(api.get_claim("CLM-1001"), graph_on(model, saver))
     assert report == "CLM-1001  approve  $420.00"
     claim = claim_of(client, "CLM-1001")
     assert (claim["thread_id"], claim["attempts"]) == (stopped["thread_id"], 1)
@@ -99,7 +99,7 @@ def test_stopped_just_after_the_decision_is_recorded(client, monkeypatch):
     assert claim_of(client, "CLM-1001")["payment"] is None
 
     model = stub()
-    report = harness.carry_on("CLM-1001", graph_on(model, saver))
+    report = harness.carry_on(api.get_claim("CLM-1001"), graph_on(model, saver))
     assert report == "CLM-1001  approve  $420.00"
     assert claim_of(client, "CLM-1001")["payment"]["amount"] == 420.0
     assert model.prompts == []
@@ -114,7 +114,7 @@ def test_stopped_just_after_the_payment_is_recorded(client, monkeypatch):
 
     payments = calls_to(monkeypatch, "pay_claim")
     graph = graph_on(stub(), saver)
-    report = harness.carry_on("CLM-1001", graph)
+    report = harness.carry_on(api.get_claim("CLM-1001"), graph)
     assert report == "CLM-1001  approve  $420.00"
     assert payments == [("CLM-1001", 420.0)]
     assert claim_of(client, "CLM-1001")["payment"] == paid
@@ -130,7 +130,7 @@ def test_stopped_after_a_step_was_written_but_before_its_checkpoint(client):
 
     model = stub()
     graph = graph_on(model, saver)
-    report = harness.carry_on("CLM-1001", graph)
+    report = harness.carry_on(api.get_claim("CLM-1001"), graph)
     assert report == "CLM-1001  approve  $420.00"
     assert model.prompts == []
     claim = claim_of(client, "CLM-1001")
@@ -150,9 +150,31 @@ def test_stopped_on_the_way_into_the_pause_is_paid_after_the_sign_off(
         )
     client.post("/api/claims/CLM-1002/sign-off", json={"handler_id": "HND-01"})
 
-    report = harness.carry_on("CLM-1002", graph_on(stub(), saver))
+    report = harness.carry_on(api.get_claim("CLM-1002"), graph_on(stub(), saver))
     assert report == "CLM-1002  approve  $1,350.00"
     assert claim_of(client, "CLM-1002")["payment"]["signed_off_by"] == "Dana Whitfield"
+
+
+@pytest.mark.parametrize("after_write", [False, True])
+def test_signed_off_decision_resumes_before_tool_checkpoint(
+    client, monkeypatch, after_write
+):
+    saver = StopBeforeCheckpoint() if after_write else InMemorySaver()
+    if not after_write:
+        fail_once(
+            monkeypatch, api, "record_decision", KeyboardInterrupt(), carry_out=True
+        )
+    with pytest.raises(KeyboardInterrupt):
+        harness.work_claim("CLM-1002", graph_on(stub(record("approve", 1350)), saver))
+    before = claim_of(client, "CLM-1002")
+    client.post("/api/claims/CLM-1002/sign-off", json={"handler_id": "HND-01"})
+    graph = graph_on(stub(), saver)
+    assert "approve" in harness.carry_on(api.get_claim("CLM-1002"), graph)
+    claim = claim_of(client, "CLM-1002")
+    assert claim["payment"]["amount"] == 1350
+    assert claim["thread_id"] == before["thread_id"]
+    assert claim["attempts"] == 1
+    assert graph.get_state(harness.thread_of(claim)).next == ()
 
 
 def test_finished_without_a_decision_but_stopped_before_it_was_failed(
@@ -165,7 +187,7 @@ def test_finished_without_a_decision_but_stopped_before_it_was_failed(
     assert claim_of(client, "CLM-1004")["status"] == "in_progress"
 
     model = stub()
-    report = harness.carry_on("CLM-1004", graph_on(model, saver))
+    report = harness.carry_on(api.get_claim("CLM-1004"), graph_on(model, saver))
     assert report == (
         "CLM-1004  failed: The agent finished without recording a decision,"
         " back in the queue"
@@ -176,7 +198,7 @@ def test_finished_without_a_decision_but_stopped_before_it_was_failed(
 def test_a_claim_stopped_before_its_first_step_was_saved(client):
     client.post("/api/claims/CLM-1001/start", json={"thread_id": "nothing-saved"})
     model = stub(*decide("refer", 0))
-    report = harness.carry_on("CLM-1001", graph_on(model))
+    report = harness.carry_on(api.get_claim("CLM-1001"), graph_on(model))
     assert report == "CLM-1001  refer  $0.00"
     claim = claim_of(client, "CLM-1001")
     assert (claim["thread_id"], claim["attempts"]) == ("nothing-saved", 1)
@@ -188,7 +210,7 @@ def test_the_model_call_limit_holds_across_a_restart(client):
     before = 20
     stop_while_working("CLM-1004", saver, *(call("get_claim") for _ in range(before)))
     endless = StubModel(messages=(call("get_claim") for _ in itertools.count()))
-    report = harness.carry_on("CLM-1004", graph_on(endless, saver))
+    report = harness.carry_on(api.get_claim("CLM-1004"), graph_on(endless, saver))
     assert report.startswith("CLM-1004  failed: TooManyModelCalls: ")
     assert len(endless.prompts) == harness.CLAIM_MODEL_CALLS - before
 
@@ -198,7 +220,7 @@ def test_a_claim_that_fails_while_carried_on_starts_afresh_next_time(client):
     stop_while_working("CLM-1004", saver, call("get_claim"))
     stopped = claim_of(client, "CLM-1004")
     outage = stub(RuntimeError("503: The model is unavailable"))
-    report = harness.carry_on("CLM-1004", graph_on(outage, saver))
+    report = harness.carry_on(api.get_claim("CLM-1004"), graph_on(outage, saver))
     assert report == (
         "CLM-1004  failed: RuntimeError: 503: The model is unavailable,"
         " back in the queue"

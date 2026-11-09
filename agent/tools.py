@@ -19,6 +19,7 @@ class ClaimContext:
 
     claim_id: str
     run_id: str | None = None
+    signed_off: bool = False
 
 
 def keep_last(_: Any, new: Any) -> Any:

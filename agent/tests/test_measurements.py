@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import InMemorySaver
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 from agent import api, dispatcher, harness
 from agent.tests.queue_setup import leave_waiting
@@ -65,6 +65,15 @@ def test_model_node_records_usage_and_missing_metadata():
     assert rows(model_calls)[1]["cost"] is None
 
 
+def test_null_provider_usage_completes_with_unavailable_measurements():
+    reply = record("refer", 0)
+    reply.response_metadata = {"token_usage": None}
+    harness.work_claim("CLM-1001", graph_on(stub(reply)))
+    assert api.get_claim("CLM-1001")["status"] == "decided"
+    saved = rows(model_calls)[0]
+    assert saved["cost"] is saved["input_tokens"] is saved["total_tokens"] is None
+
+
 def test_active_slices_exclude_wait_and_split_run_attribution(client, monkeypatch):
     clock = itertools.count()
     monkeypatch.setattr(harness, "monotonic", lambda: next(clock))
@@ -78,7 +87,7 @@ def test_active_slices_exclude_wait_and_split_run_attribution(client, monkeypatc
     for _ in range(100):
         next(clock)
     client.post("/api/claims/CLM-1001/sign-off", json={"handler_id": "HND-01"})
-    harness.carry_on("CLM-1001", graph_on(stub(), saver), second)
+    harness.carry_on(api.get_claim("CLM-1001"), graph_on(stub(), saver), second)
     harness.work_claim("CLM-1002", graph_on(stub(record("refer", 0))))
     slices = rows(work_slices)
     assert [row["run_id"] for row in slices] == [first, second, None]
@@ -95,7 +104,9 @@ def test_failure_and_restart_keep_separate_active_slices(monkeypatch):
         harness.work_claim("CLM-1001", graph_on(stub(KeyboardInterrupt()), saver))
     for _ in range(1000):
         next(clock)
-    harness.carry_on("CLM-1001", graph_on(stub(RuntimeError("failed")), saver))
+    harness.carry_on(
+        api.get_claim("CLM-1001"), graph_on(stub(RuntimeError("failed")), saver)
+    )
     harness.work_claim("CLM-1001", graph_on(stub(record("refer", 0)), saver))
     assert len(rows(work_slices)) == 3
     assert all(row["seconds"] < 20 for row in rows(work_slices))
@@ -112,6 +123,66 @@ def test_slice_cannot_change_owner_or_shrink(client):
         "/api/claims/CLM-1002/work-slices/slice", json={"run_id": None, "seconds": 4}
     )
     assert response.status_code == 409
+
+
+def test_payment_resume_does_not_wait_for_instructions_or_telemetry(
+    client, monkeypatch
+):
+    saver = InMemorySaver()
+    harness.work_claim("CLM-1001", graph_on(stub(record("approve", 1350)), saver))
+    client.post("/api/claims/CLM-1001/sign-off", json={"handler_id": "HND-01"})
+    elapsed = [0.0]
+    monkeypatch.setattr(harness, "monotonic", lambda: elapsed[0])
+
+    def prepare():
+        elapsed[0] = 4.0
+        graph = graph_on(stub(), saver)
+        monkeypatch.setattr(graph, "get_state", unavailable)
+        return graph
+
+    def unavailable():
+        raise AssertionError("Payment needs no instructions or duplicate state read")
+
+    saved = []
+    record_slice = api.record_work_slice
+
+    def record_after_payment(*args):
+        assert api.get_claim("CLM-1001")["payment"] is not None
+        saved.append(args[-1])
+        record_slice(*args)
+
+    monkeypatch.setattr(harness, "execution_graph", prepare)
+    monkeypatch.setattr(api, "get_instructions", unavailable)
+    monkeypatch.setattr(api, "record_work_slice", record_after_payment)
+    assert "approve" in harness.carry_on(api.get_claim("CLM-1001"), None)
+    assert saved
+    assert all(seconds == 4 for seconds in saved)
+
+
+def test_work_slice_uses_one_owner_checked_monotonic_upsert(client):
+    api.start_claim("CLM-1001", "thread")
+    queries = []
+
+    def record_query(*args):
+        queries.append(args[2])
+
+    db_engine = engine()
+    event.listen(db_engine, "before_cursor_execute", record_query)
+    try:
+        counts = []
+        for seconds in (3, 5, 2, 5):
+            queries.clear()
+            api.record_work_slice("CLM-1001", "slice", None, seconds)
+            counts.append(len(queries))
+        assert counts == [2, 2, 3, 3]
+    finally:
+        event.remove(db_engine, "before_cursor_execute", record_query)
+    assert rows(work_slices)[0]["seconds"] == 5
+    run = api.start_run(configuration())["run_id"]
+    with pytest.raises(api.Refused) as refused:
+        api.record_work_slice("CLM-1001", "slice", run, 6)
+    assert refused.value.status_code == 409
+    assert rows(work_slices)[0]["run_id"] is None
 
 
 def test_dispatch_attributes_its_measurements(monkeypatch):
