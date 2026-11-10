@@ -1,6 +1,6 @@
 # Status
 
-Dispatch table work in `docs/EDIT_PLAN_1.md` is in progress. Phases 1 and 2 add customer identity and run-scoped start/completion/elapsed fields, frozen with closed outcomes and compatible with older snapshots, plus the matching dashboard contract and comparison fixtures. No schema change or reseed is needed. Fresh review caught and fixed whole-second decision/payment timestamps; all outcome timestamps now use the existing precise UTC clock. Checks pass: 225 Python tests (98.75% coverage) and 48 dashboard tests (100% statements), including deterministic Manila/UTC formatting. Table implementation and browser verification follow.
+Dispatch table work in `docs/EDIT_PLAN_1.md` is in progress. Phases 1 to 3 add the eight-column table with customer, state, decision, payout, local start, per-claim elapsed completion time and model cost. Unfinished and historical timing has explicit labels. Identity/timing freeze with closed outcomes, and older snapshots remain readable. No schema change or reseed is needed. Fresh review caught and fixed whole-second decision/payment timestamps; outcomes now use the existing precise UTC clock. Checks pass: 225 Python tests (98.75% coverage) and 59 dashboard tests (100% statements). Integration and browser verification follow.
 
 The pilot, harness and durable state builds are complete. The Swarm implementation in `docs/PLAN_SWARM.md` passes all automated checks and the final whole-branch review. Recovery, connections, evaluations and tracing have live verification; two timing observations remain open below.
 

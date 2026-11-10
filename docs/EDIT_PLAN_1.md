@@ -1,6 +1,6 @@
 # EDIT_PLAN_1: Dispatch claims table
 
-Status: implementation in progress; backend data and dashboard contract complete.
+Status: implementation in progress; backend data and table rendering complete.
 
 Replace the list under **Claims in this dispatch** on the queue page with a table. Handlers should be able to compare the claims, their outcomes, when work began, how long completion took and each claim's model cost without opening every claim.
 
@@ -103,12 +103,12 @@ Add the required fields to TypeScript and update shared fixtures before renderin
 
 Replace the ordered member list with the table, keeping the dispatch controls and summary in the existing panel. Make unfinished states legible instead of suggesting that every worker return means a resolved claim.
 
-- [ ] `RunPanel` tests find a table associated with **Claims in this dispatch**, with the eight headers in the requested order: Claim, Customer, State, Decision, Payout, Started, Time to finish and Model cost.
-- [ ] Each member produces one claim row with its customer, linked ID, state, decision, payout, start, completed duration or pending label, and model cost.
-- [ ] Approvals held for sign-off display the approval and payout alongside `Waiting for sign-off` and `Awaiting sign-off`; they do not display a completed duration.
-- [ ] Errors and skipped-member explanations remain visible within the table. No-run and no-members messages still render correctly.
-- [ ] Dispatch controls, totals and the handler summary continue to render, and the separate queue table retains its existing columns.
-- [ ] Unit tests verify the important states and zero/null distinctions. `npm run check:ts` passes.
+- [x] `RunPanel` tests find a table associated with **Claims in this dispatch**, with the eight headers in the requested order: Claim, Customer, State, Decision, Payout, Started, Time to finish and Model cost.
+- [x] Each member produces one claim row with its customer, linked ID, state, decision, payout, start, completed duration or pending label, and model cost.
+- [x] Approvals held for sign-off display the approval and payout alongside `Waiting for sign-off` and `Awaiting sign-off`; they do not display a completed duration.
+- [x] Errors and skipped-member explanations remain visible within the table. No-run and no-members messages still render correctly.
+- [x] Dispatch controls, totals and the handler summary continue to render, and the separate queue table retains its existing columns.
+- [x] Unit tests verify the important states and zero/null distinctions. `npm run check:ts` passes.
 
 ## Phase 4: Verify live updates with offline integration tests
 

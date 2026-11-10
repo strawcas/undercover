@@ -311,26 +311,19 @@ p {
   margin: 16px 0 8px;
 }
 
-.run-members {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 6px;
+.dispatch-members {
+  min-width: 1100px;
+  margin-top: 8px;
 }
 
-.run-members li {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  background: var(--inset);
-  border-radius: 10px;
-  padding: 7px 12px;
+.dispatch-members td:nth-child(2) {
+  min-width: 10rem;
 }
 
-.run-members .chip {
-  min-width: 128px;
-  text-align: center;
+.member-note {
+  max-width: 30ch;
+  overflow-wrap: anywhere;
+  margin-top: 4px;
 }
 
 .summary {
