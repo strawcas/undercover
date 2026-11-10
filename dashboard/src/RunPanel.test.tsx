@@ -178,6 +178,11 @@ const unfinished: {
   runStatus: RunStatus;
   duration: string;
 }[] = [
+  {
+    changes: { claim_status: "decided", decision: "approve", payout: 420 },
+    runStatus: "finished",
+    duration: "Unavailable",
+  },
   { changes: {}, runStatus: "running", duration: "Not started" },
   {
     changes: { status: "skipped" },

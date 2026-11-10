@@ -153,11 +153,12 @@ def test_unfinished_members_do_not_invent_completion(client, clock, state):
 
 
 @pytest.mark.parametrize("measured", [False, True])
+@pytest.mark.parametrize("decision", ["approve", "decline"])
 @pytest.mark.parametrize(
     "completion", [END, "2026-11-10T08:00:00+00:00", "2026-11-10T11:00:00+00:00"]
 )
 def test_legacy_snapshots_use_bulk_identity_and_only_in_run_timing(
-    client, clock, measured, completion
+    client, clock, measured, completion, decision
 ):
     run_id = start(client).json()["run_id"]
     member(client, run_id, CLAIM_ID)
@@ -166,7 +167,9 @@ def test_legacy_snapshots_use_bulk_identity_and_only_in_run_timing(
     if measured:
         work(client, run_id)
     clock(completion)
-    decide(client, CLAIM_ID, "decline", 0)
+    decide(client, CLAIM_ID, decision, 420 if decision == "approve" else 0)
+    if decision == "approve":
+        pay(client, CLAIM_ID, 420)
     clock("2026-11-10T10:01:00+00:00")
     client.post(f"/api/runs/{run_id}/finish")
     make_legacy(run_id)

@@ -1,6 +1,6 @@
 # EDIT_PLAN_1: Dispatch claims table
 
-Status: implementation in progress; phases 1 to 4 complete, final visual verification remains.
+Status: complete; all five phases implemented, reviewed and verified.
 
 Replace the list under **Claims in this dispatch** on the queue page with a table. Handlers should be able to compare the claims, their outcomes, when work began, how long completion took and each claim's model cost without opening every claim.
 
@@ -124,12 +124,19 @@ Use the existing polling behavior and agent-service stand-in to demonstrate the 
 
 Check the actual table at desktop and phone sizes, then update the product documentation with the final timing definition. Follow the implementation review and commit process in `docs/PROCESS.md`.
 
-- [ ] Inspect the isolated test/preview app through Playwright MCP at desktop width and 390px, in light and dark mode. All columns remain reachable inside the table's scroll area, and the document itself does not overflow horizontally.
-- [ ] Verify readable customer names, keyboard-accessible claim links, semantic headers, the local-time note, brand fonts/colors and right-aligned monetary values. Browser console shows no unexpected errors.
-- [ ] A fresh reviewing subagent checks each implementation phase against `CODE_STANDARDS.md` and the diff; blocking findings are fixed before committing. Review the complete change against its starting revision before handover.
-- [ ] Update `docs/STATUS.md` and the relevant visibility/timing description in `docs/TECH_STACK.md`, and tick this plan's verified criteria. Preserve the existing historical live-run evidence and unresolved Swarm timing checks.
-- [ ] Run `npm run check` with offline fixtures and the existing thresholds, using the established temporary `.env` isolation/restoration procedure for the final check. Report actual results and any unverified criterion.
-- [ ] Commit the checked implementation phases with hooks enabled. Do not push.
+- [x] Inspect the isolated test/preview app through Playwright MCP at desktop width and 390px, in light and dark mode. All columns remain reachable inside the table's scroll area, and the document itself does not overflow horizontally.
+- [x] Verify readable customer names, keyboard-accessible claim links, semantic headers, the local-time note, brand fonts/colors and right-aligned monetary values. Browser console shows no unexpected errors.
+- [x] A fresh reviewing subagent checks each implementation phase against `CODE_STANDARDS.md` and the diff; blocking findings are fixed before committing. Review the complete change against its starting revision before handover.
+- [x] Update `docs/STATUS.md` and the relevant visibility/timing description in `docs/TECH_STACK.md`, and tick this plan's verified criteria. Preserve the existing historical live-run evidence and unresolved Swarm timing checks.
+- [x] Run `npm run check` with offline fixtures and the existing thresholds, using the established temporary `.env` isolation/restoration procedure for the final check. Report actual results and any unverified criterion.
+- [x] Commit the checked implementation phases with hooks enabled. Do not push.
+
+### Verification record
+
+- Phases 1 to 4 were already committed before the PC crash: `f80e13b`, `488d9c9`, `8b4f0f0` and `ccb0c22`. Recovery verified those commits and resumed phase 5 without rebuilding them. The interrupted check's `.env` backup was restored with a hash check.
+- The final full check exited 0: 231 Python tests (98.75% coverage), 61 dashboard tests (100% statements), and 8 e2e tests. `.env` was isolated for this check and restored byte for byte afterward.
+- Playwright MCP inspected 1440px and 390px in both color schemes using the preserved isolated preview database. Document width stayed within the viewport; keyboard arrows scrolled the table and Enter opened the focused claim link. Fonts loaded, numeric cells aligned right, all headers had column scope, and no unexpected console errors occurred during inspection. Temporary preview servers were stopped afterward.
+- Fresh phase and complete-change reviews resolved timestamp precision and a historical paid-approval label: completed approvals with missing timing show `Unavailable`, rather than `Awaiting payment`. No blocking findings remain. No model calls, business-database reseed or model configuration changes were needed; the existing unresolved Swarm live checks remain outside this change.
 
 ## Scope and execution
 

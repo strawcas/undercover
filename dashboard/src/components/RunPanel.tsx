@@ -156,10 +156,10 @@ function completionTime(member: RunMember, status: RunStatus): string {
     return "Not worked";
   if (member.claim_status === "waiting_for_sign_off")
     return "Awaiting sign-off";
+  if (member.claim_status === "decided") return UNAVAILABLE;
   if (member.decision === "approve" && member.finished_at === null)
     return "Awaiting payment";
   if (member.claim_status === "left_for_handler") return "Needs handler";
-  if (member.claim_status === "decided") return UNAVAILABLE;
   if (unstarted(member)) return NOT_STARTED;
   return status === "running" ? "In progress" : "Not completed";
 }

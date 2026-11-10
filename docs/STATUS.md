@@ -1,6 +1,6 @@
 # Status
 
-Dispatch table work in `docs/EDIT_PLAN_1.md` is in progress. Phases 1 to 4 add the eight-column table with customer, state, decision, payout, local start, per-claim elapsed completion time and model cost. Unfinished and historical timing has explicit labels. Identity/timing freeze with closed outcomes, and older snapshots remain readable. No schema change or reseed is needed. Fresh review caught and fixed whole-second decision/payment timestamps; outcomes now use the existing precise UTC clock. Checks pass: 225 Python tests (98.75% coverage), 60 dashboard tests (100% statements) and all 8 isolated e2e tests, including in-place table updates and held approvals. Final visual verification follows.
+The dispatch table in `docs/EDIT_PLAN_1.md` is complete. Its eight columns show the linked claim, customer, state, decision, payout, local start, per-claim elapsed completion time and model cost. Timing uses the first work slice in this run through decision time for declines/referrals or payment time for approvals. Held and incomplete work has explicit labels. Identity/timing freeze with closed outcomes; older snapshots remain readable and missing historical timing stays unavailable. No migration or business-database reseed is needed.
 
 The pilot, harness and durable state builds are complete. The Swarm implementation in `docs/PLAN_SWARM.md` passes all automated checks and the final whole-branch review. Recovery, connections, evaluations and tracing have live verification; two timing observations remain open below.
 
@@ -26,7 +26,13 @@ The pilot, harness and durable state builds are complete. The Swarm implementati
 
 ## Checks and reviews
 
-Latest full `npm run check` passed with `.env` temporarily absent and restored afterward: 203 Python tests (98.73% coverage), 46 Vitest tests (100% statements), and 8 Playwright e2e tests. Existing thresholds/rules are unchanged. Stub models, SQLite, in-memory checkpoints and service/Langfuse stand-ins keep automated checks offline.
+Latest full `npm run check` passed with `.env` temporarily absent and restored byte for byte afterward: 231 Python tests (98.75% coverage), 61 Vitest tests (100% statements), and 8 Playwright e2e tests. Existing thresholds/rules are unchanged. Stub models, SQLite, in-memory checkpoints and service/Langfuse stand-ins keep automated checks offline.
+
+Dispatch-table phase reviews and the complete-change review against starting revision `6f3d4dc` found and fixed whole-second outcome timestamps and a misleading historical paid-approval label. Outcomes now use the existing precise UTC clock; a completed approval with unavailable timing says `Unavailable`. Tests cover exact 42.5-second duration, retries, separate dispatches, paid/held/unpaid outcomes, legacy snapshots, frozen results, fixed query counts, zero/null formatting and in-place row updates. The broader diff against `main` includes inherited course/Swarm work.
+
+Playwright MCP inspected the table at 1440px and 390px in light and dark mode. All columns remained reachable within the scroll area without document overflow; keyboard arrows scrolled it and Enter followed a claim link. Fonts, colors, semantic headers, local-time guidance and right-aligned monetary values were verified. No unexpected browser console errors occurred during inspection. The isolated preview servers are stopped.
+
+After the PC crash, the four completed implementation commits were verified and only unfinished phase 5 resumed. The interrupted check's `.env` backup was restored with matching bytes before verification continued. Model configuration and business records were preserved, with no real model calls. All table-plan criteria are verified; the separate historical Swarm timing observations below remain open.
 
 Fresh reviews found and fixed missing run attribution, unsafe measurement replay, telemetry exceptions bypassing settlement, a sign-off handoff race, setup/read failures bypassing retry, omitted checkpoint preparation time, stale live snapshots, writes to closed run measurements and plain-text service errors. Reviews also required stronger same-event-loop, cleanup and in-place polling regressions. All phase 1 to 5 blockers were resolved before their commits.
 
