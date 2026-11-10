@@ -2,7 +2,6 @@
 
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -11,6 +10,7 @@ from sqlalchemy import Connection, RowMapping, insert, select, update
 
 from backend import agent_service, evaluations
 from backend import runs as run_records
+from backend.clock import now
 from backend.database import (
     claim_view,
     claims,
@@ -111,11 +111,6 @@ def list_evaluations(db: Database) -> list[Evaluation]:
 def get_evaluation(run_id: str, db: Database) -> EvaluationDetail:
     """Compare the agent's results with handler labels on isolated copies."""
     return evaluations.get_evaluation(db, run_id)
-
-
-def now() -> str:
-    """Return the current time in UTC, to the second."""
-    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def dollars(amount: float) -> str:

@@ -10,3 +10,13 @@ def configuration(**overrides):
         "set_name": None,
         "tiny": None,
     } | overrides
+
+
+def start(client, **overrides):
+    return client.post("/api/runs", json=configuration(**overrides))
+
+
+def member(client, run_id, claim_id, status="selected", error=None):
+    return client.put(
+        f"/api/runs/{run_id}/claims/{claim_id}", json={"status": status, "error": error}
+    )

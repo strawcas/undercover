@@ -259,6 +259,7 @@ MemberStatus = Literal["selected", "finished", "skipped", "in_progress"]
 
 class RunMember(BaseModel):
     claim_id: str
+    customer_name: str
     status: MemberStatus
     error: str | None
     claim_status: Status
@@ -267,6 +268,9 @@ class RunMember(BaseModel):
     reason: str | None
     llm_cost: float | None
     active_seconds: float
+    started_at: str | None
+    finished_at: str | None
+    elapsed_seconds: float | None
 
 
 class Run(BaseModel):

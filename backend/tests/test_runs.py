@@ -2,21 +2,12 @@
 
 from concurrent.futures import ThreadPoolExecutor
 
-from sqlalchemy import event, update
+import pytest
+from sqlalchemy import event, select, update
 
 from backend import runs
-from backend.database import claims, engine
-from backend.tests.run_requests import configuration
-
-
-def start(client, **overrides):
-    return client.post("/api/runs", json=configuration(**overrides))
-
-
-def member(client, run_id, claim_id, status="selected", error=None):
-    return client.put(
-        f"/api/runs/{run_id}/claims/{claim_id}", json={"status": status, "error": error}
-    )
+from backend.database import claims, engine, run_claims
+from backend.tests.run_requests import member, start
 
 
 def test_run_lifecycle_and_frozen_results(client):
@@ -106,12 +97,39 @@ def test_running_members_are_live_and_closed_measurements_are_refused(client):
     )
 
 
-def test_run_read_query_count_does_not_grow_with_swarm_size(client):
+@pytest.mark.parametrize("lifecycle", ["running", "finished", "legacy"])
+def test_run_read_query_count_does_not_grow_with_swarm_size(client, lifecycle):
     counts = []
     for size in (1, 25):
         run_id = start(client).json()["run_id"]
         for claim in client.get("/api/claims").json()[:size]:
             member(client, run_id, claim["claim_id"])
+        if lifecycle != "running":
+            client.post(f"/api/runs/{run_id}/finish")
+        if lifecycle == "legacy":
+            with engine().begin() as db:
+                for saved in db.execute(
+                    select(run_claims).where(run_claims.c.run_id == run_id)
+                ).mappings():
+                    old = {
+                        key: value
+                        for key, value in saved["result"].items()
+                        if key
+                        not in (
+                            "customer_name",
+                            "started_at",
+                            "finished_at",
+                            "elapsed_seconds",
+                        )
+                    }
+                    db.execute(
+                        update(run_claims)
+                        .where(
+                            run_claims.c.run_id == run_id,
+                            run_claims.c.claim_id == saved["claim_id"],
+                        )
+                        .values(result=old)
+                    )
         queries = []
 
         def record_query(*args, recorded=queries):

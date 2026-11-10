@@ -68,14 +68,16 @@ def measured_work(db: Connection, run_id: str) -> dict[str, dict[str, Any]]:
             "active_seconds": 0.0,
         }
     slices = select(
-        work_slices.c.claim_id, func.sum(work_slices.c.seconds).label("seconds")
+        work_slices.c.claim_id,
+        func.sum(work_slices.c.seconds).label("seconds"),
+        func.min(work_slices.c.started_at).label("started_at"),
     )
     for row in db.execute(
         slices.where(work_slices.c.run_id == run_id).group_by(work_slices.c.claim_id)
     ).mappings():
-        work.setdefault(row["claim_id"], {"llm_cost": 0.0})["active_seconds"] = row[
-            "seconds"
-        ]
+        work.setdefault(row["claim_id"], {"llm_cost": 0.0}).update(
+            active_seconds=row["seconds"], started_at=row["started_at"]
+        )
     return work
 
 
@@ -83,10 +85,13 @@ def claim_results(db: Connection, claim_ids: list[str]) -> dict[str, dict[str, A
     """Read actual outcomes in one query without claim payloads or expected labels."""
     query = claim_view.with_only_columns(
         claims.c.claim_id,
+        claim_view.selected_columns.customer_name,
         claims.c.status.label("claim_status"),
         claim_view.selected_columns.decision,
         claim_view.selected_columns.payout,
         claim_view.selected_columns.reason,
+        claim_view.selected_columns.decided_at,
+        claim_view.selected_columns.paid_at,
     ).where(claims.c.claim_id.in_(claim_ids))
     return {row["claim_id"]: dict(row) for row in db.execute(query).mappings()}
 
@@ -109,23 +114,55 @@ def members(
         .order_by(run_claims.c.position)
     )
     records = list(db.execute(query).mappings())
-    live = (
-        claim_results(db, [member["claim_id"] for member in records])
-        if row["status"] == "running"
-        else {}
-    )
-    return [
-        RunMember(
-            **dict(member)
-            | (
-                live[member["claim_id"]]
-                if row["status"] == "running"
-                else member["result"]
-            )
-            | work.get(member["claim_id"], {"llm_cost": 0.0, "active_seconds": 0.0})
-        )
+    refresh = [
+        member["claim_id"]
         for member in records
+        if row["status"] == "running" or "elapsed_seconds" not in member["result"]
     ]
+    live = claim_results(db, refresh) if refresh else {}
+    items = []
+    for member in records:
+        claim_id = member["claim_id"]
+        measured = work.get(claim_id, {"llm_cost": 0.0, "active_seconds": 0.0})
+        result = live.get(claim_id, {})
+        if row["status"] != "running":
+            result = result | member["result"]
+        if claim_id in refresh:
+            result = result | member_timing(row, result, measured.get("started_at"))
+        items.append(
+            RunMember(
+                **dict(member)
+                | result
+                | {key: measured[key] for key in ("llm_cost", "active_seconds")}
+            )
+        )
+    return items
+
+
+def member_timing(
+    run: Any, result: dict[str, Any], started_at: str | None
+) -> dict[str, Any]:
+    """Use only work and completed outcomes within this dispatch's interval."""
+    lower = datetime.fromisoformat(run["started_at"])
+    upper = datetime.fromisoformat(run["finished_at"] or now())
+    started = datetime.fromisoformat(started_at) if started_at else None
+    if started is not None and not lower <= started <= upper:
+        started_at, started = None, None
+    finished_at = (
+        result["paid_at"] if result["decision"] == "approve" else result["decided_at"]
+    )
+    finished = datetime.fromisoformat(finished_at) if finished_at else None
+    if result["claim_status"] != "decided" or (
+        finished is not None and not (started or lower) <= finished <= upper
+    ):
+        finished_at, finished = None, None
+    return {
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "elapsed_seconds": (finished - started).total_seconds()
+        if started is not None and finished is not None
+        else None,
+    }
 
 
 def get_run(db: Connection, run_id: str) -> Run:
@@ -264,20 +301,21 @@ def summary(items: list[RunMember]) -> str:
 
 def finish_run(db: Connection, run_id: str, status: str = "finished") -> Run:
     """Freeze every selected outcome and build the final summary."""
-    running(db, run_id)
-    ids = db.execute(
-        select(run_claims.c.claim_id).where(run_claims.c.run_id == run_id)
-    ).scalars()
-    for claim_id in ids:
+    row = dict(running(db, run_id)) | {"finished_at": now()}
+    snapshots = members(db, row, measured_work(db, run_id))
+    for member in snapshots:
         db.execute(
             update(run_claims)
-            .where(run_claims.c.run_id == run_id, run_claims.c.claim_id == claim_id)
-            .values(result=member_result(db, claim_id))
+            .where(
+                run_claims.c.run_id == run_id,
+                run_claims.c.claim_id == member.claim_id,
+            )
+            .values(result=member.model_dump())
         )
     db.execute(
         update(runs)
         .where(runs.c.run_id == run_id)
-        .values(status=status, finished_at=now())
+        .values(status=status, finished_at=row["finished_at"])
     )
     run = get_run(db, run_id)
     db.execute(
