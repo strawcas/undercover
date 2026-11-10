@@ -258,20 +258,63 @@ it("shows stopped runs, skips, errors and unavailable cost", async () => {
   expect(view.getByText(/Already being resumed/)).toBeDefined();
   expect(view.getByText("Timeout")).toBeDefined();
 });
-it("refreshes progress and the records-built summary", async () => {
+it("shows a dispatch with no selected claims", async () => {
+  showQueue({ ...running, members: [] });
+  const view = await panel("Current run");
+  expect(await view.findByText("No claims selected.")).toBeDefined();
+  expect(view.queryByRole("table")).toBeNull();
+});
+
+it("refreshes the same row from selected through work to completion", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const routes = showQueue(running);
   const view = await panel("Current run");
   expect(await view.findByText("Waiting")).toBeDefined();
+  const table = within(
+    view.getByRole("table", { name: "Claims in this dispatch" }),
+  );
+  const row = table.getAllByRole("row")[1];
+  expect(within(row).getAllByRole("cell")[6].textContent).toBe("Not started");
+  const working: RunMember = {
+    ...running.members[0],
+    claim_status: "in_progress",
+    status: "in_progress",
+    started_at: running.started_at,
+    active_seconds: 7,
+    llm_cost: 0.000123,
+  };
+  routes["GET /api/runs/latest"] = { ...running, members: [working] };
+  await act(() => vi.advanceTimersByTimeAsync(REFRESH_MS));
+  expect(row.querySelector("time")?.getAttribute("datetime")).toBe(
+    running.started_at,
+  );
+  expect(within(row).getAllByRole("cell")[6].textContent).toBe("In progress");
   routes["GET /api/runs/latest"] = {
     ...running,
     status: "finished",
     finished_at: "2026-09-29T17:03:00+00:00",
     summary: "Worked 1 claim: 1 referred.",
-    members: [],
+    members: [
+      {
+        ...working,
+        status: "finished",
+        claim_status: "decided",
+        decision: "refer",
+        payout: 0,
+        finished_at: "2026-09-29T17:02:55.500+00:00",
+        elapsed_seconds: 42.5,
+        llm_cost: 0.000456,
+      },
+    ],
   };
   await act(() => vi.advanceTimersByTimeAsync(REFRESH_MS));
   expect(view.getByText("Finished")).toBeDefined();
-  expect(view.getByText("No claims selected.")).toBeDefined();
+  expect(table.getAllByRole("row")[1]).toBe(row);
+  expect(within(row).getByText("Referred")).toBeDefined();
+  expect(within(row).getByText("42.5 s")).toBeDefined();
+  expect(within(row).getByText("$0.000456")).toBeDefined();
   expect(view.getByText("Worked 1 claim: 1 referred.")).toBeDefined();
+  expect(new Set(vi.mocked(fetch).mock.calls.map(([path]) => path))).toEqual(
+    new Set(["/api/claims", "/api/runs/latest", "/api/runs/active"]),
+  );
 });

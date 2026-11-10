@@ -5,7 +5,10 @@ test("the queue lists every claim", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Claims queue" }),
   ).toBeVisible();
-  await expect(page.locator("tbody tr")).toHaveCount(25);
+  const queue = page.getByRole("table").filter({
+    has: page.getByRole("columnheader", { name: "Claimed", exact: true }),
+  });
+  await expect(queue.locator("tbody tr")).toHaveCount(25);
   const last = page.getByRole("row").filter({ hasText: "CLM-1025" });
   await expect(last.getByText("Waiting")).toBeVisible();
 });

@@ -27,14 +27,60 @@ test("the queue shows dispatch members and a records-built summary", async ({
     tiny: null,
   });
   const { run_id } = (await response.json()) as { run_id: string };
-  await put(request, `/api/runs/${run_id}/claims/CLM-1013`, {
-    status: "selected",
-    error: null,
+  await put(request, `/api/runs/${run_id}/selection`, {
+    claim_ids: ["CLM-1013", "CLM-1014"],
   });
-  await expect(panel.getByRole("link", { name: "CLM-1013" })).toBeVisible();
+  const table = panel.getByRole("table", { name: "Claims in this dispatch" });
+  await expect(table.getByRole("columnheader")).toHaveText([
+    "Claim",
+    "Customer",
+    "State",
+    "Decision",
+    "Payout",
+    "Started",
+    "Time to finish",
+    "Model cost",
+  ]);
+  const row = table.getByRole("row").filter({ hasText: "CLM-1013" });
+  const original = await request.get("/api/claims/CLM-1013");
+  const { customer_name } = (await original.json()) as {
+    customer_name: string;
+  };
+  await expect(row.getByRole("cell").nth(1)).toHaveText(customer_name);
+  await expect(row.getByRole("cell").nth(6)).toHaveText("Not started");
   await post(request, "/api/claims/CLM-1013/start", {
     thread_id: "dispatch-e2e",
   });
+  await put(request, "/api/claims/CLM-1013/work-slices/dispatch-work", {
+    run_id,
+    seconds: 10,
+  });
+  await post(request, "/api/claims/CLM-1013/model-calls", {
+    run_id,
+    reply_id: "dispatch-reply",
+    input_tokens: 10,
+    output_tokens: 5,
+    total_tokens: 15,
+    cost: 0.000123,
+  });
+  await expect(row.getByRole("cell").nth(6)).toHaveText("In progress");
+  await expect(row.locator("time")).toHaveAttribute("datetime", /T/);
+  await expect(row.getByRole("cell").nth(7)).toHaveText("$0.000123");
+  await post(request, "/api/claims/CLM-1014/start", {
+    thread_id: "held-dispatch-e2e",
+  });
+  await put(request, "/api/claims/CLM-1014/work-slices/held-work", {
+    run_id,
+    seconds: 5,
+  });
+  await post(request, "/api/claims/CLM-1014/decision", {
+    decision: "approve",
+    payout: 1350,
+    section: "3",
+    reason: "Covered, needs sign-off",
+  });
+  const held = table.getByRole("row").filter({ hasText: "CLM-1014" });
+  await expect(held.getByRole("cell").nth(6)).toHaveText("Awaiting sign-off");
   await post(request, "/api/claims/CLM-1013/decision", {
     decision: "refer",
     payout: 0,
@@ -43,8 +89,14 @@ test("the queue shows dispatch members and a records-built summary", async ({
   });
   await post(request, `/api/runs/${run_id}/finish`, {});
   await expect(panel.getByText("Finished", { exact: true })).toBeVisible();
+  await expect(row.getByRole("cell").nth(3)).toHaveText("Referred");
+  await expect(row.getByRole("cell").nth(4)).toHaveText("$0.00");
+  await expect(row.getByRole("cell").nth(6)).toHaveText(/^\d+\.\d s$/);
+  await expect(row.getByRole("cell").nth(7)).toHaveText("$0.000123");
+  await expect(held.getByRole("cell").nth(6)).toHaveText("Awaiting sign-off");
+  await expect(held.getByRole("cell").nth(4)).toHaveText("$1,350.00");
   await expect(
-    panel.getByText("Worked 1 claim: 0 approved, 0 declined, 1 referred."),
+    panel.getByText(/Worked 2 claims: 1 approved, 0 declined, 1 referred\./),
   ).toBeVisible();
   await panel.getByRole("link", { name: "CLM-1013" }).click();
   await expect(page).toHaveURL("/claims/CLM-1013");

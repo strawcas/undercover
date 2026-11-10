@@ -1,6 +1,6 @@
 # EDIT_PLAN_1: Dispatch claims table
 
-Status: implementation in progress; backend data and table rendering complete.
+Status: implementation in progress; phases 1 to 4 complete, final visual verification remains.
 
 Replace the list under **Claims in this dispatch** on the queue page with a table. Handlers should be able to compare the claims, their outcomes, when work began, how long completion took and each claim's model cost without opening every claim.
 
@@ -114,11 +114,11 @@ Replace the ordered member list with the table, keeping the dispatch controls an
 
 Use the existing polling behavior and agent-service stand-in to demonstrate the table changing in place. These checks exercise the user flow without changing the student's current queue or calling a model.
 
-- [ ] A dashboard polling test changes a row from selected to in progress to completed without remounting; its start appears when available and its final outcome, duration and cost appear on refresh.
-- [ ] Existing slow-request tests still prove that polling does not overlap requests. The table adds no per-claim network requests or separate polling loop.
-- [ ] Extend `e2e/run.spec.ts` to locate the dispatch table separately from the queue table, assert its headers and customer, record work and cost through the test API, complete a claim and observe the resulting row without reloading.
-- [ ] The e2e test follows the claim link successfully and still verifies the records-built summary. A held or unfinished claim does not show a false completed duration.
-- [ ] `npm run e2e` passes against its independent SQLite backend and agent-service stand-in. Evaluation/Scoreboard regressions pass with the extended member contract.
+- [x] A dashboard polling test changes a row from selected to in progress to completed without remounting; its start appears when available and its final outcome, duration and cost appear on refresh.
+- [x] Existing slow-request tests still prove that polling does not overlap requests. The table adds no per-claim network requests or separate polling loop.
+- [x] Extend `e2e/run.spec.ts` to locate the dispatch table separately from the queue table, assert its headers and customer, record work and cost through the test API, complete a claim and observe the resulting row without reloading.
+- [x] The e2e test follows the claim link successfully and still verifies the records-built summary. A held or unfinished claim does not show a false completed duration.
+- [x] `npm run e2e` passes against its independent SQLite backend and agent-service stand-in. Evaluation/Scoreboard regressions pass with the extended member contract.
 
 ## Phase 5: Review, visual verification and handover
 
