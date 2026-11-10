@@ -27,6 +27,7 @@ const running: Run = {
   members: [
     {
       claim_id: "CLM-1001",
+      customer_name: "Maya Patel",
       status: "selected",
       error: null,
       claim_status: "waiting",
@@ -35,6 +36,9 @@ const running: Run = {
       reason: null,
       llm_cost: 0,
       active_seconds: 0,
+      started_at: null,
+      finished_at: null,
+      elapsed_seconds: null,
     },
   ],
 };

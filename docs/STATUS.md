@@ -1,6 +1,6 @@
 # Status
 
-Dispatch table work in `docs/EDIT_PLAN_1.md` is in progress. Phase 1 adds customer identity and run-scoped start/completion/elapsed fields, frozen with closed outcomes and compatible with older snapshots. No schema change or reseed is needed. Fresh review caught and fixed whole-second decision/payment timestamps; all outcome timestamps now use the existing precise UTC clock. Table implementation and browser verification follow.
+Dispatch table work in `docs/EDIT_PLAN_1.md` is in progress. Phases 1 and 2 add customer identity and run-scoped start/completion/elapsed fields, frozen with closed outcomes and compatible with older snapshots, plus the matching dashboard contract and comparison fixtures. No schema change or reseed is needed. Fresh review caught and fixed whole-second decision/payment timestamps; all outcome timestamps now use the existing precise UTC clock. Checks pass: 225 Python tests (98.75% coverage) and 48 dashboard tests (100% statements), including deterministic Manila/UTC formatting. Table implementation and browser verification follow.
 
 The pilot, harness and durable state builds are complete. The Swarm implementation in `docs/PLAN_SWARM.md` passes all automated checks and the final whole-branch review. Recovery, connections, evaluations and tracing have live verification; two timing observations remain open below.
 

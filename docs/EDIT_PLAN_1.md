@@ -1,6 +1,6 @@
 # EDIT_PLAN_1: Dispatch claims table
 
-Status: implementation in progress; backend identity and timing complete.
+Status: implementation in progress; backend data and dashboard contract complete.
 
 Replace the list under **Claims in this dispatch** on the queue page with a table. Handlers should be able to compare the claims, their outcomes, when work began, how long completion took and each claim's model cost without opening every claim.
 
@@ -94,10 +94,10 @@ Extend the run response and its existing queries first so the table can consume 
 
 Add the required fields to TypeScript and update shared fixtures before rendering them. Reuse the existing formatters so payouts and tiny model costs stay consistent with the rest of the product.
 
-- [ ] All `RunMember` and inherited comparison fixtures include the new fields, and strict TypeScript checking passes.
-- [ ] The table can distinguish a missing payout from `$0.00`, and a missing model cost from `$0.000000`.
-- [ ] Formatting checks cover a local start timestamp and a completed duration of `42.5 s`. Timezone assertions are deterministic rather than depending on the developer's local timezone.
-- [ ] `npm run check:ts` passes with the existing coverage thresholds.
+- [x] All `RunMember` and inherited comparison fixtures include the new fields, and strict TypeScript checking passes.
+- [x] The table can distinguish a missing payout from `$0.00`, and a missing model cost from `$0.000000`.
+- [x] Formatting checks cover a local start timestamp and a completed duration of `42.5 s`. Timezone assertions are deterministic rather than depending on the developer's local timezone.
+- [x] `npm run check:ts` passes with the existing coverage thresholds.
 
 ## Phase 3: Render the eight-column dispatch table
 

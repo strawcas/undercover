@@ -119,6 +119,7 @@ export interface Step {
 export type RunStatus = "running" | "finished" | "stopped";
 export interface RunMember {
   claim_id: string;
+  customer_name: string;
   status: "selected" | "finished" | "skipped" | "in_progress";
   error: string | null;
   claim_status: Status;
@@ -127,6 +128,9 @@ export interface RunMember {
   reason: string | null;
   llm_cost: number | null;
   active_seconds: number;
+  started_at: string | null;
+  finished_at: string | null;
+  elapsed_seconds: number | null;
 }
 export interface Run {
   run_id: string;

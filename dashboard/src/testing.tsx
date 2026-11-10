@@ -129,6 +129,7 @@ export const history: PreviousClaim[] = [
 const comparisonFixtures: EvaluationDetail["comparisons"] = [
   {
     claim_id: "EVAL-1",
+    customer_name: "Maya Patel",
     source_id: "CLM-1001",
     status: "finished",
     error: null,
@@ -138,6 +139,9 @@ const comparisonFixtures: EvaluationDetail["comparisons"] = [
     reason: "The policy excludes this event.",
     llm_cost: 0.001,
     active_seconds: 20,
+    started_at: "2026-11-09T01:00:00Z",
+    finished_at: "2026-11-09T01:00:20Z",
+    elapsed_seconds: 20,
     handler_decision: "approve",
     handler_payout: 420,
     right_decision: false,
@@ -146,6 +150,7 @@ const comparisonFixtures: EvaluationDetail["comparisons"] = [
   },
   {
     claim_id: "EVAL-2",
+    customer_name: "Tom Becker",
     source_id: "CLM-1002",
     status: "selected",
     error: "Interrupted",
@@ -155,6 +160,9 @@ const comparisonFixtures: EvaluationDetail["comparisons"] = [
     reason: null,
     llm_cost: null,
     active_seconds: 0,
+    started_at: null,
+    finished_at: null,
+    elapsed_seconds: null,
     handler_decision: "refer",
     handler_payout: 0,
     right_decision: true,
