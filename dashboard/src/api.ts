@@ -138,6 +138,7 @@ export interface Run {
   kind: "dispatch" | "evaluation";
   concurrency: number;
   model: string;
+  configuration_version: number;
   reasoning_effort: string | null;
   set_name: "evaluation" | "held_out" | null;
   tiny: boolean | null;
@@ -150,8 +151,54 @@ export interface Run {
   active_seconds: number;
   seconds: number;
 }
-export interface Instructions {
-  claim: string;
+export interface Configuration {
+  version: number;
+  parent_version: number | null;
+  instructions: string;
+  model: string;
+  reasoning_effort: string;
+  reason: string;
+  proposed_by: string;
+  approved_by: string | null;
+  approved_at: string | null;
+  created_at: string;
+  prompt: string;
+}
+export interface ConfigurationHistory extends Configuration {
+  diff: string;
+  held_out_scores: Scores | null;
+}
+export interface Objectives {
+  accuracy: number;
+  grade: number;
+}
+export interface Measures extends Objectives {
+  cost_per_claim: number;
+  seconds_per_claim: number;
+}
+export interface PlatformSettings {
+  payout_approval_limit: number;
+  objectives: Objectives;
+  noise: Measures;
+  tolerance: Measures;
+  spending_limit: number;
+  concurrency: number;
+}
+export interface AllowedModel {
+  reasoning_efforts: string[];
+  input_price: number;
+  output_price: number;
+}
+export interface SettingsView {
+  values: PlatformSettings;
+  models_allowed: Record<string, AllowedModel>;
+  changes: {
+    id: number;
+    handler: string;
+    changed_at: string;
+    before: PlatformSettings;
+    after: PlatformSettings;
+  }[];
 }
 
 export type EvaluationSet = "evaluation" | "held_out";
@@ -231,6 +278,8 @@ const claimPath = (claimId: string) =>
   `/api/claims/${encodeURIComponent(claimId)}`;
 
 const evaluationsPath = "/api/evaluations";
+const configurationsPath = "/api/configurations";
+const settingsPath = "/api/settings";
 
 export const api = {
   getCurrentHandler: () => request<Handler>("/api/me"),
@@ -244,7 +293,18 @@ export const api = {
     request<PreviousClaim[]>(
       `/api/customers/${encodeURIComponent(customerId)}/claims`,
     ),
-  getInstructions: () => request<Instructions>("/api/instructions"),
+  getCurrentConfiguration: () =>
+    request<Configuration>(`${configurationsPath}/current`),
+  listConfigurations: () => request<ConfigurationHistory[]>(configurationsPath),
+  getConfiguration: (version: number) =>
+    request<Configuration>(`${configurationsPath}/${String(version)}`),
+  getSettings: () => request<SettingsView>(settingsPath),
+  changeSettings: (values: PlatformSettings) =>
+    request<SettingsView>(settingsPath, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(values),
+    }),
   listHandlers: () => request<Handler[]>("/api/handlers"),
   getLatestRun: () => request<Run | null>("/api/runs/latest"),
   getActiveRun: () => request<Run | null>("/api/runs/active"),

@@ -28,8 +28,9 @@ export function EvaluationSummary({ run }: Readonly<{ run: Evaluation }>) {
         · {run.members.length} claims · N={run.concurrency}
       </p>
       <p className="small">
-        Model: <span className="mono">{run.model}</span> · Reasoning:{" "}
-        {run.reasoning_effort ?? "None"}
+        Configuration version {run.configuration_version} · Model:{" "}
+        <span className="mono">{run.model}</span> · Reasoning:{" "}
+        {run.reasoning_effort ?? "default"}
       </p>
       <p className="muted small">
         Started {timestamp(run.started_at)}

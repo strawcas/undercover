@@ -25,7 +25,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme]) {
     --page: #04232e;
     --panel: #000000;
     --inset: #0a1d24;
@@ -651,4 +651,85 @@ button:disabled {
 .sign-in-page {
   max-width: 560px;
   padding-top: 12vh;
+}
+
+:root[data-theme="dark"] {
+  --page: #04232e;
+  --panel: #000;
+  --inset: #0a1d24;
+  --ink: var(--sea-mist);
+  --muted: #93aab1;
+  --link: #6fcbe8;
+  --green-text: #6ff0c9;
+  color-scheme: dark;
+}
+.diff {
+  margin: 16px 0 0;
+  overflow-x: auto;
+  font: 0.82rem/1.7 var(--mono);
+  tab-size: 2;
+}
+.diff span {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.diff-add {
+  background: color-mix(in srgb, var(--sea-green) 18%, var(--panel));
+}
+.diff-remove {
+  background: color-mix(in srgb, var(--raspberry) 18%, var(--panel));
+}
+.confirmation {
+  background: var(--panel);
+  color: var(--ink);
+  border: none;
+  border-radius: 16px;
+  padding: 24px;
+  max-width: min(640px, 90vw);
+  max-height: 85vh;
+}
+.confirmation::backdrop {
+  background: #04232e99;
+}
+.confirmation .instructions {
+  max-height: 40vh;
+  overflow: auto;
+  margin-top: 16px;
+}
+.actions {
+  display: flex;
+  gap: 12px;
+  justify-content: end;
+  margin-top: 20px;
+}
+.secondary {
+  background: var(--inset);
+  color: var(--ink);
+}
+fieldset {
+  border: none;
+  padding: 0;
+  margin: 0 0 12px;
+  min-width: 0;
+}
+legend {
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.settings-grid {
+  display: grid;
+  align-items: end;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 16px;
+}
+
+.stack-form > button {
+  justify-self: start;
+  min-width: 10rem;
+}
+.panel > label {
+  display: grid;
+  gap: 6px;
+  max-width: 24rem;
 }

@@ -4,7 +4,9 @@ The data behind UnderCover Travel Insurance, a fictional insurer. Everything her
 
 ## The insurer's systems
 
-- `company.json`: company settings, including the $1,000 payout approval limit.
+- `company.json`: company settings, including the initial $1,000 payout approval limit.
+- `improvement_settings.json`: initial business objectives, noise/tolerance, round budget and evaluation concurrency. Together with the approval limit these seed database-owned settings; senior handlers' later edits are audited there.
+- `allowed_models.json`: file-owned model identifiers, allowed reasoning efforts and numeric input/output prices in US dollars per million tokens. The dashboard lists these without editing them. An explicit `MODEL_NAME` seeds the free-model override as the sole zero-price entry at `default` effort.
 - `plans.json`: the three plans (Economy, Premium, First) with their limits, waiting periods and deductibles, and the three add-ons.
 - `policies.json`: one policy per trip, with the plan, the add-ons, the purchase date, the trip and the travelers.
 - `customers.json`: contact details and claim history, with the date and a one line summary of each earlier claim. This is personal data.

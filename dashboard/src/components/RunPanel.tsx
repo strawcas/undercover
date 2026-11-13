@@ -30,6 +30,11 @@ export function RunPanel() {
 function RunDetails({ run }: Readonly<{ run: Run }>) {
   return (
     <>
+      <p className="small">
+        Configuration version {run.configuration_version} ·{" "}
+        <span className="mono">{run.model}</span> · Reasoning:{" "}
+        {run.reasoning_effort ?? "default"}
+      </p>
       <p className="muted small">
         Started at {time(run.started_at)}, {run.concurrency} agents at once
         {run.finished_at && `, finished at ${time(run.finished_at)}`}

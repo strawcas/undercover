@@ -7,7 +7,7 @@ from langchain_core.exceptions import ModelRateLimitError, ModelTimeoutError
 from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy import select
 
-from agent import api, dispatcher, harness
+from agent import api, dispatcher, harness, models
 from agent.tests.queue_setup import leave_waiting
 from agent.tests.stubs import call, graph_on, record, stub
 from backend.database import engine, run_claims, work_slices
@@ -20,7 +20,7 @@ def test_concurrency_is_bounded_and_every_claim_is_selected_once(monkeypatch, n)
     active = peak = 0
     worked = []
 
-    def work(claim_id, run_id):
+    def work(claim_id, run_id, version):
         nonlocal active, peak
         with lock:
             active += 1
@@ -55,7 +55,7 @@ def test_transient_retry_resumes_same_attempt_and_thread(
         [stub(call("get_claim"), error_type("retry")), stub(record("approve", 420))]
     )
     monkeypatch.setattr(
-        harness, "execution_graph", lambda: graph_on(next(models), saver)
+        harness, "execution_graph", lambda version=None: graph_on(next(models), saver)
     )
     run = api.start_run(configuration())
     dispatcher.dispatch(run["run_id"], 1)
@@ -83,7 +83,7 @@ def test_exhaustion_keeps_progress_and_other_claims_finish(monkeypatch):
     # The failing graph reuses the same scripted model on its three resumptions.
     failing = graph_on(next(models), saver)
     graphs = iter([failing, failing, failing, graph_on(next(models), saver)])
-    monkeypatch.setattr(harness, "execution_graph", lambda: next(graphs))
+    monkeypatch.setattr(harness, "execution_graph", lambda version=None: next(graphs))
     run_id = api.start_run(configuration())["run_id"]
     dispatcher.dispatch(run_id, 1)
     assert api.get_claim("CLM-1001")["status"] == "in_progress"
@@ -100,7 +100,7 @@ def test_ordinary_failure_retries_fresh_once(monkeypatch, succeed):
         record("refer", 0) if succeed else RuntimeError("second"),
     ]
     graph = graph_on(stub(*replies))
-    monkeypatch.setattr(harness, "execution_graph", lambda: graph)
+    monkeypatch.setattr(harness, "execution_graph", lambda version=None: graph)
     run_id = api.start_run(configuration())["run_id"]
     dispatcher.dispatch(run_id, 1)
     claim = api.get_claim("CLM-1001")
@@ -116,7 +116,7 @@ def test_empty_and_reserved_claims_are_skipped(monkeypatch):
     try:
         run_id = api.start_run(configuration())["run_id"]
         assert dispatcher.dispatch(run_id, 25)["results"] == []
-        assert harness.execute_claim("CLM-1001", run_id).startswith("Skipped:")
+        assert harness.execute_claim("CLM-1001", run_id, 1).startswith("Skipped:")
     finally:
         harness.release_claim("CLM-1001")
     finished = api.finish_run(run_id)
@@ -127,8 +127,10 @@ def test_graphs_have_distinct_savers_on_one_pool(monkeypatch):
     pool = object()
     monkeypatch.setattr(harness.checkpoints, "pool", pool)
     monkeypatch.setattr(harness, "PostgresSaver", lambda p: {"pool": p})
-    monkeypatch.setattr(harness, "model", lambda: "stub")
-    monkeypatch.setattr(harness, "claim_graph", lambda llm, saver: saver)
+    monkeypatch.setattr(models, "build_model", lambda configuration: "stub")
+    monkeypatch.setattr(
+        harness, "claim_graph", lambda llm, saver, configuration=None: saver
+    )
     first, second = harness.execution_graph(), harness.execution_graph()
     assert first is not second
     assert isinstance(first, dict)
@@ -138,16 +140,16 @@ def test_graphs_have_distinct_savers_on_one_pool(monkeypatch):
 
 def test_worker_rechecks_status_and_releases_on_failure(monkeypatch):
     graph = graph_on(stub(record("refer", 0)))
-    monkeypatch.setattr(harness, "execution_graph", lambda: graph)
+    monkeypatch.setattr(harness, "execution_graph", lambda version=None: graph)
     harness.work_claim("CLM-1001", graph)
-    assert harness.execute_claim("CLM-1001", "unused") == "No eligible work"
+    assert harness.execute_claim("CLM-1001", "unused", 1) == "No eligible work"
     assert not harness.is_reserved("CLM-1001")
 
-    def fail():
+    def fail(version=None):
         raise RuntimeError("pool unavailable")
 
     monkeypatch.setattr(harness, "execution_graph", fail)
-    assert "left for a handler" in harness.execute_claim("CLM-1002", "unused")
+    assert "left for a handler" in harness.execute_claim("CLM-1002", "unused", 1)
     assert not harness.is_reserved("CLM-1002")
 
 
@@ -163,10 +165,10 @@ def test_get_state_failure_is_settled_and_retried_fresh(monkeypatch):
 
     monkeypatch.setattr(broken, "get_state", fail_state)
     graphs = iter([broken, graph_on(stub(record("refer", 0)))])
-    monkeypatch.setattr(harness, "execution_graph", lambda: next(graphs))
+    monkeypatch.setattr(harness, "execution_graph", lambda version=None: next(graphs))
     run_id = api.start_run(configuration())["run_id"]
     api.record_run_claim(run_id, "CLM-1001", "selected", None)
-    assert "refer" in harness.execute_claim("CLM-1001", run_id)
+    assert "refer" in harness.execute_claim("CLM-1001", run_id, 1)
     claim = api.get_claim("CLM-1001")
     assert claim["attempts"] == 2
     assert claim["thread_id"] != "broken-thread"

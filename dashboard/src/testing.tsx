@@ -6,6 +6,8 @@ import { AuthContext, type AuthState } from "./auth";
 import type {
   Claim,
   ClaimSummary,
+  ConfigurationHistory,
+  SettingsView,
   EvaluationDetail,
   Policy,
   PreviousClaim,
@@ -14,6 +16,25 @@ import type {
 // Stands in for the backend: answers "METHOD /path" with the JSON given, or
 // with the status and detail given as an error, and a 404 for anything else.
 export type Routes = Record<string, unknown>;
+
+export function mockDialogs() {
+  Object.defineProperties(HTMLDialogElement.prototype, {
+    showModal: {
+      configurable: true,
+      writable: true,
+      value: vi.fn(function (this: HTMLDialogElement) {
+        this.setAttribute("open", "");
+      }),
+    },
+    close: {
+      configurable: true,
+      writable: true,
+      value: vi.fn(function (this: HTMLDialogElement) {
+        this.removeAttribute("open");
+      }),
+    },
+  });
+}
 
 export class Refusal {
   constructor(
@@ -193,6 +214,7 @@ export const evaluation: EvaluationDetail = {
   kind: "evaluation",
   concurrency: 5,
   model: "openai/gpt-6-luna",
+  configuration_version: 1,
   reasoning_effort: null,
   set_name: "held_out",
   tiny: true,
@@ -213,4 +235,49 @@ export const evaluation: EvaluationDetail = {
     seconds_per_claim: 10,
   },
   comparisons: comparisonFixtures,
+};
+
+export const configuration: ConfigurationHistory = {
+  version: 1,
+  parent_version: null,
+  instructions: "# Working a claim",
+  model: "openai/gpt-6-luna",
+  reasoning_effort: "low",
+  reason: "Initial version",
+  proposed_by: "UnderCover",
+  approved_by: null,
+  approved_at: null,
+  created_at: "2026-01-01T00:00:00Z",
+  prompt: "# Working a claim\n\n## Contents of the claims manual",
+  diff: "+# Working a claim",
+  held_out_scores: null,
+};
+
+export const settings: SettingsView = {
+  values: {
+    payout_approval_limit: 1000,
+    objectives: { accuracy: 0.6, grade: 1 },
+    noise: {
+      accuracy: 0.1,
+      grade: 0.15,
+      cost_per_claim: 0.15,
+      seconds_per_claim: 0.15,
+    },
+    tolerance: {
+      accuracy: 0.1,
+      grade: 0.15,
+      cost_per_claim: 1,
+      seconds_per_claim: 0.25,
+    },
+    spending_limit: 0.5,
+    concurrency: 25,
+  },
+  models_allowed: {
+    "openai/gpt-6-luna": {
+      reasoning_efforts: ["none", "low", "medium"],
+      input_price: 0.1,
+      output_price: 0.5,
+    },
+  },
+  changes: [],
 };

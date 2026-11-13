@@ -14,7 +14,7 @@ def serve(monkeypatch):
     """Run the agent's service, without its lifespan, on a given claim graph."""
 
     def with_graph(graph):
-        monkeypatch.setattr(harness, "execution_graph", lambda: graph)
+        monkeypatch.setattr(harness, "execution_graph", lambda version=None: graph)
         return TestClient(service.app)
 
     return with_graph
@@ -91,7 +91,7 @@ def test_an_unknown_claim(serve):
 
 def test_sign_off_is_queued_before_current_worker_releases(client, monkeypatch):
     graph = graph_on(stub(*decide("approve", 1350)))
-    monkeypatch.setattr(harness, "execution_graph", lambda: graph)
+    monkeypatch.setattr(harness, "execution_graph", lambda version=None: graph)
     harness.work_claim("CLM-1002", graph)
     client.post("/api/claims/CLM-1002/sign-off", json={"handler_id": "HND-01"})
     assert harness.reserve_claim("CLM-1002")
@@ -101,7 +101,7 @@ def test_sign_off_is_queued_before_current_worker_releases(client, monkeypatch):
         service.resume_claim("CLM-1002", BackgroundTasks())
     assert duplicate.value.status_code == 409
     harness.release_claim("CLM-1002")
-    assert harness.execute_claim("CLM-1002", "other-run").startswith("Skipped:")
+    assert harness.execute_claim("CLM-1002", "other-run", 1).startswith("Skipped:")
     task = background.tasks[0]
     task.func(*task.args, **task.kwargs)
     assert not harness.is_reserved("CLM-1002")

@@ -113,8 +113,12 @@ def get_claim_history(customer_id: str) -> list[dict[str, Any]]:
     return _call("GET", f"/customers/{customer_id}/claims")
 
 
-def get_instructions() -> dict[str, str]:
-    return _call("GET", "/instructions")
+def get_current_configuration() -> dict[str, Any]:
+    return _call("GET", "/configurations/current")
+
+
+def get_configuration(version: int) -> dict[str, Any]:
+    return _call("GET", f"/configurations/{version}")
 
 
 def search_documents(query: str) -> list[dict[str, Any]]:

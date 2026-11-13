@@ -164,15 +164,15 @@ Build sign-in first so every later page is developed behind the same session and
 
 Add backend-owned version records and settings before judging or improving anything. Pin configurations on runs, seed the recipe/catalogue/defaults, replace Instructions with Configuration, and build Settings with senior-only edits and appearance controls.
 
-- [ ] SQLite seed tests create configuration/recipe 1, current pointers, numeric model prices and all defaults listed above, with no rounds. A second rebuild resets the same state and creates fresh identities. Use temporary databases for these tests; reserve the business database's single reseed for phase 6.
-- [ ] API tests return current/history/version diffs, model/effort provenance and document contents. The claim execution view contains instructions/configuration only, with no scores or labels. Run records persist the chosen version, and stub prompts/models match it throughout a dispatch and standalone evaluation.
-- [ ] Model construction, CLI execution and run records share the version path. An explicit `MODEL_NAME` produces the sole allowed model, zero prices and effort `default`, while `none` remains a distinct allowed Luna effort.
-- [ ] Settings tests validate floors, nonnegative thresholds/budget/limit, grade/accuracy ranges and N=1–25. Dana's changes record old/new values, identity and timestamp; missing sign-in returns 401 and Marcus's write returns 403 with no audit/configuration change.
-- [ ] A decision recorded before a limit change retains its original sign-off requirement; the next decision uses the new limit. Test increases, decreases, equality at the limit and payment after changing it, without duplicate decisions or payments.
-- [ ] Vitest/e2e cover Configuration replacing Instructions, selectable versions/diffs and readable document contents; Settings read-only explanations, validation, confirmation/cancel/save/error, allowed-model display and audit history.
-- [ ] Appearance light/dark/system persists in browser storage, follows system changes only in system mode, and applies before normal page rendering. Playwright MCP checks these pages in both themes with no unexpected console errors.
-- [ ] API/OpenAPI checks retain explicit required inputs and one client per service. Shared model/checkpoint support is extracted only where needed, without adding pools or changing claim graph nodes/tools.
-- [ ] Update SPEC, TECH_STACK, CODE_STANDARDS rules 7/13, STATUS and `data/README.md` for the new ownership. `npm run check` passes; fresh code review blockers are fixed, criteria/STATUS updated and the phase committed.
+- [x] SQLite seed tests create configuration/recipe 1, current pointers, numeric model prices and all defaults listed above, with no rounds. A second rebuild resets the same state and creates fresh identities. Use temporary databases for these tests; reserve the business database's single reseed for phase 6.
+- [x] API tests return current/history/version diffs, model/effort provenance and document contents. The claim execution view contains instructions/configuration only, with no scores or labels. Run records persist the chosen version, and stub prompts/models match it throughout a dispatch and standalone evaluation.
+- [x] Model construction, CLI execution and run records share the version path. An explicit `MODEL_NAME` produces the sole allowed model, zero prices and effort `default`, while `none` remains a distinct allowed Luna effort.
+- [x] Settings tests validate floors, nonnegative thresholds/budget/limit, grade/accuracy ranges and N=1–25. Dana's changes record old/new values, identity and timestamp; missing sign-in returns 401 and Marcus's write returns 403 with no audit/configuration change.
+- [x] A decision recorded before a limit change retains its original sign-off requirement; the next decision uses the new limit. Test increases, decreases, equality at the limit and payment after changing it, without duplicate decisions or payments.
+- [x] Vitest/e2e cover Configuration replacing Instructions, selectable versions/diffs and readable document contents; Settings read-only explanations, validation, confirmation/cancel/save/error, allowed-model display and audit history.
+- [x] Appearance light/dark/system persists in browser storage, follows system changes only in system mode, and applies before normal page rendering. Playwright MCP checks these pages in both themes with no unexpected console errors.
+- [x] API/OpenAPI checks retain explicit required inputs and one client per service. Shared model/checkpoint support is extracted only where needed, without adding pools or changing claim graph nodes/tools.
+- [x] Update SPEC, TECH_STACK, CODE_STANDARDS rules 7/13, STATUS and `data/README.md` for the new ownership. `npm run check` passes; fresh code review blockers are fixed, criteria/STATUS updated and the phase committed.
 
 ## Phase 3: The explanation judge and version scores
 

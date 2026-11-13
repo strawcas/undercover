@@ -1,10 +1,17 @@
-import { Link, NavLink, Route, Routes } from "react-router";
+import { Link, Navigate, NavLink, Route, Routes } from "react-router";
 import { ClaimPage } from "./pages/ClaimPage";
-import { InstructionsPage } from "./pages/InstructionsPage";
+import { ConfigurationPage } from "./pages/ConfigurationPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { QueuePage } from "./pages/QueuePage";
 import { ScoreboardPage } from "./pages/ScoreboardPage";
 import { EvaluationPage } from "./pages/EvaluationPage";
-import { CLAIM_PAGE, EVALUATION_PAGE, SCOREBOARD_PAGE } from "./paths";
+import {
+  CLAIM_PAGE,
+  CONFIGURATION_PAGE,
+  EVALUATION_PAGE,
+  SCOREBOARD_PAGE,
+  SETTINGS_PAGE,
+} from "./paths";
 import { useAuth } from "./auth";
 import { SignInPage } from "./pages/SignInPage";
 
@@ -27,7 +34,8 @@ export function App() {
           <NavLink to="/" end>
             Queue
           </NavLink>
-          <NavLink to="/instructions">Instructions</NavLink>
+          <NavLink to={CONFIGURATION_PAGE}>Configuration</NavLink>
+          <NavLink to={SETTINGS_PAGE}>Settings</NavLink>
           <NavLink to={SCOREBOARD_PAGE}>Scoreboard</NavLink>
         </nav>
         <div className="session">
@@ -51,7 +59,12 @@ export function App() {
         <Routes>
           <Route path="/" element={<QueuePage />} />
           <Route path={CLAIM_PAGE} element={<ClaimPage />} />
-          <Route path="/instructions" element={<InstructionsPage />} />
+          <Route path={CONFIGURATION_PAGE} element={<ConfigurationPage />} />
+          <Route path={SETTINGS_PAGE} element={<SettingsPage />} />
+          <Route
+            path="/instructions"
+            element={<Navigate to={CONFIGURATION_PAGE} replace />}
+          />
           <Route path={SCOREBOARD_PAGE} element={<ScoreboardPage />} />
           <Route path={EVALUATION_PAGE} element={<EvaluationPage />} />
           <Route path="*" element={<p className="message">Page not found</p>} />

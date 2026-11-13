@@ -5,8 +5,7 @@ def configuration(**overrides):
     return {
         "kind": "dispatch",
         "concurrency": 3,
-        "model": "stub",
-        "reasoning_effort": None,
+        "configuration_version": 1,
         "set_name": None,
         "tiny": None,
     } | overrides

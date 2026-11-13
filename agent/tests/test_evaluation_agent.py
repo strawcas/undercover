@@ -22,7 +22,7 @@ def test_service_works_copies_with_no_labels_and_clears_held_threads(
     saver = InMemorySaver()
     models = []
 
-    def build():
+    def build(version=None):
         llm = stub(
             call("get_claim"),
             call("get_policy", policy_id="POL-2001"),
@@ -70,6 +70,7 @@ def test_service_works_copies_with_no_labels_and_clears_held_threads(
     assert not service.run_slot.locked()
     result = client.get("/api/evaluations").json()[0]
     assert result["status"] == "finished"
+    assert result["configuration_version"] == 1
     assert len(result["members"]) == len(cleared) == 5
     for member in result["members"]:
         copy = api.get_claim(member["claim_id"])
@@ -115,8 +116,7 @@ def test_failed_attempt_threads_are_all_returned_for_startup_cleanup(client):
             "set_name": "held_out",
             "tiny": True,
             "concurrency": 5,
-            "model": "stub",
-            "reasoning_effort": None,
+            "configuration_version": 1,
         }
     )
     claim_id = run["members"][0]["claim_id"]
@@ -143,7 +143,7 @@ def test_exhausted_and_failed_copies_clear_all_attempts(client, monkeypatch, tra
     else:
         first = [graph_on(stub(RuntimeError("failed")), saver) for _ in range(2)]
     graphs = iter(first + [graph_on(stub(record("refer", 0)), saver) for _ in range(4)])
-    monkeypatch.setattr(harness, "execution_graph", lambda: next(graphs))
+    monkeypatch.setattr(harness, "execution_graph", lambda version=None: next(graphs))
     monkeypatch.setattr(harness.checkpoints, "pool", object())
     monkeypatch.setattr(harness, "PostgresSaver", lambda pool: saver)
     assert service.run_slot.acquire(blocking=False)
@@ -172,8 +172,7 @@ def test_startup_cleans_stopped_evaluation_threads_but_preserves_records(monkeyp
             "set_name": "held_out",
             "tiny": True,
             "concurrency": 5,
-            "model": "stub",
-            "reasoning_effort": None,
+            "configuration_version": 1,
         }
     )
     claim_id = run["members"][0]["claim_id"]
@@ -197,14 +196,18 @@ def test_startup_cleans_stopped_evaluation_threads_but_preserves_records(monkeyp
             "set_name": None,
             "tiny": None,
             "concurrency": 25,
-            "model": "stub",
-            "reasoning_effort": None,
+            "configuration_version": 1,
         }
     )
     assert (
         claim_id
         not in dispatcher.list_work(
-            {"run_id": later["run_id"], "claims": [], "results": []}
+            {
+                "run_id": later["run_id"],
+                "claims": [],
+                "results": [],
+                "configuration_version": 1,
+            }
         )["claims"]
     )
     assert api.get_run(run["run_id"])["status"] == "stopped"

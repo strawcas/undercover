@@ -5,9 +5,9 @@ import sys
 
 from dotenv import load_dotenv
 
-from agent import api
+from agent import api, models
 from agent.console import show_reports
-from agent.harness import checkpointer, claim_graph, model, work_claim
+from agent.harness import checkpointer, claim_graph, work_claim
 
 
 def main(args: list[str]) -> None:
@@ -18,7 +18,8 @@ def main(args: list[str]) -> None:
     parser.add_argument("claim_id", help="work this one claim")
     options = parser.parse_args(args)
     with checkpointer() as saver:
-        graph = claim_graph(model(), saver)
+        configuration = api.get_current_configuration()
+        graph = claim_graph(models.build_model(configuration), saver, configuration)
         try:
             work_claim(options.claim_id, graph)
         except api.Refused as refusal:

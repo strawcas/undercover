@@ -79,7 +79,7 @@ it("shows all evaluation measures and refreshes running results", async () => {
   routes["GET /api/evaluations"] = [{ ...evaluation, status: "stopped" }];
   await act(() => vi.advanceTimersByTimeAsync(REFRESH_MS));
   expect(screen.getByText("Stopped")).toBeDefined();
-  expect(screen.getByText(/Reasoning: None/)).toBeDefined();
+  expect(screen.getByText(/Reasoning: default/)).toBeDefined();
 });
 
 it.each([409, 503])("shows evaluation start refusal %s", async (status) => {

@@ -65,7 +65,13 @@ def work_run(selection: dict[str, Any]) -> None:
     """Create the accepted run in background and always release its admission slot."""
     run = None
     try:
-        run = api.start_run(selection | harness.model_settings())
+        configuration = api.get_current_configuration()
+        run = api.start_run(
+            selection
+            | {
+                "configuration_version": configuration["version"],
+            }
+        )
         dispatcher.dispatch(run["run_id"], run["concurrency"])
         api.finish_run(run["run_id"])
     except Exception:

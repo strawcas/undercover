@@ -24,10 +24,10 @@ test("a claim opens from the queue", async ({ page }) => {
   await expect(page.getByText("POL-2001")).toBeVisible();
 });
 
-test("the header opens the instructions", async ({ page }) => {
+test("the header opens the configuration", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("link", { name: "Instructions" }).click();
-  await expect(page).toHaveURL("/instructions");
+  await page.getByRole("link", { name: "Configuration" }).click();
+  await expect(page).toHaveURL("/configuration");
   await expect(
     page.getByRole("region", { name: "Running the queue" }),
   ).toHaveCount(0);

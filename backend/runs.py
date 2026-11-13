@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy import Connection, func, insert, select, update
 
 from backend.clock import now
+from backend.configurations import get_configuration
 from backend.database import (
     claim_view,
     claims,
@@ -208,10 +209,13 @@ def active(db: Connection) -> Run | None:
 def start_run(db: Connection, request: RunRequest) -> Run:
     """Persist the service's accepted configuration."""
     run_id = str(uuid.uuid4())
+    configuration = get_configuration(db, request.configuration_version)
+    values = request.model_dump() | {
+        "model": configuration.model,
+        "reasoning_effort": configuration.reasoning_effort,
+    }
     db.execute(
-        insert(runs).values(
-            run_id=run_id, status="running", started_at=now(), **request.model_dump()
-        )
+        insert(runs).values(run_id=run_id, status="running", started_at=now(), **values)
     )
     return get_run(db, run_id)
 

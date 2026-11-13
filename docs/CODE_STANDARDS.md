@@ -20,5 +20,5 @@
 
 ## The agent
 
-13. The agent has five parts, kept apart. `api.py` is its only backend client. `tools.py` holds the claim tools, contexts and state. `harness.py` builds and runs the durable claim graph, owns its pool and records measurements. `dispatcher.py` selects and fans out work without a model, calling one harness function per claim and run. `service.py` admits and schedules runs, handles startup/cleanup and sign-off resumes. The backend enforces claim and payment rules.
+13. The agent has five parts, kept apart. `api.py` is its only backend client. `tools.py` holds the claim tools, contexts and state. `harness.py` builds and runs the durable claim graph, owns its pool and records measurements. Shared `models.py` constructs a model from the backend-owned configuration; every dispatched claim requires the version pinned to its run. `dispatcher.py` selects and fans out work without a model, calling one harness function per claim and run. `service.py` admits and schedules runs, handles startup/cleanup and sign-off resumes. The backend enforces claim and payment rules.
 14. Instructions give an agent its goal, what it has to work from and what done looks like. They don't script its steps: it plans those itself. Anything that must always happen, or happen in a fixed order, is done by the code.

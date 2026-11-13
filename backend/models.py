@@ -133,10 +133,6 @@ class Step(BaseModel):
     created_at: str
 
 
-class Instructions(BaseModel):
-    claim: str
-
-
 class Section(BaseModel):
     document: DocumentName
     document_title: str
@@ -275,6 +271,7 @@ class Run(BaseModel):
     kind: RunKind
     concurrency: int
     model: str
+    configuration_version: int
     reasoning_effort: str | None
     set_name: SetName | None
     tiny: bool | None
@@ -300,8 +297,7 @@ class EvaluationRequest(DispatchRequest):
 class RunRequest(BaseModel):
     kind: RunKind
     concurrency: int = Field(ge=1, le=25)
-    model: str = Field(min_length=1)
-    reasoning_effort: str | None
+    configuration_version: int = Field(ge=1)
     set_name: SetName | None
     tiny: bool | None
 

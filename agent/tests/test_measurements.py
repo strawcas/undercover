@@ -134,7 +134,7 @@ def test_payment_resume_does_not_wait_for_instructions_or_telemetry(
     elapsed = [0.0]
     monkeypatch.setattr(harness, "monotonic", lambda: elapsed[0])
 
-    def prepare():
+    def prepare(version=None):
         elapsed[0] = 4.0
         graph = graph_on(stub(), saver)
         monkeypatch.setattr(graph, "get_state", unavailable)
@@ -152,7 +152,7 @@ def test_payment_resume_does_not_wait_for_instructions_or_telemetry(
         record_slice(*args)
 
     monkeypatch.setattr(harness, "execution_graph", prepare)
-    monkeypatch.setattr(api, "get_instructions", unavailable)
+    monkeypatch.setattr(api, "get_current_configuration", unavailable)
     monkeypatch.setattr(api, "record_work_slice", record_after_payment)
     assert "approve" in harness.carry_on(api.get_claim("CLM-1001"), None)
     assert saved
@@ -188,7 +188,9 @@ def test_work_slice_uses_one_owner_checked_monotonic_upsert(client):
 def test_dispatch_attributes_its_measurements(monkeypatch):
     leave_waiting("CLM-1001")
     monkeypatch.setattr(
-        harness, "execution_graph", lambda: graph_on(stub(record("refer", 0)))
+        harness,
+        "execution_graph",
+        lambda version=None: graph_on(stub(record("refer", 0))),
     )
     run_id = api.start_run(configuration())["run_id"]
     dispatcher.dispatch(run_id, 1)

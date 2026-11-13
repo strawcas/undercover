@@ -1,0 +1,22 @@
+"""Construct OpenRouter models from backend-owned configurations."""
+
+import os
+from typing import Any
+
+from langchain_openai import ChatOpenAI
+from pydantic import SecretStr
+
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+
+def build_model(configuration: dict[str, Any]) -> ChatOpenAI:
+    """Build exactly the model and effort pinned to this work."""
+    effort = configuration["reasoning_effort"]
+    return ChatOpenAI(
+        model=configuration["model"],
+        reasoning_effort=None if effort == "default" else effort,
+        base_url=OPENROUTER_BASE_URL,
+        api_key=SecretStr(os.environ["OPENROUTER_API_KEY"]),
+        timeout=120,
+        max_retries=5,
+    )

@@ -24,7 +24,6 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.runnables import Runnable, RunnableConfig
-from langchain_openai import ChatOpenAI
 from langfuse.langchain import CallbackHandler
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.postgres import PostgresSaver
@@ -37,9 +36,8 @@ from langgraph.types import Command, interrupt
 from psycopg import Connection, sql
 from psycopg.rows import DictRow, dict_row
 from psycopg_pool import ConnectionPool
-from pydantic import SecretStr
 
-from agent import api
+from agent import api, models
 from agent.tools import CLAIM_TOOLS, ClaimContext, ClaimState
 
 log = logging.getLogger(__name__)
@@ -48,8 +46,6 @@ ClaimGraph = CompiledStateGraph[ClaimState, ClaimContext, Any, Any]
 Messages = dict[str, list[BaseMessage]]
 Start = Messages | Command | None
 
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_MODEL = "openai/gpt-6-luna"
 SCHEMA = "undercover"
 CONNECTIONS = 4
 CLAIM_MODEL_CALLS = 30
@@ -112,22 +108,31 @@ def take_resume(claim_id: str) -> None:
         owned_claims.add(claim_id)
 
 
-def execution_graph() -> ClaimGraph:
+def execution_graph(version: int | None = None) -> ClaimGraph:
     """Give each execution its own saver on the initialized process pool."""
     if checkpoints.pool is None:
         raise RuntimeError("The checkpoint pool is not open")
-    return claim_graph(model(), PostgresSaver(checkpoints.pool))
+    configuration = (
+        api.get_current_configuration()
+        if version is None
+        else api.get_configuration(version)
+    )
+    return claim_graph(
+        models.build_model(configuration),
+        PostgresSaver(checkpoints.pool),
+        configuration,
+    )
 
 
-def execute_reserved_claim(claim_id: str, run_id: str | None) -> str:
+def execute_reserved_claim(claim_id: str, run_id: str | None, version: int) -> str:
     """Start or resume an owned claim, retrying ordinary failed attempts fresh."""
     try:
         while True:
             claim = api.get_claim(claim_id)
             if claim["status"] == api.Status.WAITING:
-                line = work_claim(claim_id, None, run_id)
+                line = work_claim(claim_id, None, run_id, version)
             elif claim["status"] == api.Status.IN_PROGRESS:
-                line = carry_on(claim, None, run_id)
+                line = carry_on(claim, None, run_id, version)
             else:
                 return "No eligible work"
             if api.get_claim(claim_id)["status"] != api.Status.WAITING:
@@ -136,11 +141,11 @@ def execute_reserved_claim(claim_id: str, run_id: str | None) -> str:
         release_claim(claim_id)
 
 
-def execute_claim(claim_id: str, run_id: str) -> str:
+def execute_claim(claim_id: str, run_id: str, version: int) -> str:
     """The dispatcher's single boundary to the claim agent."""
     if not reserve_claim(claim_id):
         return "Skipped: claim is already being resumed"
-    return execute_reserved_claim(claim_id, run_id)
+    return execute_reserved_claim(claim_id, run_id, version)
 
 
 def clear_threads(thread_ids: list[str]) -> None:
@@ -154,23 +159,6 @@ def clear_threads(thread_ids: list[str]) -> None:
 
 class TooManyModelCalls(Exception):
     """The claim agent made as many model calls as it may without finishing."""
-
-
-def model_settings() -> dict[str, Any]:
-    """Resolve the model and reasoning effort once for execution and run records."""
-    name = os.getenv("MODEL_NAME")
-    return {"model": name or DEFAULT_MODEL, "reasoning_effort": None if name else "low"}
-
-
-def model() -> ChatOpenAI:
-    """Return the configured model through OpenRouter."""
-    return ChatOpenAI(
-        **model_settings(),
-        base_url=OPENROUTER_BASE_URL,
-        api_key=SecretStr(os.environ["OPENROUTER_API_KEY"]),
-        timeout=120,
-        max_retries=5,
-    )
 
 
 @contextmanager
@@ -300,12 +288,17 @@ def after_tools(state: ClaimState) -> str:
     return END
 
 
-def claim_graph(llm: BaseChatModel, saver: BaseCheckpointSaver[Any]) -> ClaimGraph:
+def claim_graph(
+    llm: BaseChatModel,
+    saver: BaseCheckpointSaver[Any],
+    configuration: dict[str, Any] | None = None,
+) -> ClaimGraph:
     """Build the claim agent's graph, which saves its progress after every step."""
 
     @cache
     def instructions() -> SystemMessage:
-        return SystemMessage(api.get_instructions()["claim"])
+        value = configuration or api.get_current_configuration()
+        return SystemMessage(value["prompt"])
 
     builder = StateGraph(ClaimState, context_schema=ClaimContext)
     builder.add_node(
@@ -384,6 +377,7 @@ def run_claim_graph(
     claim: dict[str, Any],
     name: str,
     run_id: str | None = None,
+    version: int | None = None,
 ) -> str | None:
     """Run the claim graph on the claim's thread, saving each step, and say what went
     wrong, if anything."""
@@ -399,7 +393,7 @@ def run_claim_graph(
     try:
         if not paying:
             progress()
-        graph = graph or execution_graph()
+        graph = graph or execution_graph(version)
         start = (
             begin(claim["claim_id"])
             if name == WORK_CLAIM
@@ -459,17 +453,23 @@ def resume_input(graph: ClaimGraph, claim: dict[str, Any]) -> Start:
 
 
 def work_claim(
-    claim_id: str, graph: ClaimGraph | None, run_id: str | None = None
+    claim_id: str,
+    graph: ClaimGraph | None,
+    run_id: str | None = None,
+    version: int | None = None,
 ) -> str:
     """Work a waiting claim as a new attempt, measuring preparation and execution."""
     claim = api.start_claim(claim_id, str(uuid.uuid4()))
-    error = run_claim_graph(graph, claim, WORK_CLAIM, run_id)
+    error = run_claim_graph(graph, claim, WORK_CLAIM, run_id, version)
     return settle(claim_id, error)
 
 
 def carry_on(
-    claim: dict[str, Any], graph: ClaimGraph | None, run_id: str | None = None
+    claim: dict[str, Any],
+    graph: ClaimGraph | None,
+    run_id: str | None = None,
+    version: int | None = None,
 ) -> str:
     """Resume the existing thread and attempt, measuring checkpoint lookup too."""
-    error = run_claim_graph(graph, claim, CARRY_ON, run_id)
+    error = run_claim_graph(graph, claim, CARRY_ON, run_id, version)
     return settle(claim["claim_id"], error)

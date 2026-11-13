@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import {
   Refusal,
   claim,
+  configuration,
   history,
   policy,
   renderAt,
@@ -111,11 +112,10 @@ it("shows other errors loading a claim", async () => {
 
 it("shows the agent's instructions read only", async () => {
   stubApi({
-    "GET /api/instructions": {
-      claim: "# Working a claim\n\n## Contents of the claims manual",
-    },
+    "GET /api/configurations/current": configuration,
+    "GET /api/configurations": [configuration],
   });
-  renderAt("/instructions");
+  renderAt("/configuration");
   const claim = await screen.findByRole("region", { name: "Working a claim" });
   expect(
     within(claim).getByText(/## Contents of the claims manual/),

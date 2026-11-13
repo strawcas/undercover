@@ -21,8 +21,7 @@ test("the queue shows dispatch members and a records-built summary", async ({
   const response = await post(request, "/api/runs", {
     kind: "dispatch",
     concurrency: 3,
-    model: "stub",
-    reasoning_effort: null,
+    configuration_version: 1,
     set_name: null,
     tiny: null,
   });
@@ -172,8 +171,7 @@ test("evaluations show scores, copied decisions and stopped runs without changin
     set_name: "held_out",
     tiny: true,
     concurrency: 5,
-    model: "stub",
-    reasoning_effort: null,
+    configuration_version: 1,
   });
   const run = (await response.json()) as {
     run_id: string;
@@ -252,8 +250,7 @@ test("evaluations show scores, copied decisions and stopped runs without changin
     set_name: "evaluation",
     tiny: true,
     concurrency: 3,
-    model: "stub",
-    reasoning_effort: null,
+    configuration_version: 1,
   });
   expect(stopped.ok()).toBe(true);
   await post(request, "/api/runs/stop", {});

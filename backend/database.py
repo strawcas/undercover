@@ -36,6 +36,9 @@ from sqlalchemy.engine import URL, make_url
 from sqlalchemy.pool import NullPool
 from sqlalchemy.schema import CreateSchema
 
+from backend.clock import now
+from backend.configuration_defaults import initial_model
+
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 DOCUMENTS = {"policy_wording": "Policy wording", "claims_manual": "Claims manual"}
@@ -63,8 +66,39 @@ def insert_once(
 settings = Table(
     "settings",
     metadata,
+    Column("id", Integer, primary_key=True),
     Column("payout_approval_limit", Float, nullable=False),
     Column("plans", JSON, nullable=False),
+    Column("improvement", JSON, nullable=False),
+    Column("models_allowed", JSON, nullable=False),
+    Column(
+        "current_configuration",
+        Integer,
+        ForeignKey("configurations.version"),
+        nullable=False,
+    ),
+    Column("current_recipe", Integer, ForeignKey("recipes.version"), nullable=False),
+)
+configurations = Table(
+    "configurations",
+    metadata,
+    Column("version", Integer, primary_key=True),
+    Column("record", JSON, nullable=False),
+)
+recipes = Table(
+    "recipes",
+    metadata,
+    Column("version", Integer, primary_key=True),
+    Column("record", JSON, nullable=False),
+)
+setting_changes = Table(
+    "setting_changes",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("handler", Text, nullable=False),
+    Column("changed_at", Text, nullable=False),
+    Column("before", JSON, nullable=False),
+    Column("after", JSON, nullable=False),
 )
 documents = Table(
     "documents",
@@ -117,6 +151,7 @@ decisions = Table(
     Column("section", Text, nullable=False),
     Column("reason", Text, nullable=False),
     Column("decided_at", Text, nullable=False),
+    Column("approval_limit", Float, nullable=False),
     Column("signed_off_by", Text),
     Column("signed_off_at", Text),
 )
@@ -145,6 +180,12 @@ runs = Table(
     Column("kind", Text, nullable=False),
     Column("concurrency", Integer, nullable=False),
     Column("model", Text, nullable=False),
+    Column(
+        "configuration_version",
+        Integer,
+        ForeignKey("configurations.version"),
+        nullable=False,
+    ),
     Column("reasoning_effort", Text),
     Column("set_name", Text),
     Column("tiny", Boolean),
@@ -217,6 +258,7 @@ claim_view = (
         decisions.c.section,
         decisions.c.reason,
         decisions.c.decided_at,
+        decisions.c.approval_limit,
         decisions.c.signed_off_by,
         decisions.c.signed_off_at,
         payments.c.amount,
@@ -293,11 +335,58 @@ def seed(db: Engine) -> dict[str, int]:
         connection.execute(text("DROP TABLE IF EXISTS todos"))
         metadata.drop_all(connection)
         metadata.create_all(connection)
+        configuration = initial_model()
+        provenance = {
+            "parent_version": None,
+            "reason": "Initial version",
+            "proposed_by": "UnderCover",
+            "approved_by": None,
+            "approved_at": None,
+            "created_at": now(),
+        }
+        instruction_dir = ROOT / "backend" / "instructions"
+        connection.execute(
+            insert(configurations).values(
+                record=provenance
+                | configuration
+                | {
+                    "instructions": (instruction_dir / "claim.md").read_text(
+                        encoding="utf-8"
+                    )
+                },
+            )
+        )
+        connection.execute(
+            insert(recipes).values(
+                record=provenance
+                | {
+                    "recipe": (instruction_dir / "recipe.md").read_text(
+                        encoding="utf-8"
+                    )
+                },
+            )
+        )
+        allowed = (
+            load("allowed_models.json")
+            if configuration["reasoning_effort"] != "default"
+            else {
+                configuration["model"]: {
+                    "reasoning_efforts": ["default"],
+                    "input_price": 0,
+                    "output_price": 0,
+                }
+            }
+        )
         connection.execute(
             insert(settings),
             {
+                "id": 1,
                 "payout_approval_limit": company["payout_approval_limit"],
                 "plans": load("plans.json"),
+                "improvement": load("improvement_settings.json"),
+                "models_allowed": allowed,
+                "current_configuration": 1,
+                "current_recipe": 1,
             },
         )
         connection.execute(

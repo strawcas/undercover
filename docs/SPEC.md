@@ -31,11 +31,12 @@ Our goal is to handle claims straight through, as accurately as our handlers do.
 - The queue and each claim in full, with its status, decision, reasons and work recorded step by step, including failed attempts and sections read.
 - Controls to start a dispatch, its linked claims and progress, its own model cost and time, and a records-built summary naming held payouts and unresolved claims.
 - A Scoreboard to start evaluations on either labelled set and compare newest-first results: decision match, payout accuracy within a dollar, cost of mistakes, straight-through rate, model cost per claim, active time per claim and run elapsed time. Each result opens handler and agent decisions side by side and links to copied claims. Undecided copies count as referrals.
-- The claim agent's instructions and document contents, read only.
+- A Configuration page showing the current claim-agent version, its instructions/model/reasoning effort, provenance, version history, changes and read-only document contents. Every dispatch and evaluation records the version it uses.
+- A Settings page for the approval limit, improvement objectives, noise/tolerance, round spending limit and evaluation concurrency. Everyone signed in can view it; only senior handlers can change platform settings, with an audit trail. Allowed models and prices are file-owned and read only. Light/dark/system appearance is remembered by each browser.
 
 ## Rules
 
-- A payout over $1,000 needs a handler's sign-off. The agent can approve such a claim, but the payment waits until a handler signs off. The system must block the payment until then, even if the agent tries to pay.
+- A payout over the configured approval limit ($1,000 initially) needs a senior handler's sign-off. The agent can approve such a claim, but the payment waits until sign-off. The system blocks payment even if the agent tries to pay. Each decision retains its recorded approval limit; a new setting applies to subsequently recorded decisions.
 - Decisions follow the policy wording and the claims manual. The wording comes first, and the manual says how to read it.
 - Our handlers' own decisions on these claims are in `data/evals/`. We use them to check the agent's work. The agent must never see them.
 - Amounts are in US dollars.

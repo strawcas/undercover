@@ -16,14 +16,16 @@ class Dispatch(TypedDict):
     run_id: str
     claims: list[str]
     results: Annotated[list[str], operator.add]
+    configuration_version: int
 
 
 class Work(TypedDict):
     run_id: str
     claim_id: str
+    configuration_version: int
 
 
-def list_work(state: Dispatch) -> dict[str, list[str]]:
+def list_work(state: Dispatch) -> dict[str, Any]:
     """Select ordinary eligible claims or an evaluation's existing copies."""
     run = api.get_run(state["run_id"])
     if run["kind"] == "evaluation":
@@ -39,20 +41,29 @@ def list_work(state: Dispatch) -> dict[str, list[str]]:
             and not harness.is_reserved(c["claim_id"])
         ]
         api.record_run_selection(state["run_id"], ids)
-    return {"claims": ids}
+    return {"claims": ids, "configuration_version": run["configuration_version"]}
 
 
 def fan_out(state: Dispatch) -> list[Send] | str:
     """Fan out once per claim; an empty queue finishes cleanly."""
     return [
-        Send("work_claim", {"claim_id": c, "run_id": state["run_id"]})
+        Send(
+            "work_claim",
+            {
+                "claim_id": c,
+                "run_id": state["run_id"],
+                "configuration_version": state["configuration_version"],
+            },
+        )
         for c in state["claims"]
     ] or END
 
 
 def work_claim(state: Work, *, completed: list[str]) -> dict[str, list[str]]:
     """Work through the harness boundary, retaining one member through retries."""
-    line = harness.execute_claim(state["claim_id"], state["run_id"])
+    line = harness.execute_claim(
+        state["claim_id"], state["run_id"], state["configuration_version"]
+    )
     status = "skipped" if line.startswith("Skipped:") else "finished"
     api.record_run_claim(state["run_id"], state["claim_id"], status, None)
     completed.append(state["claim_id"])
@@ -97,7 +108,7 @@ def dispatch(run_id: str, concurrency: int) -> dict[str, Any]:
     result: dict[str, Any] = {}
     try:
         for state in builder.compile().stream(
-            {"run_id": run_id, "claims": [], "results": []},
+            {"run_id": run_id, "claims": [], "results": [], "configuration_version": 0},
             {"max_concurrency": concurrency},
             stream_mode="values",
         ):

@@ -6,7 +6,8 @@ import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
 from agent import __main__ as cli
-from agent import api, harness
+from agent import api, harness, models
+from agent.models import build_model
 
 
 class FakePool:
@@ -70,8 +71,8 @@ def graph(monkeypatch):
     builds, and return what it builds."""
     saver = InMemorySaver()
     monkeypatch.setattr(cli, "checkpointer", lambda: nullcontext(saver))
-    monkeypatch.setattr(cli, "model", lambda: "model")
-    monkeypatch.setattr(cli, "claim_graph", lambda llm, s: (llm, s))
+    monkeypatch.setattr(models, "build_model", lambda configuration: "model")
+    monkeypatch.setattr(cli, "claim_graph", lambda llm, s, configuration: (llm, s))
     return ("model", saver)
 
 
@@ -95,15 +96,14 @@ def test_command_line_works_one_claim(monkeypatch, capsys, graph):
 
 def test_model_name(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-    monkeypatch.delenv("MODEL_NAME", raising=False)
-    default = harness.model()
+    default = build_model({"model": "openai/gpt-6-luna", "reasoning_effort": "low"})
     assert default.model_name == "openai/gpt-6-luna"
     assert default.reasoning_effort == "low"
     assert default.request_timeout == 120
     assert default.max_retries == 5
-    monkeypatch.setenv("MODEL_NAME", "openrouter/free")
-    assert harness.model().model_name == "openrouter/free"
-    assert harness.model().reasoning_effort is None
+    free = build_model({"model": "openrouter/free", "reasoning_effort": "default"})
+    assert free.model_name == "openrouter/free"
+    assert free.reasoning_effort is None
 
 
 def test_command_line_requires_a_claim_id(graph):

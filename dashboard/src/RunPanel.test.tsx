@@ -14,6 +14,7 @@ const running: Run = {
   kind: "dispatch",
   concurrency: 3,
   model: "stub",
+  configuration_version: 1,
   reasoning_effort: null,
   set_name: null,
   tiny: null,

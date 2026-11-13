@@ -19,6 +19,10 @@ it("raises the backend's reason for refusing", async () => {
 });
 
 it("falls back to a general message when the reason isn't text", async () => {
-  stubApi({ "GET /api/instructions": new Refusal(422, [{ msg: "bad" }]) });
-  await expect(api.getInstructions()).rejects.toThrow("The request failed");
+  stubApi({
+    "GET /api/configurations/current": new Refusal(422, [{ msg: "bad" }]),
+  });
+  await expect(api.getCurrentConfiguration()).rejects.toThrow(
+    "The request failed",
+  );
 });

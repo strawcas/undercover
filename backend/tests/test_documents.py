@@ -82,9 +82,10 @@ def test_search_with_no_matches(client):
 
 
 def test_instructions_for_a_claim(client):
-    instructions = client.get("/api/instructions").json()
-    assert set(instructions) == {"claim"}
-    claim = instructions["claim"]
+    instructions = client.get("/api/configurations/current").json()
+    assert "held_out_scores" not in instructions
+    assert instructions["version"] == 1
+    claim = instructions["prompt"]
     assert claim.startswith("# UnderCover Agent: working a claim")
     contents = claim[claim.index("## Contents of the policy wording") :]
     assert "\n3. Trip Delay\n" in contents

@@ -2,16 +2,17 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from sqlalchemy import Connection, RowMapping, insert, select, update
 
-from backend import agent_service, evaluations
+from backend import agent_service, configurations, evaluations
 from backend import runs as run_records
+from backend import settings as platform_settings
 from backend.auth import CurrentHandler, SeniorHandler
 from backend.clock import now
+from backend.configuration_models import ClaimConfiguration, ConfigurationHistory
 from backend.database import (
     claim_view,
     claims,
@@ -27,7 +28,7 @@ from backend.database import (
     steps,
 )
 from backend.dependencies import Database
-from backend.documents import contents, search, sections, titles
+from backend.documents import search, sections, titles
 from backend.models import (
     Claim,
     ClaimSummary,
@@ -40,7 +41,6 @@ from backend.models import (
     EvaluationRequest,
     FailureRequest,
     Handler,
-    Instructions,
     ModelCallRequest,
     Payment,
     PaymentRequest,
@@ -62,8 +62,8 @@ from backend.models import (
     WorkSliceRequest,
 )
 from backend.payout import needs_sign_off, work_out_payout
+from backend.settings_models import PlatformSettings, SettingsView
 
-INSTRUCTIONS = Path(__file__).parent / "instructions"
 ATTEMPTS = 2
 
 
@@ -115,11 +115,6 @@ def get_evaluation(run_id: str, db: Database) -> EvaluationDetail:
 def dollars(amount: float) -> str:
     """Format an amount like $1,250.00."""
     return f"${amount:,.2f}"
-
-
-def approval_limit(db: Connection) -> float:
-    """Return the largest payout that can be paid without a handler's sign-off."""
-    return db.execute(select(settings.c.payout_approval_limit)).scalar_one()
 
 
 def plans(db: Connection) -> Plans:
@@ -245,11 +240,38 @@ def get_claim_history(customer_id: str, db: Database) -> list[PreviousClaim]:
     return [PreviousClaim(**claim) for claim in record["previous_claims"]]
 
 
-@app.get("/api/instructions", operation_id="get_instructions")
-def get_instructions(db: Database) -> Instructions:
-    """Get the claim agent's instructions and the document contents."""
-    claim = (INSTRUCTIONS / "claim.md").read_text(encoding="utf-8")
-    return Instructions(claim=f"{claim}\n{contents(db)}")
+@app.get("/api/configurations/current", operation_id="get_current_configuration")
+def get_current_configuration(db: Database) -> ClaimConfiguration:
+    """Get the current claim configuration and document contents without scores."""
+    return configurations.get_configuration(db, configurations.current_version(db))
+
+
+@app.get("/api/configurations", operation_id="list_configurations")
+def list_configurations(
+    db: Database, handler: CurrentHandler
+) -> list[ConfigurationHistory]:
+    """List configuration versions and their changes newest first."""
+    return configurations.history(db)
+
+
+@app.get("/api/configurations/{version}", operation_id="get_configuration")
+def get_configuration(version: int, db: Database) -> ClaimConfiguration:
+    """Get an immutable claim configuration and prompt without scores."""
+    return configurations.get_configuration(db, version)
+
+
+@app.get("/api/settings", operation_id="get_settings")
+def get_settings(db: Database, handler: CurrentHandler) -> SettingsView:
+    """Show the business settings, allowed models and change history."""
+    return platform_settings.view(db)
+
+
+@app.put("/api/settings", operation_id="change_settings")
+def change_settings(
+    request: PlatformSettings, db: Database, handler: SeniorHandler
+) -> SettingsView:
+    """Change platform settings with the signed-in senior handler's audit trail."""
+    return platform_settings.change_settings(db, request, handler)
 
 
 @app.get("/api/documents/search", operation_id="search_documents")
@@ -322,19 +344,22 @@ def record_decision(claim_id: str, request: DecisionRequest, db: Database) -> Cl
         raise HTTPException(409, f"Claim {claim_id} has already been decided")
     if claim["status"] != "in_progress":
         raise HTTPException(409, f"Claim {claim_id} is not in progress")
-    db.execute(
-        insert(decisions).values(
+    limit = db.execute(
+        insert(decisions)
+        .values(
             claim_id=claim_id,
             decision=request.decision,
             payout=payout,
             section=request.section,
             reason=request.reason,
             decided_at=now(),
+            approval_limit=platform_settings.decision_limit(),
         )
-    )
+        .returning(decisions.c.approval_limit)
+    ).scalar_one()
     if request.decision != "approve":
         set_status(db, claim_id, "decided")
-    elif needs_sign_off(payout, approval_limit(db)):
+    elif needs_sign_off(payout, limit):
         set_status(db, claim_id, "waiting_for_sign_off")
     return to_claim(find_claim(db, claim_id))
 
@@ -343,7 +368,9 @@ def record_decision(claim_id: str, request: DecisionRequest, db: Database) -> Cl
 def calculate_payout(claim_id: str, request: PayoutRequest, db: Database) -> Payout:
     """Work out an approval's payout with UnderCover's payout rules; records nothing."""
     policy = find_policy(db, to_claim(find_claim(db, claim_id)).policy_id)
-    return work_out_payout(policy, plans(db), request, approval_limit(db))
+    return work_out_payout(
+        policy, plans(db), request, platform_settings.approval_limit(db)
+    )
 
 
 @app.post("/api/claims/{claim_id}/payment", operation_id="pay_claim")
@@ -360,7 +387,8 @@ def pay_claim(claim_id: str, request: PaymentRequest, db: Database) -> Claim:
     if claim["status"] == "waiting_for_sign_off":
         raise HTTPException(
             403,
-            f"A payout over {dollars(approval_limit(db))} needs a handler's sign-off",
+            f"A payout over {dollars(claim['approval_limit'])} "
+            "needs a handler's sign-off",
         )
     if amount != claim["payout"]:
         raise HTTPException(

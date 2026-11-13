@@ -79,7 +79,7 @@ def test_uses_the_claim_instructions_from_the_backend(client):
     work("CLM-1003", model)
     system, first = model.prompts[0]
     assert isinstance(system, SystemMessage)
-    assert system.content == client.get("/api/instructions").json()["claim"]
+    assert system.content == client.get("/api/configurations/current").json()["prompt"]
     assert first.content == "Claim CLM-1003"
 
 
