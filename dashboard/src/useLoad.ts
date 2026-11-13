@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "./api";
 
 export const REFRESH_MS = 2000;
@@ -18,38 +18,49 @@ export function useLoad<T>(
 ): Loaded<T> {
   const [loaded, setLoaded] = useState<Omit<Loaded<T>, "reload">>({});
   const [version, setVersion] = useState(0);
+  const gate = useRef<{ pending: boolean; queued: (() => void) | null }>({
+    pending: false,
+    queued: null,
+  });
 
   useEffect(() => {
     let active = true;
-    let loading = false;
+    const requests = gate.current;
     const fetchNow = () => {
-      if (loading) return;
-      loading = true;
-      load().then(
-        (data) => {
-          loading = false;
-          if (active) setLoaded({ data });
-        },
-        (error: unknown) => {
-          loading = false;
-          if (error instanceof ApiError && error.status === 404)
-            clearInterval(timer);
-          if (active)
-            setLoaded((previous) => ({
-              data: previous.data,
-              error:
-                error instanceof Error
-                  ? error
-                  : new Error("The request failed"),
-            }));
-        },
-      );
+      if (!active || requests.pending) return;
+      requests.pending = true;
+      load()
+        .then(
+          (data) => {
+            if (active) setLoaded({ data });
+          },
+          (error: unknown) => {
+            if (error instanceof ApiError && error.status === 404)
+              clearInterval(timer);
+            if (active)
+              setLoaded((previous) => ({
+                data: previous.data,
+                error:
+                  error instanceof Error
+                    ? error
+                    : new Error("The request failed"),
+              }));
+          },
+        )
+        .finally(() => {
+          requests.pending = false;
+          const next = requests.queued;
+          requests.queued = null;
+          next?.();
+        });
     };
-    fetchNow();
+    if (requests.pending) requests.queued = fetchNow;
+    else fetchNow();
     const timer =
       refreshMs === undefined ? undefined : setInterval(fetchNow, refreshMs);
     return () => {
       active = false;
+      if (requests.queued === fetchNow) requests.queued = null;
       clearInterval(timer);
     };
   }, [load, refreshMs, version]);

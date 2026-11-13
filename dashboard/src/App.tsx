@@ -2,6 +2,7 @@ import { Link, Navigate, NavLink, Route, Routes } from "react-router";
 import { ClaimPage } from "./pages/ClaimPage";
 import { ConfigurationPage } from "./pages/ConfigurationPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { ImprovementPage } from "./pages/ImprovementPage";
 import { QueuePage } from "./pages/QueuePage";
 import { ScoreboardPage } from "./pages/ScoreboardPage";
 import { EvaluationPage } from "./pages/EvaluationPage";
@@ -11,6 +12,7 @@ import {
   EVALUATION_PAGE,
   SCOREBOARD_PAGE,
   SETTINGS_PAGE,
+  IMPROVEMENT_PAGE,
 } from "./paths";
 import { useAuth } from "./auth";
 import { SignInPage } from "./pages/SignInPage";
@@ -35,6 +37,7 @@ export function App() {
             Queue
           </NavLink>
           <NavLink to={CONFIGURATION_PAGE}>Configuration</NavLink>
+          <NavLink to={IMPROVEMENT_PAGE}>Improvement</NavLink>
           <NavLink to={SETTINGS_PAGE}>Settings</NavLink>
           <NavLink to={SCOREBOARD_PAGE}>Scoreboard</NavLink>
         </nav>
@@ -61,6 +64,7 @@ export function App() {
           <Route path={CLAIM_PAGE} element={<ClaimPage />} />
           <Route path={CONFIGURATION_PAGE} element={<ConfigurationPage />} />
           <Route path={SETTINGS_PAGE} element={<SettingsPage />} />
+          <Route path={IMPROVEMENT_PAGE} element={<ImprovementPage />} />
           <Route
             path="/instructions"
             element={<Navigate to={CONFIGURATION_PAGE} replace />}

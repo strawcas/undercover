@@ -1,9 +1,14 @@
 import { expect, test } from "./fixtures";
 import { post, put, AGENT_STAND_IN } from "./api";
+import {
+  internalRound,
+  playEvaluations,
+  playProposal,
+} from "./improvement_driver";
 
 // These tests stand in for the dispatcher and a claim agent by calling the
 // API through the dashboard's proxy, and watch the pages update without a
-// reload. Only this file starts runs, and it uses claims no other test touches.
+// reload. Starts are kept in this file so the shared service slot is sequential.
 
 test("the queue shows dispatch members and a records-built summary", async ({
   page,
@@ -263,4 +268,85 @@ test("evaluations show scores, copied decisions and stopped runs without changin
   await post(request, "/api/runs/stop", {});
   await page.getByRole("link", { name: "Scoreboard", exact: true }).click();
   await expect(page.getByText("Stopped", { exact: true })).toBeVisible();
+});
+
+test("improvement approvals retain feedback, refuse busy work and show the verdict and recipe", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(90_000);
+  await page.goto("/improvement");
+  await page.getByRole("button", { name: "Start round", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog
+    .getByRole("button", { name: "Start round", exact: true })
+    .click();
+  await expect(page.getByText(/Round accepted/)).toBeVisible();
+  const response = await request.get("/api/rounds");
+  const rounds = (await response.json()) as { round_id: string }[];
+  const identity = rounds[0].round_id;
+  const detail = page.getByRole("region", { name: "Selected round" });
+  await expect(
+    detail.getByText("Baseline evaluations", { exact: true }),
+  ).toBeVisible();
+  await playEvaluations(request, identity, 1, "baseline");
+  await playProposal(request, identity, "first-change");
+  await expect(
+    detail.getByRole("heading", { name: "Proposed configuration" }),
+  ).toBeVisible();
+  const feedback = "Keep the policy change general and explain the evidence";
+  await detail.getByLabel("Rejection reason").fill(feedback);
+  await detail.getByRole("button", { name: "Reject proposal" }).click();
+  await dialog.getByRole("button", { name: "Reject proposal" }).click();
+  await expect(page.getByText(/Rejection and feedback recorded/)).toBeVisible();
+  await playProposal(request, identity, "replacement-change");
+  await expect(
+    detail.getByRole("button", { name: "Approve testing" }),
+  ).toBeVisible();
+  await post(request, `${AGENT_STAND_IN}/api/dispatches`, { concurrency: 25 });
+  await detail.getByRole("button", { name: "Approve testing" }).click();
+  await dialog.getByRole("button", { name: "Approve proposal" }).click();
+  await expect(dialog.getByText(/already running/)).toBeVisible();
+  const stillPending = await request.get(internalRound(identity));
+  const pending = (await stillPending.json()) as {
+    proposals: { proposal_id: string; decision: string | null }[];
+  };
+  expect(
+    pending.proposals.find(
+      (value) => value.proposal_id === "replacement-change",
+    )?.decision,
+  ).toBeNull();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await post(request, `${AGENT_STAND_IN}/api/release`, {});
+  await detail.getByRole("button", { name: "Approve testing" }).click();
+  await dialog.getByRole("button", { name: "Approve proposal" }).click();
+  await expect(page.getByText(/Approval recorded/)).toBeVisible();
+  await playEvaluations(request, identity, 2, "evaluating");
+  await expect(detail.getByText("Rolled back", { exact: true })).toBeVisible();
+  await playProposal(request, identity, "next-recipe", "recipe");
+  await detail.getByRole("button", { name: "Approve recipe" }).click();
+  await dialog.getByRole("button", { name: "Approve proposal" }).click();
+  await expect(dialog).toBeHidden();
+  await post(request, `${internalRound(identity)}/finish`, {
+    stopped: false,
+    reason: "Offline approval loop complete",
+  });
+  await expect(detail.getByText("Finished", { exact: true })).toBeVisible();
+  await detail.getByText("Configuration · Rejected").click();
+  await expect(detail.getByText(`Handler feedback: ${feedback}`)).toBeVisible();
+  await expect(
+    page.getByText("Recipe version 2 · Dana Whitfield"),
+  ).toBeVisible();
+  await detail
+    .getByRole("link", { name: "Review configuration history" })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Configuration", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("combobox").selectOption("2");
+  await expect(
+    page.getByText("+Use the evidence to support the general policy rule.", {
+      exact: true,
+    }),
+  ).toBeVisible();
 });

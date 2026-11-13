@@ -8,6 +8,7 @@ export const claimPage = (claimId: string) =>
 export const SCOREBOARD_PAGE = "/scoreboard";
 export const CONFIGURATION_PAGE = "/configuration";
 export const SETTINGS_PAGE = "/settings";
+export const IMPROVEMENT_PAGE = "/improvement";
 export const EVALUATION_PAGE = `${SCOREBOARD_PAGE}/:runId`;
 export const evaluationPage = (runId: string) =>
   generatePath(EVALUATION_PAGE, { runId });

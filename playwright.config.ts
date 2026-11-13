@@ -1,5 +1,10 @@
 import { defineConfig } from "@playwright/test";
-import { AGENT_STAND_IN, AUTH_STAND_IN, JUDGE_STAND_IN } from "./e2e/addresses";
+import {
+  AGENT_STAND_IN,
+  AUTH_STAND_IN,
+  JUDGE_STAND_IN,
+  TEST_BACKEND,
+} from "./e2e/addresses";
 
 // The tests run their own backend and dashboard, on their own ports and
 // database, so they never touch the servers started by `npm run dev`.
@@ -12,7 +17,7 @@ export default defineConfig({
     {
       command:
         "uv run -m backend.seed && uv run -m uvicorn backend.main:app --port 8001",
-      url: "http://127.0.0.1:8001/api/health",
+      url: `${TEST_BACKEND}/api/health`,
       // An empty DATABASE_URL keeps the tests on SQLite, whatever the shell has.
       env: {
         UNDERCOVER_DB: "e2e/undercover.db",
@@ -35,13 +40,13 @@ export default defineConfig({
     {
       command: "node e2e/agent_stand_in.ts",
       url: `${AGENT_STAND_IN}/api/health`,
-      env: { PORT: new URL(AGENT_STAND_IN).port },
+      env: { PORT: new URL(AGENT_STAND_IN).port, UNDERCOVER_API: TEST_BACKEND },
     },
     {
       command: "npx vite dashboard --port 5174 --strictPort",
       url: "http://localhost:5174",
       env: {
-        UNDERCOVER_API: "http://127.0.0.1:8001",
+        UNDERCOVER_API: TEST_BACKEND,
         VITE_SUPABASE_URL: AUTH_STAND_IN,
         VITE_SUPABASE_PUBLISHABLE_KEY: "offline-publishable",
         NODE_ENV: "test",

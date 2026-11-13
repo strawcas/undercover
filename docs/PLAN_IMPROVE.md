@@ -209,14 +209,14 @@ Build the backend rule, round/report APIs and improver service on the earlier fo
 
 Make the approval loop and history reviewable by handlers. Reuse the shared diff, dialog, formatting and polling components rather than putting orchestration or scoring rules in the browser.
 
-- [ ] The page shows every round state described in the design, evaluation progress 1–3, settings snapshot, base/candidate/recipe versions, improver rationale and remaining/total spending. Polls preserve page selection, focus, scroll and entered rejection reasons.
-- [ ] Pending configuration proposals show colored instruction changes and before/after model/effort; recipe proposals use the same diff component. Approve/reject have in-app confirmation, rejection requires a reason, and failed/busy requests preserve the proposal without suggesting success.
-- [ ] Dana can start/stop a round and decide proposals; Marcus/Priya see explicit permission explanations and history. Vitest/API tests cover every new handler action without sign-in and without senior authority, with no unauthorized writes.
-- [ ] Newest-first history shows before/after held-out measures, verdict/reason, proposal decisions/handlers/times, recipe changes and attributed costs. Versions tried are retained even after rollback or stop, and no-proposal rounds have a clear empty candidate state.
-- [ ] The SVG chart shows held-out accuracy and grade for each tried version with readable labels, explicit scales, missing-value handling and an equivalent table. No chart library is added.
-- [ ] End-to-end tests sign in, start a round, play proposal/progress states through the stand-in API, reject with a reason, approve a later proposal, observe verdict/recipe completion and follow Configuration history. A busy dispatch refuses approval with no decision recorded.
-- [ ] Playwright MCP checks loading, empty, error/retry, awaiting-approval, running, kept/rolled-back and stopped states in both themes at laptop width. Keyboard focus and dialog cancellation work; there are no unexpected console errors or layout jumps during refresh.
-- [ ] `npm run check` passes; a fresh code review checks that the dashboard contains no copied rule or direct service request, blockers are fixed, criteria/STATUS updated and the phase committed.
+- [x] The page shows every round state described in the design, evaluation progress 1–3, settings snapshot, base/candidate/recipe versions, improver rationale and remaining/total spending. Polls preserve page selection, focus, scroll and entered rejection reasons.
+- [x] Pending configuration proposals show colored instruction changes and before/after model/effort; recipe proposals use the same diff component. Approve/reject have in-app confirmation, rejection requires a reason, and failed/busy requests preserve the proposal without suggesting success.
+- [x] Dana can start/stop a round and decide proposals; Marcus/Priya see explicit permission explanations and history. Vitest/API tests cover every new handler action without sign-in and without senior authority, with no unauthorized writes.
+- [x] Newest-first history shows before/after held-out measures, verdict/reason, proposal decisions/handlers/times, recipe changes and attributed costs. Versions tried are retained even after rollback or stop, and no-proposal rounds have a clear empty candidate state.
+- [x] The SVG chart shows held-out accuracy and grade for each tried version with readable labels, explicit scales, missing-value handling and an equivalent table. No chart library is added.
+- [x] End-to-end tests sign in, start a round, play proposal/progress states through the stand-in API, reject with a reason, approve a later proposal, observe verdict/recipe completion and follow Configuration history. A busy dispatch refuses approval with no decision recorded.
+- [x] Playwright MCP checks loading, empty, error/retry, awaiting-approval, running, kept/rolled-back and stopped states in both themes at laptop width. Keyboard focus and dialog cancellation work; there are no unexpected console errors or layout jumps during refresh.
+- [x] `npm run check` passes; a fresh code review checks that the dashboard contains no copied rule or direct service request, blockers are fixed, criteria/STATUS updated and the phase committed.
 
 ## Phase 6: Dashboard consistency and the prescribed live checks
 

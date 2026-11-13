@@ -1,4 +1,10 @@
-import type { DecisionKind, RunStatus, Status } from "./api";
+import type {
+  DecisionKind,
+  Round,
+  RoundStatus,
+  RunStatus,
+  Status,
+} from "./api";
 
 const dollars = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -48,6 +54,30 @@ export const runLabels: Record<RunStatus, string> = {
   finished: "Finished",
   stopped: "Stopped",
 };
+
+export const roundLabels: Record<RoundStatus, string> = {
+  baseline: "Baseline evaluations",
+  working: "Improver working",
+  awaiting_configuration: "Configuration approval",
+  evaluating: "Candidate evaluations",
+  awaiting_recipe: "Recipe approval",
+  finished: "Finished",
+  stopped: "Stopped",
+};
+
+export function roundClosed(status: RoundStatus) {
+  return status === "finished" || status === "stopped";
+}
+export function roundMeasurePlaceholder(status: RoundStatus) {
+  return roundClosed(status) ? "Not evaluated" : "Pending";
+}
+export function roundVerdictLabel(
+  round: Pick<Round, "verdict" | "status" | "candidate_version">,
+) {
+  if (round.verdict) return label(round.verdict);
+  if (!roundClosed(round.status)) return "Pending";
+  return round.candidate_version === null ? "No version tried" : "No verdict";
+}
 
 export const decisionLabels: Record<DecisionKind, string> = {
   approve: "Approved",

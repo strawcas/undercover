@@ -11,6 +11,9 @@ import type {
   EvaluationDetail,
   Policy,
   PreviousClaim,
+  Proposal,
+  Recipe,
+  Round,
 } from "./api";
 
 // Stands in for the backend: answers "METHOD /path" with the JSON given, or
@@ -297,4 +300,72 @@ export const settings: SettingsView = {
     },
   },
   changes: [],
+};
+
+export const changeProposal: Proposal = {
+  proposal_id: "proposal-one",
+  kind: "configuration",
+  arguments: {
+    instructions: "Check the policy and the evidence.",
+    model: "openai/gpt-6-luna",
+    reasoning_effort: "medium",
+    reason: "Improve evidence grounding",
+  },
+  diff: "--- Before\n+++ After\n-Old goal\n+Check the policy and the evidence.",
+  created_at: "2026-11-13T01:00:01Z",
+  decision: null,
+  feedback: null,
+  handler: null,
+  decided_at: null,
+  version: null,
+};
+export const recipeProposal: Proposal = {
+  ...changeProposal,
+  proposal_id: "recipe-one",
+  kind: "recipe",
+  arguments: {
+    recipe: "Use development evidence to improve the next round.",
+    reason: "Learn from the evaluated change",
+  },
+  diff: "--- Before\n+++ After\n-Old recipe\n+Use development evidence.",
+};
+export const recipe: Recipe = {
+  version: 1,
+  parent_version: null,
+  proposed_by: "UnderCover",
+  approved_by: null,
+  approved_at: null,
+  created_at: "2026-11-13T01:00:00Z",
+  reason: "Initial recipe",
+  recipe: "Read results and propose a general improvement.",
+  diff: "+Read results and propose a general improvement.",
+};
+export const round: Round = {
+  round_id: "round-current",
+  thread_id: "round-thread",
+  status: "awaiting_configuration",
+  started_at: "2026-11-13T01:00:00Z",
+  started_by: "Dana Whitfield",
+  finished_at: null,
+  base_version: 1,
+  candidate_version: null,
+  recipe_version: 1,
+  settings: settings.values,
+  models_allowed: settings.models_allowed,
+  improver_model: "openai/gpt-6-luna",
+  improver_effort: "medium",
+  progress: 0,
+  before: { ...evaluation.scores, accuracy: 0.7, grade: 1.5 },
+  after: null,
+  verdict: null,
+  explanation: null,
+  proposals: [changeProposal],
+  spending: {
+    improver: 0.01,
+    claims: 0.02,
+    judge: 0.003,
+    total: 0.033,
+    remaining: 0.467,
+    unknown: false,
+  },
 };

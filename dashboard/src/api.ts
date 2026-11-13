@@ -235,6 +235,76 @@ export interface EvaluationDetail extends Evaluation {
   comparisons: Comparison[];
 }
 
+export type ConfigurationProposal = Pick<
+  Configuration,
+  "instructions" | "model" | "reasoning_effort" | "reason"
+>;
+export interface RecipeProposal {
+  recipe: string;
+  reason: string;
+}
+export interface Recipe extends RecipeProposal {
+  version: number;
+  parent_version: number | null;
+  proposed_by: string;
+  approved_by: string | null;
+  approved_at: string | null;
+  created_at: string;
+  diff: string;
+}
+interface ProposalAudit {
+  proposal_id: string;
+  diff: string;
+  created_at: string;
+  decision: "approve" | "reject" | null;
+  feedback: string | null;
+  handler: string | null;
+  decided_at: string | null;
+  version: number | null;
+}
+export type Proposal = ProposalAudit &
+  (
+    | { kind: "configuration"; arguments: ConfigurationProposal }
+    | { kind: "recipe"; arguments: RecipeProposal }
+  );
+export type RoundStatus =
+  | "baseline"
+  | "working"
+  | "awaiting_configuration"
+  | "evaluating"
+  | "awaiting_recipe"
+  | "finished"
+  | "stopped";
+export interface Round {
+  round_id: string;
+  thread_id: string;
+  status: RoundStatus;
+  started_at: string;
+  started_by: string;
+  finished_at: string | null;
+  base_version: number;
+  candidate_version: number | null;
+  recipe_version: number;
+  settings: PlatformSettings;
+  models_allowed: Record<string, AllowedModel>;
+  improver_model: string;
+  improver_effort: string;
+  progress: number;
+  before: Scores | null;
+  after: Scores | null;
+  verdict: "kept" | "rolled_back" | null;
+  explanation: string | null;
+  proposals: Proposal[];
+  spending: {
+    improver: number;
+    claims: number;
+    judge: number;
+    total: number;
+    remaining: number;
+    unknown: boolean;
+  };
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -290,9 +360,27 @@ const claimPath = (claimId: string) =>
 const evaluationsPath = "/api/evaluations";
 const configurationsPath = "/api/configurations";
 const settingsPath = "/api/settings";
+const roundsPath = "/api/rounds";
+const roundPath = (roundId: string) =>
+  `${roundsPath}/${encodeURIComponent(roundId)}`;
 
 export const api = {
   getCurrentHandler: () => request<Handler>("/api/me"),
+  listRounds: () => request<Round[]>(roundsPath),
+  listRecipes: () => request<Recipe[]>("/api/recipes"),
+  startRound: () => post<{ status: string; round_id: string }>(roundsPath, {}),
+  stopRound: (roundId: string) =>
+    post<{ status: string }>(`${roundPath(roundId)}/stop`, {}),
+  decideProposal: (
+    roundId: string,
+    proposalId: string,
+    decision: "approve" | "reject",
+    reason: string | null,
+  ) =>
+    post<{ status: string }>(
+      `${roundPath(roundId)}/proposals/${encodeURIComponent(proposalId)}/decision`,
+      { decision, reason },
+    ),
   listClaims: () => request<ClaimSummary[]>("/api/claims"),
   getClaim: (claimId: string) => request<Claim>(claimPath(claimId)),
   listSteps: (claimId: string) =>

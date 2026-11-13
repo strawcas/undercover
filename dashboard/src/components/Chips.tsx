@@ -1,5 +1,10 @@
-import type { DecisionKind, RunStatus, Status } from "../api";
-import { decisionLabels, runLabels, statusLabels } from "../format";
+import type { DecisionKind, RoundStatus, RunStatus, Status } from "../api";
+import {
+  decisionLabels,
+  roundLabels,
+  runLabels,
+  statusLabels,
+} from "../format";
 
 export function StatusChip({ status }: Readonly<{ status: Status }>) {
   return (
@@ -19,4 +24,8 @@ export function DecisionChip({
 
 export function RunChip({ status }: Readonly<{ status: RunStatus }>) {
   return <span className={`chip run-${status}`}>{runLabels[status]}</span>;
+}
+
+export function RoundChip({ status }: Readonly<{ status: RoundStatus }>) {
+  return <span className={`chip round-${status}`}>{roundLabels[status]}</span>;
 }

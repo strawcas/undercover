@@ -1,8 +1,9 @@
+import { VersionScoresTable } from "../components/VersionScoresTable";
 import { useState } from "react";
 import { api } from "../api";
 import { Diff } from "../components/Diff";
 import { Message } from "../components/Message";
-import { gradeScore, modelCost, percent, seconds, time } from "../format";
+import { time } from "../format";
 import { REFRESH_MS, useLoad } from "../useLoad";
 
 export function ConfigurationPage() {
@@ -39,42 +40,7 @@ export function ConfigurationPage() {
               Averages of completed whole-set evaluations run by improvement
               rounds.
             </p>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Version</th>
-                  <th className="num">Accuracy</th>
-                  <th className="num">Grade / 3</th>
-                  <th className="num">Model cost / claim</th>
-                  <th className="num">Active time / claim</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.data?.map((version) => (
-                  <tr key={version.version}>
-                    <th scope="row">{version.version}</th>
-                    <td className="num">
-                      {version.held_out_scores
-                        ? percent(version.held_out_scores.accuracy)
-                        : "No evaluations"}
-                    </td>
-                    <td className="num mono">
-                      {gradeScore(version.held_out_scores?.grade ?? null)}
-                    </td>
-                    <td className="num mono">
-                      {modelCost(
-                        version.held_out_scores?.model_cost_per_claim ?? null,
-                      )}
-                    </td>
-                    <td className="num mono">
-                      {version.held_out_scores
-                        ? seconds(version.held_out_scores.seconds_per_claim)
-                        : "Unavailable"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <VersionScoresTable versions={history.data ?? []} />
           </section>
           <section className="panel" aria-label="Configuration versions">
             <h2>Current version {current.data?.version}</h2>
