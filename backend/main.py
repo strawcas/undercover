@@ -7,7 +7,7 @@ from typing import Annotated, Any
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from sqlalchemy import Connection, RowMapping, insert, select, update
 
-from backend import agent_service, configurations, evaluations
+from backend import agent_service, configurations, evaluation_completion, evaluations
 from backend import runs as run_records
 from backend import settings as platform_settings
 from backend.auth import CurrentHandler, SeniorHandler
@@ -251,7 +251,16 @@ def list_configurations(
     db: Database, handler: CurrentHandler
 ) -> list[ConfigurationHistory]:
     """List configuration versions and their changes newest first."""
-    return configurations.history(db)
+    return [
+        value.model_copy(
+            update={
+                "held_out_scores": evaluations.version_scores(
+                    db, value.version, "held_out"
+                )
+            }
+        )
+        for value in configurations.history(db)
+    ]
 
 
 @app.get("/api/configurations/{version}", operation_id="get_configuration")
@@ -504,9 +513,9 @@ def record_run_selection(
 
 
 @app.post("/api/runs/{run_id}/finish", operation_id="finish_run")
-def finish_run(run_id: str, db: Database) -> Run:
+def finish_run(run_id: str) -> Run:
     """Finish a run with a summary built entirely from backend records."""
-    return run_records.finish_run(db, run_id)
+    return evaluation_completion.finish_run(run_id)
 
 
 @app.post("/api/claims/{claim_id}/model-calls", operation_id="record_model_call")

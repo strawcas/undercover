@@ -139,6 +139,7 @@ export interface Run {
   concurrency: number;
   model: string;
   configuration_version: number;
+  round_id: string | null;
   reasoning_effort: string | null;
   set_name: "evaluation" | "held_out" | null;
   tiny: boolean | null;
@@ -203,6 +204,7 @@ export interface SettingsView {
 
 export type EvaluationSet = "evaluation" | "held_out";
 export interface Scores {
+  grade: number | null;
   decision_accuracy: number;
   accuracy: number;
   cost_of_mistakes: number;
@@ -212,11 +214,19 @@ export interface Scores {
 }
 export interface Evaluation extends Run {
   scores: Scores;
+  judge_cost: number | null;
 }
 export interface Comparison extends RunMember {
   source_id: string;
   handler_decision: DecisionKind;
   handler_payout: number;
+  handler_reason: string;
+  handler_reference: string;
+  agent_section: string | null;
+  grade: number | null;
+  letter: "F" | "C" | "B" | "A" | null;
+  same_grounds: number | null;
+  same_section: number | null;
   right_decision: boolean;
   right: boolean;
   mistake_cost: number;

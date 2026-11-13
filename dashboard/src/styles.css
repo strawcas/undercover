@@ -733,3 +733,30 @@ legend {
   gap: 6px;
   max-width: 24rem;
 }
+
+.grade-A {
+  background: var(--sea-green);
+}
+.grade-B {
+  background: var(--marigold);
+}
+.grade-C {
+  background: var(--coral);
+}
+.grade-F {
+  background: var(--raspberry);
+  color: white;
+}
+.grade-ungraded {
+  background: var(--inset);
+  color: var(--ink);
+}
+.grade-summary {
+  min-width: 150px;
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+.comparisons details {
+  margin-top: 8px;
+}

@@ -4,6 +4,7 @@ import { ApiError, api } from "../api";
 import { DecisionChip } from "../components/Chips";
 import { EvaluationSummary } from "../components/EvaluationSummary";
 import { Message } from "../components/Message";
+import { Grade } from "../components/Grade";
 import { modelCost, money, seconds } from "../format";
 import { claimPage, SCOREBOARD_PAGE } from "../paths";
 import { REFRESH_MS, useLoad } from "../useLoad";
@@ -38,14 +39,15 @@ export function EvaluationPage() {
               <tr>
                 <th>Claim</th>
                 <th>Handler decision</th>
-                <th>Handler payout</th>
+                <th className="num">Handler payout</th>
                 <th>Agent decision</th>
-                <th>Agent payout</th>
+                <th className="num">Agent payout</th>
                 <th>Result</th>
-                <th>Cost of mistake</th>
-                <th>Model cost</th>
-                <th>Active time</th>
-                <th>Agent reason</th>
+                <th className="num">Cost of mistake</th>
+                <th className="num">Model cost</th>
+                <th className="num">Active time</th>
+                <th>Explanation grade</th>
+                <th>Explanations</th>
               </tr>
             </thead>
             <tbody>
@@ -59,7 +61,7 @@ export function EvaluationPage() {
                   <td>
                     <DecisionChip decision={item.handler_decision} />
                   </td>
-                  <td className="mono">{money(item.handler_payout)}</td>
+                  <td className="mono num">{money(item.handler_payout)}</td>
                   <td>
                     {item.decision ? (
                       <DecisionChip decision={item.decision} />
@@ -67,16 +69,27 @@ export function EvaluationPage() {
                       "No decision (scored as referred)"
                     )}
                   </td>
-                  <td className="mono">{money(item.payout ?? 0)}</td>
+                  <td className="mono num">{money(item.payout ?? 0)}</td>
                   <td>
                     <span className={`chip ${item.right ? "match" : "miss"}`}>
                       {item.right ? "Match" : "Miss"}
                     </span>
                   </td>
-                  <td className="mono">{money(item.mistake_cost)}</td>
-                  <td className="mono">{modelCost(item.llm_cost)}</td>
-                  <td className="mono">{seconds(item.active_seconds)}</td>
-                  <td>{item.reason ?? item.error ?? "No decision recorded"}</td>
+                  <td className="mono num">{money(item.mistake_cost)}</td>
+                  <td className="mono num">{modelCost(item.llm_cost)}</td>
+                  <td className="mono num">{seconds(item.active_seconds)}</td>
+                  <td>
+                    <Grade value={item} />
+                  </td>
+                  <td>
+                    <p>{item.reason ?? item.error ?? "No decision recorded"}</p>
+                    <p className="muted small">{item.agent_section}</p>
+                    <details>
+                      <summary>Handler reason</summary>
+                      <p>{item.handler_reason}</p>
+                      <p className="muted small">{item.handler_reference}</p>
+                    </details>
+                  </td>
                 </tr>
               ))}
             </tbody>

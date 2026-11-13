@@ -272,6 +272,7 @@ class Run(BaseModel):
     concurrency: int
     model: str
     configuration_version: int
+    round_id: str | None
     reasoning_effort: str | None
     set_name: SetName | None
     tiny: bool | None
@@ -298,6 +299,7 @@ class RunRequest(BaseModel):
     kind: RunKind
     concurrency: int = Field(ge=1, le=25)
     configuration_version: int = Field(ge=1)
+    round_id: str | None
     set_name: SetName | None
     tiny: bool | None
 
@@ -306,7 +308,9 @@ class RunRequest(BaseModel):
         if self.kind == "evaluation" and (self.set_name is None or self.tiny is None):
             raise ValueError("An evaluation needs a set and tiny/full selection")
         if self.kind == "dispatch" and (
-            self.set_name is not None or self.tiny is not None
+            self.set_name is not None
+            or self.tiny is not None
+            or self.round_id is not None
         ):
             raise ValueError("A dispatch has no evaluation selection")
         return self
@@ -336,6 +340,7 @@ class WorkSliceRequest(BaseModel):
 
 
 class Scores(BaseModel):
+    grade: float | None
     decision_accuracy: float
     accuracy: float
     cost_of_mistakes: float
@@ -348,6 +353,13 @@ class Comparison(RunMember):
     source_id: str
     handler_decision: DecisionKind
     handler_payout: float
+    handler_reason: str
+    handler_reference: str
+    agent_section: str | None
+    grade: float | None
+    letter: Literal["F", "C", "B", "A"] | None
+    same_grounds: float | None
+    same_section: float | None
     right_decision: bool
     right: bool
     mistake_cost: float
@@ -355,6 +367,7 @@ class Comparison(RunMember):
 
 class Evaluation(Run):
     scores: Scores
+    judge_cost: float | None
 
 
 class EvaluationDetail(Evaluation):

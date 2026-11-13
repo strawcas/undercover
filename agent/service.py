@@ -70,6 +70,7 @@ def work_run(selection: dict[str, Any]) -> None:
             selection
             | {
                 "configuration_version": configuration["version"],
+                "round_id": None,
             }
         )
         dispatcher.dispatch(run["run_id"], run["concurrency"])

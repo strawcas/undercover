@@ -75,6 +75,16 @@ export function seconds(amount: number): string {
 export function percent(amount: number): string {
   return `${(amount * 100).toFixed(1)}%`;
 }
+export const NOT_GRADED = "Not graded";
+
+export function gradeScore(value: number | null): string {
+  return value === null ? NOT_GRADED : `${value.toFixed(2)} / 3`;
+}
+
+export function judgeCheck(probability: number | null): string {
+  if (probability === null) return NOT_GRADED;
+  return probability >= 0.5 ? "Yes" : "No";
+}
 export function timestamp(iso: string): string {
   return new Date(iso).toLocaleString("en-US", {
     dateStyle: "medium",

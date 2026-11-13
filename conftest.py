@@ -4,8 +4,9 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from backend import agent_service, auth
+from backend import agent_service, auth, judge
 from backend.database import engine, seed
+from backend.judge_models import Grade
 from backend.main import app
 from backend.tests.auth_support import PUBLIC_JWK, authorization
 
@@ -59,3 +60,15 @@ def auth_keys(monkeypatch):
     """Verify test signatures locally instead of fetching real project keys."""
     monkeypatch.setattr(auth, "SUPABASE_URL", "http://test-auth")
     monkeypatch.setattr(auth.keys, "fetch_data", lambda: {"keys": [PUBLIC_JWK]})
+
+
+@pytest.fixture(autouse=True)
+def stub_judge(monkeypatch):
+    """Keep every automated evaluation on a local judge stand-in."""
+    monkeypatch.setattr(
+        judge,
+        "grade",
+        lambda state: Grade(
+            grade=1, letter="C", same_grounds=0.6, same_section=0.7, judge_cost=0.0001
+        ),
+    )

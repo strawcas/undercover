@@ -117,6 +117,7 @@ def test_failed_attempt_threads_are_all_returned_for_startup_cleanup(client):
             "tiny": True,
             "concurrency": 5,
             "configuration_version": 1,
+            "round_id": None,
         }
     )
     claim_id = run["members"][0]["claim_id"]
@@ -173,6 +174,7 @@ def test_startup_cleans_stopped_evaluation_threads_but_preserves_records(monkeyp
             "tiny": True,
             "concurrency": 5,
             "configuration_version": 1,
+            "round_id": None,
         }
     )
     claim_id = run["members"][0]["claim_id"]
@@ -197,6 +199,7 @@ def test_startup_cleans_stopped_evaluation_threads_but_preserves_records(monkeyp
             "tiny": None,
             "concurrency": 25,
             "configuration_version": 1,
+            "round_id": None,
         }
     )
     assert (

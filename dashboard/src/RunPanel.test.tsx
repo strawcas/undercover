@@ -15,6 +15,7 @@ const running: Run = {
   concurrency: 3,
   model: "stub",
   configuration_version: 1,
+  round_id: null,
   reasoning_effort: null,
   set_name: null,
   tiny: null,

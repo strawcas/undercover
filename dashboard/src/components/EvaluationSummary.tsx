@@ -1,6 +1,7 @@
 import type { Evaluation } from "../api";
 import {
   evaluationName,
+  gradeScore,
   modelCost,
   money,
   percent,
@@ -11,6 +12,7 @@ import { RunChip } from "./Chips";
 
 export function EvaluationSummary({ run }: Readonly<{ run: Evaluation }>) {
   const measures = [
+    ["Average explanation grade", gradeScore(run.scores.grade)],
     ["Decision match", percent(run.scores.decision_accuracy)],
     ["Accuracy within $1", percent(run.scores.accuracy)],
     ["Cost of mistakes", money(run.scores.cost_of_mistakes)],
@@ -19,6 +21,7 @@ export function EvaluationSummary({ run }: Readonly<{ run: Evaluation }>) {
     ["Active time / claim", seconds(run.scores.seconds_per_claim)],
     ["Run elapsed time", seconds(run.seconds)],
     ["Total model cost", modelCost(run.llm_cost)],
+    ["Total judge cost", modelCost(run.judge_cost)],
     ["Total active claim time", seconds(run.active_seconds)],
   ];
   return (

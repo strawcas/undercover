@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import Connection, func, insert, select, update
+from sqlalchemy import Connection, bindparam, func, insert, select, update
 
 from backend.clock import now
 from backend.configurations import get_configuration
@@ -307,23 +307,29 @@ def finish_run(db: Connection, run_id: str, status: str = "finished") -> Run:
     """Freeze every selected outcome and build the final summary."""
     row = dict(running(db, run_id)) | {"finished_at": now()}
     snapshots = members(db, row, measured_work(db, run_id))
-    for member in snapshots:
+    if snapshots:
         db.execute(
             update(run_claims)
             .where(
-                run_claims.c.run_id == run_id,
-                run_claims.c.claim_id == member.claim_id,
+                run_claims.c.run_id == bindparam("frozen_run"),
+                run_claims.c.claim_id == bindparam("frozen_claim"),
             )
-            .values(result=member.model_dump())
+            .values(result=bindparam("frozen_result")),
+            [
+                {
+                    "frozen_run": run_id,
+                    "frozen_claim": member.claim_id,
+                    "frozen_result": member.model_dump(),
+                }
+                for member in snapshots
+            ],
         )
     db.execute(
         update(runs)
         .where(runs.c.run_id == run_id)
-        .values(status=status, finished_at=row["finished_at"])
-    )
-    run = get_run(db, run_id)
-    db.execute(
-        update(runs).where(runs.c.run_id == run_id).values(summary=summary(run.members))
+        .values(
+            status=status, finished_at=row["finished_at"], summary=summary(snapshots)
+        )
     )
     return get_run(db, run_id)
 

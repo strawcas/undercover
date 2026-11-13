@@ -2,6 +2,8 @@ import { afterEach, expect, it, vi } from "vitest";
 import {
   addOnName,
   date,
+  gradeScore,
+  judgeCheck,
   label,
   modelCost,
   money,
@@ -14,6 +16,20 @@ afterEach(() => vi.unstubAllEnvs());
 it("formats money in US dollars", () => {
   expect(money(1150)).toBe("$1,150.00");
   expect(money(0)).toBe("$0.00");
+});
+
+it("distinguishes ungraded explanations from an F score of zero", () => {
+  expect(gradeScore(null)).toBe("Not graded");
+  expect(gradeScore(0)).toBe("0.00 / 3");
+  expect(gradeScore(1.6)).toBe("1.60 / 3");
+});
+
+it("shows saved judge probabilities as yes/no with a 0.5 threshold", () => {
+  expect(judgeCheck(null)).toBe("Not graded");
+  expect(judgeCheck(0)).toBe("No");
+  expect(judgeCheck(0.499)).toBe("No");
+  expect(judgeCheck(0.5)).toBe("Yes");
+  expect(judgeCheck(1)).toBe("Yes");
 });
 
 it("formats dates without shifting the day", () => {

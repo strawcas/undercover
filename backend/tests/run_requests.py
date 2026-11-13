@@ -6,6 +6,7 @@ def configuration(**overrides):
         "kind": "dispatch",
         "concurrency": 3,
         "configuration_version": 1,
+        "round_id": None,
         "set_name": None,
         "tiny": None,
     } | overrides

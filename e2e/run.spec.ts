@@ -22,6 +22,7 @@ test("the queue shows dispatch members and a records-built summary", async ({
     kind: "dispatch",
     concurrency: 3,
     configuration_version: 1,
+    round_id: null,
     set_name: null,
     tiny: null,
   });
@@ -172,6 +173,7 @@ test("evaluations show scores, copied decisions and stopped runs without changin
     tiny: true,
     concurrency: 5,
     configuration_version: 1,
+    round_id: null,
   });
   const run = (await response.json()) as {
     run_id: string;
@@ -228,13 +230,17 @@ test("evaluations show scores, copied decisions and stopped runs without changin
   await expect(
     evaluations.getByText("Finished", { exact: true }),
   ).toBeVisible();
-  await expect(evaluations.getByText("$0.000200")).toBeVisible();
+  await expect(evaluations.getByText("$0.000200")).toHaveCount(2);
   await evaluations.getByRole("link").first().click();
   await expect(
     page.getByRole("heading", { name: "Evaluation results" }),
   ).toBeVisible();
   await expect(page.getByText("Evaluation rationale")).toBeVisible();
   const comparison = page.getByRole("table");
+  await expect(comparison.getByText("A", { exact: true })).toHaveCount(1);
+  await expect(comparison.getByText("F", { exact: true })).toHaveCount(4);
+  await expect(comparison.getByText("Same grounds: Yes")).toBeVisible();
+  await expect(comparison.getByText("Same section: No")).toHaveCount(5);
   await expect(
     comparison.getByText("No decision (scored as referred)"),
   ).toHaveCount(4);
@@ -251,6 +257,7 @@ test("evaluations show scores, copied decisions and stopped runs without changin
     tiny: true,
     concurrency: 3,
     configuration_version: 1,
+    round_id: null,
   });
   expect(stopped.ok()).toBe(true);
   await post(request, "/api/runs/stop", {});

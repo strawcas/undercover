@@ -1,5 +1,5 @@
 import { defineConfig } from "@playwright/test";
-import { AGENT_STAND_IN, AUTH_STAND_IN } from "./e2e/addresses";
+import { AGENT_STAND_IN, AUTH_STAND_IN, JUDGE_STAND_IN } from "./e2e/addresses";
 
 // The tests run their own backend and dashboard, on their own ports and
 // database, so they never touch the servers started by `npm run dev`.
@@ -19,11 +19,18 @@ export default defineConfig({
         DATABASE_URL: "",
         UNDERCOVER_AGENT: AGENT_STAND_IN,
         VITE_SUPABASE_URL: AUTH_STAND_IN,
+        OPENROUTER_DECISIONS_URL: JUDGE_STAND_IN,
+        OPENROUTER_API_KEY: "offline",
+        MODEL_NAME: "",
       },
     },
     {
       command: "node e2e/auth_stand_in.ts",
       url: `${AUTH_STAND_IN}/auth/v1/.well-known/jwks.json`,
+    },
+    {
+      command: "node e2e/judge_stand_in.ts",
+      url: `${JUDGE_STAND_IN}/health`,
     },
     {
       command: "node e2e/agent_stand_in.ts",

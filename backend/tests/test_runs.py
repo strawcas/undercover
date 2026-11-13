@@ -39,6 +39,27 @@ def test_run_lifecycle_and_frozen_results(client):
     assert client.post(f"/api/runs/{run_id}/finish").status_code == 409
 
 
+def test_completion_freezes_all_members_in_one_database_batch(client):
+    run_id = start(client).json()["run_id"]
+    ids = [row["claim_id"] for row in client.get("/api/claims").json()]
+    client.put(f"/api/runs/{run_id}/selection", json={"claim_ids": ids})
+    batches = []
+
+    def capture(statement, parameters, executemany, **context):
+        if statement.startswith("UPDATE run_claims"):
+            batches.append((executemany, len(parameters)))
+
+    database = engine()
+    event.listen(database, "before_cursor_execute", capture, named=True)
+    try:
+        frozen = client.post(f"/api/runs/{run_id}/finish").json()
+    finally:
+        event.remove(database, "before_cursor_execute", capture)
+    assert batches == [(True, 25)]
+    assert len(frozen["members"]) == 25
+    assert all(member["customer_name"] for member in frozen["members"])
+
+
 def test_unknowns_and_membership_validation(client):
     assert client.get("/api/runs/unknown").status_code == 404
     assert member(client, "unknown", "CLM-1001").status_code == 404

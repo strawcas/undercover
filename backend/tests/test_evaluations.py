@@ -6,13 +6,8 @@ from sqlalchemy import delete, func, select, update
 from backend import runs
 from backend.database import claims, engine, evaluation_labels, evaluation_sources, seed
 from backend.scoring import compare
+from backend.tests.evaluation_requests import evaluation
 from backend.tests.run_requests import configuration
-
-
-def evaluation(client, set_name="evaluation", tiny=True):
-    return client.post(
-        "/api/runs", json=configuration(kind="evaluation", set_name=set_name, tiny=tiny)
-    ).json()
 
 
 @pytest.mark.parametrize("set_name", ["evaluation", "held_out"])
@@ -239,6 +234,7 @@ def test_all_selected_copies_are_scored_with_attributed_cost_time(client, monkey
     assert result["status"] == "stopped"
     assert result["seconds"] == 30
     assert result["scores"] == {
+        "grade": 0,
         "decision_accuracy": 0.2,
         "accuracy": 0.2,
         "cost_of_mistakes": 2951,
@@ -268,4 +264,7 @@ def test_zero_work_scores_are_defined(client):
     run = evaluation(client, "held_out")
     result = client.get(f"/api/evaluations/{run['run_id']}").json()
     assert result["members"] == []
-    assert all(value == 0 for value in result["scores"].values())
+    assert result["scores"]["grade"] is None
+    assert all(
+        value == 0 for name, value in result["scores"].items() if name != "grade"
+    )

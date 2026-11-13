@@ -64,6 +64,8 @@ it("shows all evaluation measures and refreshes running results", async () => {
   const list = screen.getByRole("list", { name: "Evaluations" });
   for (const label of [
     "Decision match",
+    "Average explanation grade",
+    "Total judge cost",
     "Accuracy within $1",
     "Cost of mistakes",
     "Straight through",
@@ -120,6 +122,13 @@ it("shows readable matches, misses and absent decisions beside handlers", async 
     within(table).getByText("The policy excludes this event."),
   ).toBeDefined();
   expect(within(table).getByText("Unavailable")).toBeDefined();
+  expect(within(table).getByText("A").className).toBe("chip grade-A");
+  expect(within(table).getByText("1.60 / 3")).toBeDefined();
+  expect(within(table).getByText("F").className).toBe("chip grade-F");
+  expect(within(table).getByText("0.00 / 3")).toBeDefined();
+  expect(within(table).getByText("Same grounds: Yes")).toBeDefined();
+  expect(within(table).getAllByText("Same section: No")).toHaveLength(2);
+  expect(within(table).getByText("The delay is covered.")).toBeDefined();
   expect(
     within(table).getByRole("link", { name: "CLM-1001" }).getAttribute("href"),
   ).toBe("/claims/EVAL-1");
@@ -129,4 +138,30 @@ it("identifies missing evaluations", async () => {
   stubApi({});
   renderAt("/scoreboard/missing");
   expect(await screen.findByText("Evaluation not found")).toBeDefined();
+});
+
+it("shows unavailable grading without inventing a score or a check", async () => {
+  const comparisons = evaluation.comparisons.map((item) => ({
+    ...item,
+    grade: null,
+    letter: null,
+    same_grounds: null,
+    same_section: null,
+  }));
+  stubApi({
+    "GET /api/evaluations/eval-1": {
+      ...evaluation,
+      scores: { ...evaluation.scores, grade: null },
+      judge_cost: null,
+      comparisons,
+    },
+  });
+  renderAt("/scoreboard/eval-1");
+  await screen.findByText("Evaluation results");
+  const table = screen.getByRole("table");
+  expect(within(table).getAllByText("Not graded")).toHaveLength(2);
+  expect(within(table).getAllByText("Same grounds: Not graded")).toHaveLength(
+    2,
+  );
+  expect(within(table).queryByText("0.00 / 3")).toBeNull();
 });

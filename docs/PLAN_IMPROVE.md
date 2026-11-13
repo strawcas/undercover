@@ -178,15 +178,15 @@ Add backend-owned version records and settings before judging or improving anyth
 
 Add grading inside evaluation completion, retaining existing scoring and measurements. Persist results once so later polling, dashboards and round comparisons use the same evidence.
 
-- [ ] Judge unit tests verify the lab's three questions/rubric, explicit agent section, per-call `server_url`, disabled retries and 10-second timeout through a stubbed installed SDK boundary. No test reaches OpenRouter.
-- [ ] A response with score 1.6 and highest probability at A displays letter A, proving the letter is not rounded. Both check probabilities are retained, with deterministic Yes/No display at the chosen boundary.
-- [ ] An undecided claim gets F/0 with no judge call; a failed judge call is Not graded and excluded from the average; all-ungraded and free-mode evaluations have null grade. One failing claim does not discard other grades.
-- [ ] A slow-judge stand-in proves grading runs in parallel, the entire finish request stays under 20 seconds, database connections are released during calls, and the 30-second caller does not time out. Startup/stopped-run cleanup also stays within the finish contract.
-- [ ] Finishing/retrying completion and polling cannot duplicate grading charges or change frozen outcomes. Judge cost is stored separately from claim cost, with a total available for later round accounting.
-- [ ] Tests distinguish full round evaluations from manual full evaluations, tiny runs and stopped runs; only eligible completed round runs enter a version's set averages. Existing mistake, accuracy, straight-through and time formulas remain unchanged.
-- [ ] Scoreboard and evaluation detail tests show average score/grade, claim letters, same-grounds/section checks and separate judge cost, including missing-grade states and copied-claim links.
-- [ ] Sentinel-label tests prove claim prompts/tools/version fetches still receive no handler decisions, reasons, grades or scores. Playwright MCP checks the graded and ungraded pages using the stand-in.
-- [ ] `npm run check` passes; a fresh code review checks the grading boundary and transaction lifetime, blockers are fixed, criteria/STATUS updated and the phase committed.
+- [x] Judge unit tests verify the lab's three questions/rubric, explicit agent section, per-call `server_url`, disabled retries and 10-second timeout through a stubbed installed SDK boundary. No test reaches OpenRouter.
+- [x] A response with score 1.6 and highest probability at A displays letter A, proving the letter is not rounded. Both check probabilities are retained, with deterministic Yes/No display at the chosen boundary.
+- [x] An undecided claim gets F/0 with no judge call; a failed judge call is Not graded and excluded from the average; all-ungraded and free-mode evaluations have null grade. One failing claim does not discard other grades.
+- [x] A slow-judge stand-in proves grading runs in parallel, the entire finish request stays under 20 seconds, database connections are released during calls, and the 30-second caller does not time out. Startup/stopped-run cleanup also stays within the finish contract.
+- [x] Finishing/retrying completion and polling cannot duplicate grading charges or change frozen outcomes. Judge cost is stored separately from claim cost, with a total available for later round accounting.
+- [x] Tests distinguish full round evaluations from manual full evaluations, tiny runs and stopped runs; only eligible completed round runs enter a version's set averages. Existing mistake, accuracy, straight-through and time formulas remain unchanged.
+- [x] Scoreboard and evaluation detail tests show average score/grade, claim letters, same-grounds/section checks and separate judge cost, including missing-grade states and copied-claim links.
+- [x] Sentinel-label tests prove claim prompts/tools/version fetches still receive no handler decisions, reasons, grades or scores. Playwright MCP checks the graded and ungraded pages using the stand-in.
+- [x] `npm run check` passes; a fresh code review checks the grading boundary and transaction lifetime, blockers are fixed, criteria/STATUS updated and the phase committed.
 
 ## Phase 4: Durable improvement rounds and spending control
 

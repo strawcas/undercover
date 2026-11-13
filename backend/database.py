@@ -187,6 +187,9 @@ runs = Table(
         nullable=False,
     ),
     Column("reasoning_effort", Text),
+    Column("round_id", Text),
+    Column("grading_started", Boolean, nullable=False, default=False),
+    Column("scores", JSON),
     Column("set_name", Text),
     Column("tiny", Boolean),
     Column("status", Text, nullable=False),
@@ -203,6 +206,13 @@ run_claims = Table(
     Column("status", Text, nullable=False),
     Column("error", Text),
     Column("result", JSON),
+)
+evaluation_grades = Table(
+    "evaluation_grades",
+    metadata,
+    Column("run_id", Text, ForeignKey("runs.run_id"), primary_key=True),
+    Column("claim_id", Text, ForeignKey("claims.claim_id"), primary_key=True),
+    Column("record", JSON, nullable=False),
 )
 model_calls = Table(
     "model_calls",
