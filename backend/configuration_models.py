@@ -13,6 +13,12 @@ class ConfigurationProposal(BaseModel):
     reason: str = Field(min_length=1)
 
 
+class RecipeProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    recipe: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+
 class VersionMetadata(BaseModel):
     version: int
     parent_version: int | None

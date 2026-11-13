@@ -6,8 +6,10 @@ import sys
 from dotenv import load_dotenv
 
 from agent import api, models
+from agent.backend_client import Refused
+from agent.checkpoints import checkpointer
 from agent.console import show_reports
-from agent.harness import checkpointer, claim_graph, work_claim
+from agent.harness import claim_graph, work_claim
 
 
 def main(args: list[str]) -> None:
@@ -22,7 +24,7 @@ def main(args: list[str]) -> None:
         graph = claim_graph(models.build_model(configuration), saver, configuration)
         try:
             work_claim(options.claim_id, graph)
-        except api.Refused as refusal:
+        except Refused as refusal:
             parser.exit(1, f"{options.claim_id}  not started: {refusal}\n")
 
 

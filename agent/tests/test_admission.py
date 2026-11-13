@@ -9,7 +9,7 @@ import pytest
 from fastapi import BackgroundTasks, HTTPException
 from fastapi.testclient import TestClient
 
-from agent import api, dispatcher, harness, service
+from agent import api, checkpoints, dispatcher, service
 from backend.tests.run_requests import configuration
 
 
@@ -34,7 +34,7 @@ def test_background_failure_releases_admission(monkeypatch, caplog):
         raise RuntimeError("cannot create run")
 
     monkeypatch.setattr(api, "start_run", fail)
-    monkeypatch.setattr(harness, "clear_threads", lambda threads: None)
+    monkeypatch.setattr(checkpoints, "clear_threads", lambda threads: None)
     assert service.run_slot.acquire(blocking=False)
     service.work_run(configuration())
     assert not service.run_slot.locked()
@@ -51,7 +51,7 @@ def test_background_dispatch_does_not_block_health(monkeypatch):
     monkeypatch.setattr(dispatcher, "dispatch", dispatch)
     monkeypatch.setenv("MODEL_NAME", "stub")
     monkeypatch.setattr(service, "checkpointer", lambda: nullcontext(None))
-    monkeypatch.setattr(harness, "clear_threads", lambda threads: None)
+    monkeypatch.setattr(checkpoints, "clear_threads", lambda threads: None)
     with TestClient(service.app) as agent, ThreadPoolExecutor(max_workers=1) as workers:
         response = workers.submit(
             agent.post, "/api/dispatches", json={"concurrency": 1}
@@ -100,7 +100,7 @@ def test_startup_waits_then_stops_abandoned_runs(monkeypatch):
     monkeypatch.setattr(api, "health", health)
     monkeypatch.setattr(service.asyncio, "sleep", wait)
     monkeypatch.setattr(service, "checkpointer", lambda: nullcontext(None))
-    monkeypatch.setattr(harness, "clear_threads", cleared.extend)
+    monkeypatch.setattr(checkpoints, "clear_threads", cleared.extend)
     with TestClient(service.app) as agent:
         assert agent.get("/api/health").status_code == 200
     assert calls == ["health", "wait", "health"]

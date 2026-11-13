@@ -7,7 +7,14 @@ from typing import Annotated, Any
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from sqlalchemy import Connection, RowMapping, insert, select, update
 
-from backend import agent_service, configurations, evaluation_completion, evaluations
+from backend import (
+    agent_service,
+    configurations,
+    evaluation_completion,
+    evaluations,
+    improvement_budget,
+    improvements,
+)
 from backend import runs as run_records
 from backend import settings as platform_settings
 from backend.auth import CurrentHandler, SeniorHandler
@@ -29,6 +36,8 @@ from backend.database import (
 )
 from backend.dependencies import Database
 from backend.documents import search, sections, titles
+from backend.improvement_models import EvaluationQuote
+from backend.improvement_routes import router as improvement_router
 from backend.models import (
     Claim,
     ClaimSummary,
@@ -50,6 +59,7 @@ from backend.models import (
     Policy,
     PreviousClaim,
     Run,
+    RunAdmission,
     RunClaimRequest,
     RunRequest,
     RunSelectionRequest,
@@ -76,6 +86,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="UnderCover", lifespan=lifespan)
+app.include_router(improvement_router)
 
 
 @app.post("/api/dispatches", operation_id="start_dispatch", status_code=202)
@@ -126,6 +137,7 @@ def find_claim(db: Connection, claim_id: str, lock: bool = False) -> RowMapping:
     """Return one claim's row, or raise a 404."""
     query = claim_view.where(claims.c.claim_id == claim_id)
     if lock:
+        improvement_budget.guard_claim_write(db, claim_id)
         query = query.with_for_update(of=claims)
     row = db.execute(query).mappings().first()
     if row is None:
@@ -311,6 +323,7 @@ def list_handlers(db: Database) -> list[Handler]:
 @app.post("/api/claims/{claim_id}/start", operation_id="start_claim")
 def start_claim(claim_id: str, request: StartRequest, db: Database) -> Claim:
     """Start work on a waiting claim, which moves it to in progress."""
+    improvement_budget.admit_run(db, find_claim(db, claim_id)["evaluation_id"])
     if find_claim(db, claim_id, lock=True)["status"] != "waiting":
         raise HTTPException(409, f"Claim {claim_id} is not waiting")
     db.execute(
@@ -328,6 +341,7 @@ def start_claim(claim_id: str, request: StartRequest, db: Database) -> Claim:
 @app.post("/api/claims/{claim_id}/steps", operation_id="record_step")
 def record_step(claim_id: str, request: StepRequest, db: Database) -> Step:
     """Record one step of the agent's work on a claim."""
+    improvement_budget.guard_claim_write(db, claim_id)
     thread_id = find_claim(db, claim_id)["thread_id"]
     if thread_id is None:
         raise HTTPException(409, f"Claim {claim_id} has not been started")
@@ -457,6 +471,19 @@ def fail_claim(claim_id: str, request: FailureRequest, db: Database) -> Claim:
 @app.post("/api/runs", operation_id="start_run")
 def start_run(request: RunRequest, db: Database) -> Run:
     """Create a run recording its execution configuration."""
+    if request.round_id is not None:
+        if request.set_name is None:
+            raise HTTPException(422, "Round work must be a whole-set evaluation")
+        quote = improvements.evaluation_quote(
+            db,
+            request.round_id,
+            EvaluationQuote(
+                set_name=request.set_name,
+                configuration_version=request.configuration_version,
+            ),
+        )
+        if not quote.allowed:
+            raise HTTPException(409, quote.reason)
     run = run_records.start_run(db, request)
     if request.kind == "evaluation":
         evaluations.create_copies(db, run.run_id, request)
@@ -528,6 +555,22 @@ def record_model_call(
         raise HTTPException(409, "Claim has not been started")
     run_records.record_model_call(db, claim_id, claim["thread_id"], request)
     return {"status": "recorded"}
+
+
+@app.post("/api/claims/{claim_id}/admission", operation_id="admit_claim")
+def admit_claim(claim_id: str, request: RunAdmission, db: Database) -> dict[str, str]:
+    """Check stop and spending immediately before new claim model work."""
+    claim = find_claim(db, claim_id)
+    if claim["evaluation_id"] is not None and request.run_id != claim["evaluation_id"]:
+        raise HTTPException(409, "Evaluation work must use its own run")
+    improvement_budget.admit_run(db, request.run_id)
+    return {"status": "accepted"}
+
+
+@app.post("/api/runs/{run_id}/stop", operation_id="stop_run")
+def stop_run(run_id: str, db: Database) -> Run:
+    """Close one drained run without interrupting another accepted operation."""
+    return run_records.finish_run(db, run_id, "stopped")
 
 
 @app.put(

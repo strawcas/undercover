@@ -172,6 +172,29 @@ steps = Table(
     Column("content", Text, nullable=False),
     Column("created_at", Text, nullable=False),
 )
+rounds = Table(
+    "rounds",
+    metadata,
+    Column("number", Integer, primary_key=True),
+    Column("round_id", Text, nullable=False, unique=True),
+    Column("status", Text, nullable=False),
+    Column("record", JSON, nullable=False),
+)
+round_proposals = Table(
+    "round_proposals",
+    metadata,
+    Column("round_id", Text, ForeignKey("rounds.round_id"), primary_key=True),
+    Column("proposal_id", Text, primary_key=True),
+    Column("record", JSON, nullable=False),
+)
+round_model_calls = Table(
+    "round_model_calls",
+    metadata,
+    Column("round_id", Text, ForeignKey("rounds.round_id"), primary_key=True),
+    Column("reply_id", Text, primary_key=True),
+    Column("cost", Float),
+    Column("record", JSON, nullable=False),
+)
 runs = Table(
     "runs",
     metadata,
@@ -187,7 +210,7 @@ runs = Table(
         nullable=False,
     ),
     Column("reasoning_effort", Text),
-    Column("round_id", Text),
+    Column("round_id", Text, ForeignKey("rounds.round_id")),
     Column("grading_started", Boolean, nullable=False, default=False),
     Column("scores", JSON),
     Column("set_name", Text),

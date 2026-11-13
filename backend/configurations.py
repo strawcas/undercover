@@ -1,6 +1,7 @@
 """Immutable configuration and recipe records with backend-generated diffs."""
 
 import difflib
+from dataclasses import dataclass
 
 from fastapi import HTTPException
 from sqlalchemy import Connection, Table, insert, select, update
@@ -13,11 +14,20 @@ from backend.configuration_models import (
     ConfigurationProposal,
     Recipe,
     RecipeHistory,
+    RecipeProposal,
 )
 from backend.database import configurations, recipes, settings
 from backend.documents import contents
 from backend.models import Handler
 from backend.settings import allowed_models
+from backend.settings_models import AllowedModel
+
+
+@dataclass
+class Approval:
+    parent: int
+    handler: Handler
+    proposed_by: str
 
 
 def record(db: Connection, table: Table, version: int) -> dict:
@@ -107,9 +117,13 @@ def recipe_history(db: Connection) -> list[RecipeHistory]:
     ]
 
 
-def validate_model(db: Connection, proposal: ConfigurationProposal) -> None:
+def validate_model(
+    db: Connection,
+    proposal: ConfigurationProposal,
+    catalogue: dict[str, AllowedModel] | None = None,
+) -> None:
     """Refuse a model or effort outside the file-owned catalogue."""
-    model = allowed_models(db).get(proposal.model)
+    model = (allowed_models(db) if catalogue is None else catalogue).get(proposal.model)
     if model is None or proposal.reasoning_effort not in model.reasoning_efforts:
         raise HTTPException(
             422, "Choose a model and reasoning effort from the allowed models"
@@ -117,22 +131,55 @@ def validate_model(db: Connection, proposal: ConfigurationProposal) -> None:
 
 
 def append_configuration(
-    db: Connection, proposal: ConfigurationProposal, handler: Handler, proposed_by: str
+    db: Connection,
+    proposal: ConfigurationProposal,
+    approval: Approval,
+    catalogue: dict[str, AllowedModel] | None = None,
 ) -> Configuration:
     """Save an approved candidate without activating it."""
-    validate_model(db, proposal)
-    parent = current_version(db)
-    values = proposal.model_dump() | {
-        "parent_version": parent,
-        "proposed_by": proposed_by,
-        "approved_by": handler.name,
+    validate_model(db, proposal, catalogue)
+    return Configuration(
+        **append_version(db, configurations, proposal.model_dump(), approval)
+    )
+
+
+def append_version(
+    db: Connection,
+    table: Table,
+    proposal: dict,
+    approval: Approval,
+) -> dict:
+    """Keep provenance and immutable version writes in one place."""
+    values = proposal | {
+        "parent_version": approval.parent,
+        "proposed_by": approval.proposed_by,
+        "approved_by": approval.handler.name,
         "approved_at": now(),
         "created_at": now(),
     }
     version = db.execute(
-        insert(configurations).values(record=values).returning(configurations.c.version)
+        insert(table).values(record=values).returning(table.c.version)
     ).scalar_one()
-    return Configuration(**values, version=version)
+    return values | {"version": version}
+
+
+def append_recipe(
+    db: Connection,
+    proposal: RecipeProposal,
+    approval: Approval,
+) -> Recipe:
+    """Append and activate an approved recipe for future rounds."""
+    get_recipe(db, approval.parent)
+    result = Recipe(
+        **append_version(
+            db,
+            recipes,
+            proposal.model_dump(),
+            approval,
+        )
+    )
+    db.execute(update(settings).values(current_recipe=result.version))
+    return result
 
 
 def activate_configuration(db: Connection, version: int) -> None:

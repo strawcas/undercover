@@ -7,7 +7,7 @@ from functools import partial
 from fastapi import HTTPException
 from sqlalchemy import select, update
 
-from backend import evaluations, judge
+from backend import evaluations, improvement_budget, judge
 from backend import runs as run_records
 from backend.database import engine, evaluation_grades, insert_once, runs
 from backend.judge_models import Grade, undecided
@@ -58,6 +58,11 @@ def prepare(run_id: str) -> PreparedEvaluation | Run:
             return run_records.finish_run(db, run_id)
         if row["status"] != "running":
             return run_records.get_run(db, run_id)
+        if row["round_id"] is not None:
+            try:
+                improvement_budget.admit(db, row["round_id"])
+            except HTTPException:
+                return run_records.finish_run(db, run_id, "stopped")
         claimed = db.execute(
             update(runs)
             .where(
@@ -79,16 +84,26 @@ def save_results(run_id: str, results: list[tuple[str, Grade]]) -> Run:
     """Persist grading facts and the final score snapshot in one transaction."""
     with engine().begin() as db:
         row = db.execute(
-            select(runs.c.status).where(runs.c.run_id == run_id).with_for_update()
-        ).scalar_one()
+            select(runs.c.status, runs.c.round_id)
+            .where(runs.c.run_id == run_id)
+            .with_for_update()
+        ).one()
+        stopped = row.status != "running"
+        if row.round_id is not None:
+            try:
+                improvement_budget.admit(db, row.round_id)
+            except HTTPException:
+                stopped = True
         records = [
             {"run_id": run_id, "claim_id": claim_id, "record": judgement.model_dump()}
             for claim_id, judgement in results
         ]
         if records:
             insert_once(db, evaluation_grades, records)
-        if row != "running":
+        if row.status != "running":
             return run_records.get_run(db, run_id)
+        if stopped:
+            return run_records.finish_run(db, run_id, "stopped")
         finished = run_records.finish_run(db, run_id)
         evaluation = evaluations.get_evaluation(db, run_id)
         db.execute(

@@ -8,6 +8,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy import update
 
 from agent import api, harness
+from agent.backend_client import Refused
 from agent.tests.records import claim_of, steps_of
 from agent.tests.stubs import StubModel, call, decide, graph_on, record, stub
 from backend.database import engine, settings
@@ -308,7 +309,7 @@ def test_a_failure_after_the_decision_keeps_it(client, monkeypatch, caplog):
 def test_a_claim_that_isnt_waiting_is_not_started(client):
     work("CLM-1003", stub(*decide("refer", 0)))
     before = steps_of(client, "CLM-1003")
-    with pytest.raises(api.Refused, match="^409: Claim CLM-1003 is not waiting$"):
+    with pytest.raises(Refused, match="^409: Claim CLM-1003 is not waiting$"):
         work("CLM-1003", stub())
     assert steps_of(client, "CLM-1003") == before
     assert claim_of(client, "CLM-1003")["attempts"] == 1

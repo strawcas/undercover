@@ -1,15 +1,13 @@
 """The UnderCover backend's API: one function for each operation the agent uses."""
 
-import os
 from enum import StrEnum
 from typing import Any, Literal
 
-import httpx
 from pydantic import BaseModel, Field
 
-BACKEND_URL = os.getenv("UNDERCOVER_API", "http://127.0.0.1:8000")
+from agent import backend_client
 
-backend = httpx.Client(base_url=f"{BACKEND_URL}/api", timeout=30)
+backend = backend_client.client()
 
 DecisionKind = Literal["approve", "decline", "refer"]
 APPROVE: DecisionKind = "approve"
@@ -81,20 +79,9 @@ class Line(BaseModel):
     )
 
 
-class Refused(Exception):
-    """The backend refused a request, with its status code and reason."""
-
-    def __init__(self, status_code: int, detail: str) -> None:
-        super().__init__(f"{status_code}: {detail}")
-        self.status_code, self.detail = status_code, detail
-
-
 def _call(method: str, path: str, **request: Any) -> Any:
     """Send one request to the backend and return its JSON, or raise Refused."""
-    response = backend.request(method, path, **request)
-    if response.is_error:
-        raise Refused(response.status_code, response.json()["detail"])
-    return response.json()
+    return backend_client.call(backend, method, path, **request)
 
 
 def list_claims() -> list[dict[str, Any]]:
@@ -142,6 +129,14 @@ def calculate_payout(
 
 def start_claim(claim_id: str, thread_id: str) -> dict[str, Any]:
     return _call("POST", f"/claims/{claim_id}/start", json={"thread_id": thread_id})
+
+
+def admit_claim(claim_id: str, run_id: str | None) -> dict[str, str]:
+    return _call("POST", f"/claims/{claim_id}/admission", json={"run_id": run_id})
+
+
+def stop_run(run_id: str) -> dict[str, Any]:
+    return _call("POST", f"/runs/{run_id}/stop")
 
 
 def record_step(claim_id: str, kind: StepKind, content: str) -> dict[str, Any]:

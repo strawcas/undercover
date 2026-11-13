@@ -7,6 +7,9 @@ from typing import Any
 import httpx
 from fastapi import HTTPException
 
+from backend.improvement_models import ProposalDecision
+from backend.models import Handler
+
 AGENT_URL = os.getenv("UNDERCOVER_AGENT", "http://127.0.0.1:8002")
 
 agent = httpx.Client(base_url=f"{AGENT_URL}/api", timeout=10)
@@ -52,3 +55,23 @@ def resume_claim(claim_id: str) -> None:
         log.warning(
             "The agent didn't pick up %s after its sign-off: %s", claim_id, error
         )
+
+
+def start_round(handler: Handler) -> dict[str, str]:
+    """Ask the service to start a round with the verified senior handler."""
+    return _start("/rounds", handler.model_dump())
+
+
+def stop_round(round_id: str, handler: Handler) -> dict[str, str]:
+    """Ask the service to mark a round stopped before draining its work."""
+    return _start(f"/rounds/{round_id}/stop", handler.model_dump())
+
+
+def decide_proposal(
+    round_id: str, proposal_id: str, decision: ProposalDecision, handler: Handler
+) -> dict[str, str]:
+    """Forward a proposal decision without writing an approval prematurely."""
+    return _start(
+        f"/rounds/{round_id}/proposals/{proposal_id}/decision",
+        decision.model_dump() | {"handler": handler.model_dump()},
+    )

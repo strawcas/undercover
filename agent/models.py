@@ -9,7 +9,9 @@ from pydantic import SecretStr
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
-def build_model(configuration: dict[str, Any]) -> ChatOpenAI:
+def build_model(
+    configuration: dict[str, Any], *, parallel_tool_calls: bool | None = None
+) -> ChatOpenAI:
     """Build exactly the model and effort pinned to this work."""
     effort = configuration["reasoning_effort"]
     return ChatOpenAI(
@@ -19,4 +21,7 @@ def build_model(configuration: dict[str, Any]) -> ChatOpenAI:
         api_key=SecretStr(os.environ["OPENROUTER_API_KEY"]),
         timeout=120,
         max_retries=5,
+        model_kwargs={}
+        if parallel_tool_calls is None
+        else {"parallel_tool_calls": parallel_tool_calls},
     )

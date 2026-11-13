@@ -178,6 +178,43 @@ def version_evaluations(db: Connection, version: int, set_name: str) -> list[Sco
     return [Scores(**value) for value in values]
 
 
+def development_examples(db: Connection, version: int) -> list[dict]:
+    """Read mistakes and the five lowest graded correct development explanations."""
+    identity = (
+        db.execute(
+            select(runs.c.run_id)
+            .where(
+                runs.c.configuration_version == version,
+                runs.c.set_name == "evaluation",
+                runs.c.status == "finished",
+                runs.c.round_id.is_not(None),
+                runs.c.tiny.is_(False),
+            )
+            .order_by(runs.c.number.desc())
+        )
+        .scalars()
+        .first()
+    )
+    if identity is None:
+        return []
+    items = get_evaluation(db, identity).comparisons
+    weakest = sorted(
+        (item for item in items if item.right and item.grade is not None),
+        key=lambda item: item.grade if item.grade is not None else 3,
+    )[:5]
+    chosen = [item for item in items if not item.right] + weakest
+    sources = db.execute(
+        select(evaluation_sources.c.source_id, evaluation_sources.c.record).where(
+            evaluation_sources.c.set_name == "evaluation",
+            evaluation_sources.c.source_id.in_([item.source_id for item in chosen]),
+        )
+    )
+    summaries = {source_id: record["summary"] for source_id, record in sources}
+    return [
+        item.model_dump() | {"summary": summaries[item.source_id]} for item in chosen
+    ]
+
+
 def version_scores(db: Connection, version: int, set_name: str) -> Scores | None:
     """Average eligible run measures as in the lab, preserving unavailable cost."""
     values = version_evaluations(db, version, set_name)

@@ -10,7 +10,7 @@ from langchain_core.exceptions import ModelTimeoutError
 from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy import update
 
-from agent import api, dispatcher, harness, service
+from agent import api, checkpoints, dispatcher, harness, service
 from agent.tests.stubs import call, graph_on, record, stub
 from backend.database import engine, evaluation_labels
 
@@ -43,7 +43,7 @@ def test_service_works_copies_with_no_labels_and_clears_held_threads(
             saver.delete_thread(thread)
             cleared.append(thread)
 
-    monkeypatch.setattr(harness, "clear_threads", clear)
+    monkeypatch.setattr(checkpoints, "clear_threads", clear)
     request = api.backend.request
     paths = []
 
@@ -145,8 +145,8 @@ def test_exhausted_and_failed_copies_clear_all_attempts(client, monkeypatch, tra
         first = [graph_on(stub(RuntimeError("failed")), saver) for _ in range(2)]
     graphs = iter(first + [graph_on(stub(record("refer", 0)), saver) for _ in range(4)])
     monkeypatch.setattr(harness, "execution_graph", lambda version=None: next(graphs))
-    monkeypatch.setattr(harness.checkpoints, "pool", object())
-    monkeypatch.setattr(harness, "PostgresSaver", lambda pool: saver)
+    monkeypatch.setattr(checkpoints.state, "pool", object())
+    monkeypatch.setattr(checkpoints, "PostgresSaver", lambda pool: saver)
     assert service.run_slot.acquire(blocking=False)
     service.work_run(
         {"kind": "evaluation", "set_name": "evaluation", "tiny": True, "concurrency": 1}
@@ -185,8 +185,8 @@ def test_startup_cleans_stopped_evaluation_threads_but_preserves_records(monkeyp
     before = api.get_claim(claim_id)
     assert saver.get_tuple(harness.thread_of(before)) is not None
     monkeypatch.setattr(service, "checkpointer", lambda: nullcontext(None))
-    monkeypatch.setattr(harness.checkpoints, "pool", object())
-    monkeypatch.setattr(harness, "PostgresSaver", lambda pool: saver)
+    monkeypatch.setattr(checkpoints.state, "pool", object())
+    monkeypatch.setattr(checkpoints, "PostgresSaver", lambda pool: saver)
     with TestClient(service.app) as agent:
         assert agent.get("/api/health").status_code == 200
     assert api.get_run(run["run_id"])["status"] == "stopped"

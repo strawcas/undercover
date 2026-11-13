@@ -7,7 +7,7 @@ from langchain_core.exceptions import ModelRateLimitError, ModelTimeoutError
 from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy import select
 
-from agent import api, dispatcher, harness, models
+from agent import api, checkpoints, dispatcher, harness, models
 from agent.tests.queue_setup import leave_waiting
 from agent.tests.stubs import call, graph_on, record, stub
 from backend.database import engine, run_claims, work_slices
@@ -125,8 +125,8 @@ def test_empty_and_reserved_claims_are_skipped(monkeypatch):
 
 def test_graphs_have_distinct_savers_on_one_pool(monkeypatch):
     pool = object()
-    monkeypatch.setattr(harness.checkpoints, "pool", pool)
-    monkeypatch.setattr(harness, "PostgresSaver", lambda p: {"pool": p})
+    monkeypatch.setattr(checkpoints.state, "pool", pool)
+    monkeypatch.setattr(checkpoints, "PostgresSaver", lambda p: {"pool": p})
     monkeypatch.setattr(models, "build_model", lambda configuration: "stub")
     monkeypatch.setattr(
         harness, "claim_graph", lambda llm, saver, configuration=None: saver
@@ -139,17 +139,18 @@ def test_graphs_have_distinct_savers_on_one_pool(monkeypatch):
 
 
 def test_worker_rechecks_status_and_releases_on_failure(monkeypatch):
+    run_id = api.start_run(configuration())["run_id"]
     graph = graph_on(stub(record("refer", 0)))
     monkeypatch.setattr(harness, "execution_graph", lambda version=None: graph)
     harness.work_claim("CLM-1001", graph)
-    assert harness.execute_claim("CLM-1001", "unused", 1) == "No eligible work"
+    assert harness.execute_claim("CLM-1001", run_id, 1) == "No eligible work"
     assert not harness.is_reserved("CLM-1001")
 
     def fail(version=None):
         raise RuntimeError("pool unavailable")
 
     monkeypatch.setattr(harness, "execution_graph", fail)
-    assert "left for a handler" in harness.execute_claim("CLM-1002", "unused", 1)
+    assert "left for a handler" in harness.execute_claim("CLM-1002", run_id, 1)
     assert not harness.is_reserved("CLM-1002")
 
 

@@ -3,11 +3,8 @@
 import contextvars
 import json
 import logging
-import os
 import uuid
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
-from dataclasses import dataclass
+from collections.abc import Callable
 from functools import cache, partial
 from threading import Condition
 from time import monotonic
@@ -26,18 +23,15 @@ from langchain_core.messages import (
 from langchain_core.runnables import Runnable, RunnableConfig
 from langfuse.langchain import CallbackHandler
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
 from langgraph.types import Command, interrupt
-from psycopg import Connection, sql
-from psycopg.rows import DictRow, dict_row
-from psycopg_pool import ConnectionPool
 
-from agent import api, models
+from agent import api, checkpoints, measurements, models
+from agent.backend_client import Refused
 from agent.tools import CLAIM_TOOLS, ClaimContext, ClaimState
 
 log = logging.getLogger(__name__)
@@ -46,8 +40,6 @@ ClaimGraph = CompiledStateGraph[ClaimState, ClaimContext, Any, Any]
 Messages = dict[str, list[BaseMessage]]
 Start = Messages | Command | None
 
-SCHEMA = "undercover"
-CONNECTIONS = 4
 CLAIM_MODEL_CALLS = 30
 NO_DECISION = "The agent finished without recording a decision"
 WORK_CLAIM = "Work claim"
@@ -58,12 +50,6 @@ PAUSE = "wait_for_sign_off"
 PAY = "pay"
 
 
-@dataclass
-class Checkpoints:
-    pool: ConnectionPool[Connection[DictRow]] | None = None
-
-
-checkpoints = Checkpoints()
 claim_lock = Condition()
 owned_claims: set[str] = set()
 pending_resumes: set[str] = set()
@@ -110,8 +96,6 @@ def take_resume(claim_id: str) -> None:
 
 def execution_graph(version: int | None = None) -> ClaimGraph:
     """Give each execution its own saver on the initialized process pool."""
-    if checkpoints.pool is None:
-        raise RuntimeError("The checkpoint pool is not open")
     configuration = (
         api.get_current_configuration()
         if version is None
@@ -119,7 +103,7 @@ def execution_graph(version: int | None = None) -> ClaimGraph:
     )
     return claim_graph(
         models.build_model(configuration),
-        PostgresSaver(checkpoints.pool),
+        checkpoints.new_saver(),
         configuration,
     )
 
@@ -128,6 +112,7 @@ def execute_reserved_claim(claim_id: str, run_id: str | None, version: int) -> s
     """Start or resume an owned claim, retrying ordinary failed attempts fresh."""
     try:
         while True:
+            api.admit_claim(claim_id, run_id)
             claim = api.get_claim(claim_id)
             if claim["status"] == api.Status.WAITING:
                 line = work_claim(claim_id, None, run_id, version)
@@ -148,51 +133,13 @@ def execute_claim(claim_id: str, run_id: str, version: int) -> str:
     return execute_reserved_claim(claim_id, run_id, version)
 
 
-def clear_threads(thread_ids: list[str]) -> None:
-    """Discard evaluation checkpoints while retaining the backend's records."""
-    if checkpoints.pool is None:
-        raise RuntimeError("The checkpoint pool is not open")
-    saver = PostgresSaver(checkpoints.pool)
-    for thread_id in thread_ids:
-        saver.delete_thread(thread_id)
-
-
 class TooManyModelCalls(Exception):
     """The claim agent made as many model calls as it may without finishing."""
 
 
-@contextmanager
-def checkpointer() -> Iterator[PostgresSaver]:
-    """Save the claim graph's progress in Postgres at DATABASE_URL, in our own schema,
-    with at most CONNECTIONS connections."""
-    settings = {
-        "autocommit": True,
-        "prepare_threshold": 0,
-        "row_factory": dict_row,
-        "options": f"-c search_path={SCHEMA}",
-        "application_name": f"undercover-agent-{os.getpid()}",
-    }
-    with ConnectionPool[Connection[DictRow]](
-        os.environ["DATABASE_URL"],
-        min_size=1,
-        max_size=CONNECTIONS,
-        kwargs=settings,
-    ) as pool:
-        with pool.connection() as connection:
-            create = sql.SQL("CREATE SCHEMA IF NOT EXISTS {}")
-            connection.execute(create.format(sql.Identifier(SCHEMA)))
-        saver = PostgresSaver(pool)
-        saver.setup()
-        checkpoints.pool = pool
-        try:
-            yield saver
-        finally:
-            checkpoints.pool = None
-
-
 def refusal(error: Exception) -> str:
     """Show the model why a tool was refused, and let any other error stop the agent."""
-    if isinstance(error, api.Refused):
+    if isinstance(error, Refused):
         return f"Refused with status {error}"
     if isinstance(error, ToolException):
         return f"Refused: {error}"
@@ -239,19 +186,11 @@ def call_model(
     if calls >= CLAIM_MODEL_CALLS:
         message = f"The claim agent made {calls} model calls without finishing"
         raise TooManyModelCalls(message)
+    api.admit_claim(runtime.context.claim_id, runtime.context.run_id)
     reply = llm.invoke([instructions(), *state["messages"]])
-    usage = reply.usage_metadata if isinstance(reply, AIMessage) else None
-    reported = reply.response_metadata.get("token_usage") or {}
     api.record_model_call(
         runtime.context.claim_id,
-        {
-            "reply_id": reply.id or str(uuid.uuid4()),
-            "run_id": runtime.context.run_id,
-            "input_tokens": usage.get("input_tokens") if usage else None,
-            "output_tokens": usage.get("output_tokens") if usage else None,
-            "total_tokens": usage.get("total_tokens") if usage else None,
-            "cost": reported.get("cost"),
-        },
+        measurements.model_reply(reply, runtime.context.run_id),
     )
     record_reply(runtime.context.claim_id, reply)
     return {"messages": [reply], "model_calls": 1}
@@ -329,12 +268,16 @@ def claim_config(
 ) -> RunnableConfig:
     """Run on the claim's thread, traced in Langfuse in the session of that thread."""
     session = f"{claim['claim_id']}:{claim['thread_id']}"
+    run = api.get_run(run_id) if run_id else None
+    tags = [run_id] if run_id else []
+    if run and run.get("round_id"):
+        tags.append(run["round_id"])
     return thread_of(claim) | {
         "callbacks": [CallbackHandler()],
         "metadata": {
             "langfuse_session_id": session,
             "langfuse_trace_name": name,
-            "langfuse_tags": [run_id] if run_id else [],
+            "langfuse_tags": tags,
         },
         # One tool call at a time, so two decisions in one reply can't race.
         "max_concurrency": 1,

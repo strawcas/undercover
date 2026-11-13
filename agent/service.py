@@ -5,6 +5,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from threading import Lock
 from typing import Any, Literal
 
@@ -14,15 +15,18 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from agent import api, dispatcher, harness
+from agent import api, checkpoints, improver, improver_api, run_execution
+from agent.backend_client import Refused
+from agent.checkpoints import checkpointer
 from agent.console import show_reports
 from agent.harness import (
     carry_on,
-    checkpointer,
     queue_resume,
     release_claim,
     take_resume,
 )
+from backend.improvement_models import HandlerDecision
+from backend.models import Handler
 
 
 @asynccontextmanager
@@ -37,6 +41,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="UnderCover Agent", lifespan=lifespan)
 run_slot = Lock()
+
+
+@dataclass
+class Slot:
+    owner: str = "another operation"
+
+
+slot = Slot()
 log = logging.getLogger(__name__)
 
 
@@ -58,44 +70,39 @@ async def recover() -> None:
         except httpx.RequestError:
             await asyncio.sleep(0.25)
     threads = await run_in_threadpool(api.stop_runs)
-    await run_in_threadpool(harness.clear_threads, threads)
+    await run_in_threadpool(checkpoints.clear_threads, threads)
+    await run_in_threadpool(improver_api.recover)
 
 
 def work_run(selection: dict[str, Any]) -> None:
     """Create the accepted run in background and always release its admission slot."""
-    run = None
     try:
         configuration = api.get_current_configuration()
-        run = api.start_run(
+        run_execution.execute(
             selection
             | {
                 "configuration_version": configuration["version"],
                 "round_id": None,
             }
         )
-        dispatcher.dispatch(run["run_id"], run["concurrency"])
-        api.finish_run(run["run_id"])
     except Exception:
         log.exception("The run stopped before it finished")
-        try:
-            harness.clear_threads(api.stop_runs())
-        except Exception:
-            log.exception("Run recovery will be retried at service startup")
     finally:
-        if run is not None and run["kind"] == "evaluation":
-            try:
-                harness.clear_threads(api.get_run_threads(run["run_id"]))
-            except Exception:
-                log.exception("Evaluation checkpoints will be cleared at startup")
         run_slot.release()
+
+
+def reserve(owner: str) -> None:
+    """Name the current work while holding the service's single admission lock."""
+    if not run_slot.acquire(blocking=False):
+        raise HTTPException(409, f"Cannot start while {slot.owner} is running")
+    slot.owner = owner
 
 
 def accept_run(
     selection: dict[str, Any], background: BackgroundTasks
 ) -> dict[str, str]:
     """Reserve the single dispatch/evaluation slot before scheduling any work."""
-    if not run_slot.acquire(blocking=False):
-        raise HTTPException(409, "A dispatch or evaluation is already running")
+    reserve(selection["kind"])
     background.add_task(work_run, selection)
     return {"status": "accepted"}
 
@@ -124,10 +131,75 @@ def start_evaluation(
     return accept_run({"kind": "evaluation", **request.model_dump()}, background)
 
 
-@app.exception_handler(api.Refused)
-def refused(_: Request, error: api.Refused) -> JSONResponse:
+@app.exception_handler(Refused)
+def refused(_: Request, error: Refused) -> JSONResponse:
     """Pass on the backend's refusal, such as a claim it doesn't know."""
     return JSONResponse({"detail": error.detail}, status_code=error.status_code)
+
+
+def work_round(round_id: str, decision: dict | None = None) -> None:
+    """Hold the work slot until all nested work drains or an approval pauses it."""
+    try:
+        improver.work(round_id, decision)
+    except Exception:
+        log.exception("The improvement stretch stopped")
+        try:
+            current = improver_api.get_round(round_id)
+            if current["status"] not in ("finished", "stopped"):
+                improver_api.finish(
+                    round_id, True, "The improvement stretch failed; see service logs"
+                )
+        except Exception:
+            log.exception("Round recovery will be retried at startup")
+    finally:
+        run_slot.release()
+
+
+@app.post("/api/rounds", operation_id="start_round", status_code=202)
+def start_round(handler: Handler, background: BackgroundTasks) -> dict[str, str]:
+    """Reserve a stretch before creating and scheduling a senior handler's round."""
+    reserve("improvement round")
+    try:
+        current = improver_api.start_round(handler.model_dump())
+    except Exception:
+        run_slot.release()
+        raise
+    background.add_task(work_round, current["round_id"])
+    return {"status": "accepted", "round_id": current["round_id"]}
+
+
+@app.post("/api/rounds/{round_id}/stop", operation_id="stop_round", status_code=202)
+def stop_round(round_id: str, handler: Handler) -> dict[str, str]:
+    """Mark a round stopped immediately, leaving in-flight work to drain."""
+    if not handler.can_approve_over_limit:
+        raise HTTPException(403, "A senior handler must stop rounds")
+    improver_api.finish(round_id, True, f"Stopped by {handler.name}")
+    return {"status": "accepted"}
+
+
+@app.post(
+    "/api/rounds/{round_id}/proposals/{proposal_id}/decision",
+    operation_id="decide_proposal",
+    status_code=202,
+)
+def decide_proposal(
+    round_id: str,
+    proposal_id: str,
+    request: HandlerDecision,
+    background: BackgroundTasks,
+) -> dict[str, str]:
+    """Record a decision only after admission, then resume the saved tool call."""
+    reserve(f"improvement round {round_id}")
+    try:
+        improver_api.decide(round_id, proposal_id, request.model_dump())
+    except Exception:
+        run_slot.release()
+        raise
+    decision: dict[str, Any] = {"type": request.decision}
+    if request.decision == "reject":
+        decision["message"] = request.reason
+    background.add_task(work_round, round_id, decision)
+    return {"status": "accepted"}
 
 
 def resume_owned(claim: dict[str, Any]) -> None:

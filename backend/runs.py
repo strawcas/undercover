@@ -20,6 +20,7 @@ from backend.database import (
     steps,
     work_slices,
 )
+from backend.improvement_budget import lock_round
 from backend.models import (
     ModelCallRequest,
     Run,
@@ -386,6 +387,12 @@ def record_model_call(
 ) -> None:
     """Save each provider reply once, preserving unavailable measurements."""
     validate_run(db, request.run_id)
+    if request.run_id is not None:
+        round_id = db.execute(
+            select(runs.c.round_id).where(runs.c.run_id == request.run_id)
+        ).scalar_one()
+        if round_id is not None:
+            lock_round(db, round_id)
     insert_once(
         db,
         model_calls,

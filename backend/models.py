@@ -325,6 +325,10 @@ class RunSelectionRequest(BaseModel):
     claim_ids: list[str]
 
 
+class RunAdmission(BaseModel):
+    run_id: str | None
+
+
 class ModelCallRequest(BaseModel):
     reply_id: str = Field(min_length=1)
     run_id: str | None

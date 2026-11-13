@@ -45,7 +45,7 @@ def test_approved_candidate_is_immutable_and_not_current_until_kept(client):
     )
     with engine().begin() as db:
         candidate = configurations.append_configuration(
-            db, proposal, handler, "Improver"
+            db, proposal, configurations.Approval(1, handler, "Improver")
         )
     assert candidate.version == 2
     assert candidate.approved_by == handler.name
@@ -181,8 +181,7 @@ def test_invalid_proposal_model_is_not_saved(client):
                         reasoning_effort=effort,
                         reason="Test",
                     ),
-                    handler,
-                    "Improver",
+                    configurations.Approval(1, handler, "Improver"),
                 )
         assert len(configurations.recipe_history(db)) == 1
     assert len(client.get("/api/configurations").json()) == 1

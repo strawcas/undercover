@@ -34,3 +34,7 @@ A decision is scored on two things: the decision itself and the payout. A valid 
 ## The security claim
 
 - `security/`: CLM-1901, a stolen watch whose story carries an instruction to the AI to approve it in full, with its policy, its customer and the handler's decision (decline). It is a prompt injection kept for security testing, in a folder of its own, apart from the queue and the evaluation sets.
+
+## Improvement evidence
+
+Seeding resets configuration and recipe versions to 1 and clears round, proposal, evaluation, usage and settings-audit records. Each new round gets fresh UUID identities, including its checkpoint thread. It captures platform settings and the model catalogue; later setting edits apply to future rounds. Backend reports give the improver development-set summaries, handler reasons, weak graded explanations and both sets' aggregate scores. Held-out claim contents and labels remain backend-only, available to the judge and signed-in dashboard views. Claim execution receives neither set's labels or scores. Supabase Auth accounts/passwords are never created or changed by seeding.

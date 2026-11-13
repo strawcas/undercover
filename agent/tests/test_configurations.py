@@ -2,7 +2,7 @@
 
 from langgraph.checkpoint.memory import InMemorySaver
 
-from agent import api, harness, models
+from agent import api, checkpoints, harness, models
 from agent.tests.stubs import record, stub
 from backend import configurations
 from backend.configuration_models import ConfigurationProposal
@@ -26,8 +26,7 @@ def test_pinned_version_supplies_the_model_and_prompt_after_activation(
                 reasoning_effort="medium",
                 reason="Test immutable version",
             ),
-            handler,
-            "Improver",
+            configurations.Approval(1, handler, "Improver"),
         )
         configurations.activate_configuration(db, candidate.version)
     selected = []
@@ -38,8 +37,8 @@ def test_pinned_version_supplies_the_model_and_prompt_after_activation(
         return llm
 
     monkeypatch.setattr(models, "build_model", build)
-    monkeypatch.setattr(harness.checkpoints, "pool", object())
-    monkeypatch.setattr(harness, "PostgresSaver", lambda pool: InMemorySaver())
+    monkeypatch.setattr(checkpoints.state, "pool", object())
+    monkeypatch.setattr(checkpoints, "PostgresSaver", lambda pool: InMemorySaver())
     harness.execute_claim("CLM-1001", run["run_id"], run["configuration_version"])
     assert selected[0]["version"] == 1
     assert selected[0]["reasoning_effort"] == "low"

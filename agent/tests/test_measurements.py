@@ -9,6 +9,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy import event, select
 
 from agent import api, dispatcher, harness
+from agent.backend_client import Refused
 from agent.tests.queue_setup import leave_waiting
 from agent.tests.stubs import graph_on, record, stub
 from backend.database import engine, model_calls, work_slices
@@ -179,7 +180,7 @@ def test_work_slice_uses_one_owner_checked_monotonic_upsert(client):
         event.remove(db_engine, "before_cursor_execute", record_query)
     assert rows(work_slices)[0]["seconds"] == 5
     run = api.start_run(configuration())["run_id"]
-    with pytest.raises(api.Refused) as refused:
+    with pytest.raises(Refused) as refused:
         api.record_work_slice("CLM-1001", "slice", run, 6)
     assert refused.value.status_code == 409
     assert rows(work_slices)[0]["run_id"] is None

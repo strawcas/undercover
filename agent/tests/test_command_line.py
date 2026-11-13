@@ -6,7 +6,8 @@ import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
 from agent import __main__ as cli
-from agent import api, harness, models
+from agent import checkpoints, models
+from agent.backend_client import Refused
 from agent.models import build_model
 
 
@@ -49,9 +50,9 @@ class FakeSaver:
 def test_the_checkpointer_settings(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@pooler.example.com/db")
     monkeypatch.setattr(FakePool, "opened", [])
-    monkeypatch.setattr(harness, "ConnectionPool", FakePool)
-    monkeypatch.setattr(harness, "PostgresSaver", FakeSaver)
-    with harness.checkpointer() as saver:
+    monkeypatch.setattr(checkpoints, "ConnectionPool", FakePool)
+    monkeypatch.setattr(checkpoints, "PostgresSaver", FakeSaver)
+    with checkpoints.checkpointer() as saver:
         [pool] = FakePool.opened
         assert isinstance(saver, FakeSaver)
         assert (saver.pool, saver.set_up) == (pool, True)
@@ -59,7 +60,7 @@ def test_the_checkpointer_settings(monkeypatch):
         assert (pool.settings["min_size"], pool.settings["max_size"]) == (1, 4)
         kwargs = pool.settings["kwargs"]
         assert (kwargs["autocommit"], kwargs["prepare_threshold"]) == (True, 0)
-        assert kwargs["row_factory"] is harness.dict_row
+        assert kwargs["row_factory"] is checkpoints.dict_row
         assert kwargs["options"] == "-c search_path=undercover"
         assert kwargs["application_name"].startswith("undercover-agent-")
         assert "undercover" in repr(pool.statements[0])
@@ -83,7 +84,7 @@ def test_command_line_works_one_claim(monkeypatch, capsys, graph):
     assert worked == [("CLM-1001", graph)]
 
     def refuse(claim_id, claim_graph):
-        raise api.Refused(409, f"Claim {claim_id} is not waiting")
+        raise Refused(409, f"Claim {claim_id} is not waiting")
 
     monkeypatch.setattr(cli, "work_claim", refuse)
     with pytest.raises(SystemExit) as refused:
