@@ -11,7 +11,7 @@ const NOT_STARTED = "Not started";
 const UNAVAILABLE = "Unavailable";
 
 export function RunPanel() {
-  const { data: run, error } = useLoad(api.getLatestRun, REFRESH_MS);
+  const { data: run, error, reload } = useLoad(api.getLatestRun, REFRESH_MS);
 
   return (
     <section className="panel run" aria-labelledby="run-title">
@@ -20,7 +20,7 @@ export function RunPanel() {
         {run && <RunChip status={run.status} />}
       </div>
       <RunStartForm name="Dispatch" start={api.startDispatch} />
-      {run === undefined && <Message error={error} />}
+      {(run === undefined || error) && <Message error={error} retry={reload} />}
       {run === null && <p className="muted">No run yet.</p>}
       {run && <RunDetails run={run} />}
     </section>

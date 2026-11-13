@@ -1,5 +1,6 @@
 import { type SyntheticEvent, useState } from "react";
 import { useAuth } from "../auth";
+import { PageHeader } from "../components/PageHeader";
 
 export function SignInPage() {
   const auth = useAuth();
@@ -26,8 +27,9 @@ export function SignInPage() {
   return (
     <main className="page sign-in-page">
       <section className="panel">
-        <h1>Sign in to UnderCover</h1>
-        <p className="muted">Use your handler account to work claims.</p>
+        <PageHeader title="Sign in to UnderCover">
+          Use your handler account to work claims.
+        </PageHeader>
         <form
           className="stack-form"
           onSubmit={(event) => {

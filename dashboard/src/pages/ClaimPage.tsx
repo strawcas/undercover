@@ -6,23 +6,66 @@ import { DecisionPanel } from "../components/DecisionPanel";
 import { Message } from "../components/Message";
 import { HistoryPanel, PolicyPanel } from "../components/PolicyPanels";
 import { StepList } from "../components/StepList";
+import { PageHeader } from "../components/PageHeader";
 import { date, label, money } from "../format";
 import { REFRESH_MS, useLoad } from "../useLoad";
-import { evaluationPage } from "../paths";
+import { evaluationPage, QUEUE_PAGE } from "../paths";
 
 export function ClaimPage() {
   const { claimId = "" } = useParams();
   const load = useCallback(() => api.getClaim(claimId), [claimId]);
   const { data: claim, error, reload } = useLoad(load, REFRESH_MS);
+  const header = (
+    <PageHeader
+      title={claim?.summary ?? "Claim"}
+      eyebrow={claimId}
+      actions={
+        claim && (
+          <>
+            <StatusChip
+              status={claim.status}
+              evaluationCopy={Boolean(claim.evaluation_id)}
+            />
+            {!claim.evaluation_id && (
+              <Link className="button-link secondary" to={QUEUE_PAGE}>
+                Back to queue
+              </Link>
+            )}
+          </>
+        )
+      }
+    >
+      Review the policy, supporting evidence and the agent's decision and
+      recorded work.
+    </PageHeader>
+  );
 
   if (!claim) {
     if (error instanceof ApiError && error.status === 404)
-      return <p className="message">Claim not found</p>;
-    return <Message error={error} />;
+      return (
+        <PageHeader
+          title="Claim not found"
+          actions={
+            <Link className="button-link secondary" to={QUEUE_PAGE}>
+              Return to queue
+            </Link>
+          }
+        >
+          Check the claim address or return to the queue to find the claim.
+        </PageHeader>
+      );
+    return (
+      <>
+        {header}
+        <Message error={error} retry={reload} />
+      </>
+    );
   }
 
   return (
     <>
+      {header}
+      {error && <Message error={error} retry={reload} />}
       {claim.evaluation_id && (
         <aside className="panel evaluation-notice">
           Evaluation claim · Source {claim.source_id}.{" "}
@@ -31,11 +74,6 @@ export function ClaimPage() {
           </Link>
         </aside>
       )}
-      <div className="claim-heading">
-        <p className="mono muted">{claim.claim_id}</p>
-        <h1>{claim.summary}</h1>
-        <StatusChip status={claim.status} />
-      </div>
       <div className="claim-layout">
         <div className="column">
           <ClaimDetails claim={claim} />

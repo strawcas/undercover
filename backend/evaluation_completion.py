@@ -91,7 +91,7 @@ def save_results(run_id: str, results: list[tuple[str, Grade]]) -> Run:
         stopped = row.status != "running"
         if row.round_id is not None:
             try:
-                improvement_budget.admit(db, row.round_id)
+                improvement_budget.admit(db, row.round_id, shared=False)
             except HTTPException:
                 stopped = True
         records = [

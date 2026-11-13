@@ -1,7 +1,15 @@
-export function Message({ error }: Readonly<{ error?: Error }>) {
+export function Message({
+  error,
+  retry,
+}: Readonly<{ error?: Error; retry?: () => void }>) {
   return (
-    <p className="message" role={error ? "alert" : "status"}>
-      {error ? error.message : "Loading..."}
-    </p>
+    <div className="message" role={error ? "alert" : "status"}>
+      <p>{error ? error.message : "Loading..."}</p>
+      {error && retry && (
+        <button type="button" className="secondary" onClick={retry}>
+          Retry
+        </button>
+      )}
+    </div>
   );
 }

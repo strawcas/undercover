@@ -4,6 +4,8 @@
   --coral: #f78c6b;
   --cerulean: #118ab2;
   --raspberry: #ef476f;
+  --info-chip: #0b7396;
+  --alert-chip: #c72d52;
   --midnight: #073b4c;
   --sea-mist: #cdd8db;
 
@@ -195,14 +197,14 @@ p {
 
 .status-waiting,
 .member-selected {
-  background: var(--cerulean);
+  background: var(--info-chip);
   color: #ffffff;
 }
 
 .status-left_for_handler,
 .member-left_for_handler,
 .step-failed {
-  background: var(--raspberry);
+  background: var(--alert-chip);
   color: #ffffff;
 }
 
@@ -270,9 +272,6 @@ p {
 .evaluation-notice {
   margin-bottom: 20px;
 }
-.claim-heading .mono {
-  overflow-wrap: anywhere;
-}
 .comparisons {
   margin-top: 16px;
 }
@@ -284,7 +283,7 @@ p {
   color: var(--midnight);
 }
 .miss {
-  background: var(--raspberry);
+  background: var(--alert-chip);
   color: #fff;
 }
 .run-start p {
@@ -292,7 +291,7 @@ p {
   margin: 0;
 }
 .run-stopped {
-  background: var(--raspberry);
+  background: var(--alert-chip);
   color: #fff;
 }
 
@@ -378,14 +377,6 @@ p {
   white-space: nowrap;
 }
 
-.claim-heading {
-  margin-bottom: 20px;
-}
-
-.claim-heading h1 {
-  margin: 4px 0 10px;
-}
-
 .claim-layout {
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
@@ -395,6 +386,7 @@ p {
 
 .column {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px;
 }
 
@@ -506,40 +498,6 @@ p {
   gap: 4px;
   font-size: 0.8rem;
   color: var(--muted);
-}
-
-.run-start input,
-.run-start select,
-.run-start button,
-.sign-off-form select,
-.sign-off-form button {
-  font: inherit;
-  font-size: 0.95rem;
-  border-radius: 999px;
-  padding: 7px 14px;
-  border: none;
-}
-
-.run-start input,
-.run-start select,
-.sign-off-form select {
-  background: var(--panel);
-  color: var(--ink);
-  min-width: 200px;
-}
-
-.run-start button,
-.sign-off-form button {
-  background: var(--sea-green);
-  color: var(--midnight);
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.run-start button:disabled,
-.sign-off-form button:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 
 .form-error {
@@ -744,7 +702,7 @@ legend {
   background: var(--coral);
 }
 .grade-F {
-  background: var(--raspberry);
+  background: var(--alert-chip);
   color: white;
 }
 .grade-ungraded {
@@ -775,10 +733,35 @@ legend {
 .page-header .lead {
   max-width: 70ch;
 }
+.page-header > div:first-child {
+  min-width: 0;
+}
+.page-header h1 {
+  overflow-wrap: anywhere;
+}
+.eyebrow {
+  margin-bottom: 8px;
+  overflow-wrap: anywhere;
+}
+.button-link {
+  display: inline-block;
+  padding: 9px 14px;
+  border-radius: 10px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.message button {
+  margin-top: 12px;
+}
+:focus-visible {
+  outline: 3px solid var(--link);
+  outline-offset: 3px;
+}
 .round-baseline,
 .round-evaluating,
 .round-working {
-  background: var(--cerulean);
+  background: var(--info-chip);
   color: white;
 }
 .round-awaiting_configuration,
@@ -790,7 +773,7 @@ legend {
   background: var(--sea-green);
 }
 .round-stopped {
-  background: var(--raspberry);
+  background: var(--alert-chip);
   color: white;
 }
 .verdict-rolled_back {

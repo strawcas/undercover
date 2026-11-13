@@ -33,6 +33,15 @@ Our goal is to handle claims straight through, as accurately as our handlers do.
 - A Scoreboard to start evaluations on either labelled set and compare newest-first results: decision match, payout accuracy within a dollar, explanation grade, cost of mistakes, straight-through rate, model cost per claim, active time per claim and run elapsed time. Each result opens handler and agent decisions/reasons/references side by side, shows the explanation's F/C/B/A letter, numerical score and same-grounds/section checks, and links to copied claims. Judge cost is separate from claim-agent cost. Undecided copies count as referrals and receive F; unavailable judge results are excluded from the average.
 - A Configuration page showing the current claim-agent version, its instructions/model/reasoning effort, provenance, version history, changes and read-only document contents. Every dispatch and evaluation records the version it uses.
 - A Settings page for the approval limit, improvement objectives, noise/tolerance, round spending limit and evaluation concurrency. Everyone signed in can view it; only senior handlers can change platform settings, with an audit trail. Allowed models and prices are file-owned and read only. Light/dark/system appearance is remembered by each browser.
+- An Improvement page for senior handlers to start/stop rounds, approve or reject proposed configuration and recipe changes, and review durable progress, diffs, decisions, spending and before/after held-out scores. All handlers can view the history and accuracy/grade charts. An approved configuration is tested before the backend keeps or rolls it back; an approved recipe applies to future rounds.
+
+## Improving the agent
+
+Configurations and recipes are immutable backend-owned versions. New work pins the current configuration; a round captures its settings and recipe. The improver sees development examples and held-out aggregates, while claim execution sees no labels or scores. The backend judges explanations and owns the keep/rollback rule. Only completed whole-set round evaluations contribute to version scores.
+
+Initial settings are accuracy/grade floors of 0.60/1.00, noise of 0.10/0.15/0.15/0.15 and tolerance of 0.10/0.15/1.00/0.25 for accuracy/grade/cost/time. Accuracy and grade use absolute differences; cost and time use relative differences. Each round starts with a $0.50 limit covering its improver, claim evaluations and judge, with 25 concurrent claim agents. Missing evidence or an unaffordable candidate rolls back. The default claim model is Luna at low effort and the improver uses Luna at medium effort. A configured free-model override disables grading and records default effort.
+
+Every dashboard page has a clear header and consistent controls in light and dark mode. Statuses include words, tables show units, and wide comparisons scroll locally. Held evaluation copies are complete without payout sign-off and stay outside the queue.
 
 ## Rules
 

@@ -1,8 +1,10 @@
-import { Link, Navigate, NavLink, Route, Routes } from "react-router";
+import { Link, Navigate, Route, Routes } from "react-router";
+import { MainNavigation } from "./components/MainNavigation";
 import { ClaimPage } from "./pages/ClaimPage";
 import { ConfigurationPage } from "./pages/ConfigurationPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { ImprovementPage } from "./pages/ImprovementPage";
+import { NotFoundPage } from "./pages/NotFoundPage";
 import { QueuePage } from "./pages/QueuePage";
 import { ScoreboardPage } from "./pages/ScoreboardPage";
 import { EvaluationPage } from "./pages/EvaluationPage";
@@ -13,6 +15,7 @@ import {
   SCOREBOARD_PAGE,
   SETTINGS_PAGE,
   IMPROVEMENT_PAGE,
+  QUEUE_PAGE,
 } from "./paths";
 import { useAuth } from "./auth";
 import { SignInPage } from "./pages/SignInPage";
@@ -29,18 +32,10 @@ export function App() {
   return (
     <>
       <header className="header">
-        <Link to="/" className="brand">
+        <Link to={QUEUE_PAGE} className="brand">
           UnderCover <span className="tagline">claims pilot</span>
         </Link>
-        <nav className="nav" aria-label="Main">
-          <NavLink to="/" end>
-            Queue
-          </NavLink>
-          <NavLink to={CONFIGURATION_PAGE}>Configuration</NavLink>
-          <NavLink to={IMPROVEMENT_PAGE}>Improvement</NavLink>
-          <NavLink to={SETTINGS_PAGE}>Settings</NavLink>
-          <NavLink to={SCOREBOARD_PAGE}>Scoreboard</NavLink>
-        </nav>
+        <MainNavigation />
         <div className="session">
           <span>{auth.handler.name}</span>
           <button
@@ -60,7 +55,7 @@ export function App() {
           </p>
         )}
         <Routes>
-          <Route path="/" element={<QueuePage />} />
+          <Route path={QUEUE_PAGE} element={<QueuePage />} />
           <Route path={CLAIM_PAGE} element={<ClaimPage />} />
           <Route path={CONFIGURATION_PAGE} element={<ConfigurationPage />} />
           <Route path={SETTINGS_PAGE} element={<SettingsPage />} />
@@ -71,7 +66,7 @@ export function App() {
           />
           <Route path={SCOREBOARD_PAGE} element={<ScoreboardPage />} />
           <Route path={EVALUATION_PAGE} element={<EvaluationPage />} />
-          <Route path="*" element={<p className="message">Page not found</p>} />
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </main>
     </>

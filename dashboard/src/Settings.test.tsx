@@ -134,10 +134,9 @@ it("remembers light, dark and computer appearance in the browser", async () => {
 it("shows settings load errors", async () => {
   stubApi({ "GET /api/settings": new Refusal(503, "Settings unavailable") });
   renderAt("/settings");
-  expect(await screen.findByRole("alert")).toHaveProperty(
-    "textContent",
-    "Settings unavailable",
-  );
+  expect(
+    within(await screen.findByRole("alert")).getByText("Settings unavailable"),
+  ).toBeDefined();
 });
 
 it("selects version diffs and keeps that selection through polling", async () => {
@@ -176,6 +175,35 @@ it("explains empty configuration history", async () => {
   expect(
     await screen.findByText(/No configurations are available/),
   ).toBeDefined();
+});
+
+it("shows before and after models and effort when only model settings change", async () => {
+  const second = {
+    ...configuration,
+    version: 2,
+    parent_version: 1,
+    model: "google/gemini-3.5-flash-lite",
+    reasoning_effort: "minimal",
+    diff: "",
+  };
+  stubApi({
+    "GET /api/configurations/current": second,
+    "GET /api/configurations": [second, configuration],
+  });
+  renderAt("/configuration");
+  const changes = within(
+    await screen.findByRole("region", { name: "Changes" }),
+  );
+  expect(
+    changes.getByText(
+      `${configuration.model} · ${configuration.reasoning_effort}`,
+    ),
+  ).toBeDefined();
+  expect(
+    changes.getByText("google/gemini-3.5-flash-lite · minimal"),
+  ).toBeDefined();
+  expect(changes.getByText("Before · version 1")).toBeDefined();
+  expect(changes.getByText("After · version 2")).toBeDefined();
 });
 
 it.each([false, true])(

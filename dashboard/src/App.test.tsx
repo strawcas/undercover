@@ -1,4 +1,4 @@
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   Refusal,
@@ -9,6 +9,7 @@ import {
   renderAt,
   stubApi,
   summary,
+  type Routes,
 } from "./testing";
 
 afterEach(() => {
@@ -51,9 +52,9 @@ it("shows the queue with counts by state", async () => {
 it("shows an error when the queue can't load", async () => {
   stubApi({ "GET /api/claims": new Refusal(500, "The backend is down") });
   renderAt("/");
-  expect((await screen.findByRole("alert")).textContent).toBe(
-    "The backend is down",
-  );
+  expect(
+    within(await screen.findByRole("alert")).getByText("The backend is down"),
+  ).toBeDefined();
 });
 
 it("shows a claim in full", async () => {
@@ -107,7 +108,9 @@ it("says when a claim doesn't exist, and stops asking for it", async () => {
 it("shows other errors loading a claim", async () => {
   stubApi({ "GET /api/claims/CLM-1002": new Refusal(500, "Server error") });
   renderAt("/claims/CLM-1002");
-  expect((await screen.findByRole("alert")).textContent).toBe("Server error");
+  expect(
+    within(await screen.findByRole("alert")).getByText("Server error"),
+  ).toBeDefined();
 });
 
 it("shows the agent's instructions read only", async () => {
@@ -128,4 +131,39 @@ it("says when a page doesn't exist", () => {
   stubApi({});
   renderAt("/nowhere");
   expect(screen.getByText("Page not found")).toBeDefined();
+  expect(
+    screen.getByRole("link", { name: "Return to queue" }).getAttribute("href"),
+  ).toBe("/");
+});
+
+it("keeps the page header through an error and retries to an actionable empty queue", async () => {
+  const routes: Routes = {
+    "GET /api/claims": new Refusal(503, "Queue unavailable"),
+    "GET /api/runs/latest": null,
+  };
+  stubApi(routes);
+  renderAt("/");
+  const error = await screen.findByRole("alert");
+  expect(screen.getByRole("heading", { name: "Claims queue" })).toBeDefined();
+  routes["GET /api/claims"] = [];
+  fireEvent.click(within(error).getByRole("button", { name: "Retry" }));
+  expect(
+    await screen.findByText(/There are no claims in the queue/),
+  ).toBeDefined();
+});
+
+it("retries a failed policy panel without resetting the claim", async () => {
+  const routes: Routes = {
+    "GET /api/claims/CLM-1002": claim,
+    "GET /api/policies/POL-2002": new Refusal(503, "Policy unavailable"),
+    "GET /api/customers/CUS-3002/claims": [],
+  };
+  stubApi(routes);
+  renderAt("/claims/CLM-1002");
+  const panel = within(await screen.findByRole("region", { name: "Policy" }));
+  await panel.findByText("Policy unavailable");
+  routes["GET /api/policies/POL-2002"] = policy;
+  fireEvent.click(panel.getByRole("button", { name: "Retry" }));
+  expect(await panel.findByText("Premium")).toBeDefined();
+  expect(screen.getByRole("heading", { name: claim.summary })).toBeDefined();
 });

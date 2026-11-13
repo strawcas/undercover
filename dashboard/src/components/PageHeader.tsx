@@ -4,10 +4,17 @@ export function PageHeader({
   title,
   children,
   actions,
-}: Readonly<{ title: string; children: ReactNode; actions?: ReactNode }>) {
+  eyebrow,
+}: Readonly<{
+  title: string;
+  children: ReactNode;
+  actions?: ReactNode;
+  eyebrow?: ReactNode;
+}>) {
   return (
     <div className="page-header">
       <div>
+        {eyebrow && <p className="mono muted eyebrow">{eyebrow}</p>}
         <h1>{title}</h1>
         <p className="lead">{children}</p>
       </div>

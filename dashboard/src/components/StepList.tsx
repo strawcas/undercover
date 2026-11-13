@@ -8,12 +8,12 @@ const SUMMARY_LENGTH = 90;
 
 export function StepList({ claimId }: Readonly<{ claimId: string }>) {
   const load = useCallback(() => api.listSteps(claimId), [claimId]);
-  const { data: steps, error } = useLoad(load, REFRESH_MS);
+  const { data: steps, error, reload } = useLoad(load, REFRESH_MS);
 
   return (
     <section className="panel" aria-labelledby="steps-title">
       <h2 id="steps-title">Agent at work</h2>
-      {!steps && <Message error={error} />}
+      {(!steps || error) && <Message error={error} retry={reload} />}
       {steps?.length === 0 && (
         <p className="muted">
           No steps yet. They appear here as the agent works.

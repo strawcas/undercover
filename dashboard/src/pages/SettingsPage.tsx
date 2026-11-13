@@ -3,6 +3,7 @@ import { api, type Measures, type PlatformSettings } from "../api";
 import { useAuth } from "../auth";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Message } from "../components/Message";
+import { PageHeader } from "../components/PageHeader";
 import { money, time } from "../format";
 import { getTheme, setTheme, type Theme } from "../theme";
 import { REFRESH_MS, useLoad } from "../useLoad";
@@ -25,12 +26,11 @@ export function SettingsPage() {
   const [theme, updateTheme] = useState(getTheme);
   return (
     <>
-      <h1>Settings</h1>
-      <p className="lead">
+      <PageHeader title="Settings">
         Set the business rules and limits for future improvement rounds and new
         decisions.
-      </p>
-      {data && error && <Message error={error} />}
+      </PageHeader>
+      {data && error && <Message error={error} retry={reload} />}
       <div className="column">
         <section className="panel" aria-label="Appearance">
           <h2>Appearance</h2>
@@ -114,7 +114,7 @@ export function SettingsPage() {
             </section>
           </>
         ) : (
-          <Message error={error} />
+          <Message error={error} retry={reload} />
         )}
       </div>
     </>

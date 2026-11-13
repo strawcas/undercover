@@ -4,6 +4,7 @@ import { api, type EvaluationSet } from "../api";
 import { EvaluationSummary } from "../components/EvaluationSummary";
 import { Message } from "../components/Message";
 import { RunStartForm } from "../components/RunStartForm";
+import { PageHeader } from "../components/PageHeader";
 import { evaluationName, timestamp } from "../format";
 import { evaluationPage } from "../paths";
 import { REFRESH_MS, useLoad } from "../useLoad";
@@ -11,10 +12,17 @@ import { REFRESH_MS, useLoad } from "../useLoad";
 export function ScoreboardPage() {
   const [setName, setSetName] = useState<EvaluationSet>("evaluation");
   const [tiny, setTiny] = useState(false);
-  const { data: runs, error } = useLoad(api.listEvaluations, REFRESH_MS);
+  const {
+    data: runs,
+    error,
+    reload,
+  } = useLoad(api.listEvaluations, REFRESH_MS);
   return (
     <>
-      <h1>Scoreboard</h1>
+      <PageHeader title="Scoreboard">
+        Compare decisions, explanation quality and efficiency on fresh
+        evaluation copies.
+      </PageHeader>
       <section className="panel" aria-label="Start an evaluation">
         <h2>Start an evaluation</h2>
         <p>
@@ -51,8 +59,15 @@ export function ScoreboardPage() {
           </label>
         </RunStartForm>
       </section>
-      {runs === undefined && <Message error={error} />}
-      {runs?.length === 0 && <p className="message">No evaluations yet.</p>}
+      {(runs === undefined || error) && (
+        <Message error={error} retry={reload} />
+      )}
+      {runs?.length === 0 && (
+        <p className="message">
+          No evaluations yet. Choose a set and start an evaluation to compare
+          the agent with our handlers.
+        </p>
+      )}
       <ol className="evaluations" aria-label="Evaluations">
         {runs?.map((run) => (
           <li className="panel" key={run.run_id}>

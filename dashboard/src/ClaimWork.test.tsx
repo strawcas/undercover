@@ -2,10 +2,14 @@ import {
   act,
   cleanup,
   fireEvent,
+  render,
   screen,
   within,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import { Link, MemoryRouter } from "react-router";
+import { App } from "./App";
+import { AuthContext } from "./auth";
 import type { Claim, Decision, Step } from "./api";
 import { time } from "./format";
 import {
@@ -17,6 +21,7 @@ import {
   policy,
   renderAt,
   stubApi,
+  signedIn,
 } from "./testing";
 import { REFRESH_MS } from "./useLoad";
 
@@ -95,6 +100,29 @@ const held: Claim = {
   decision: { ...approval, payout: 1350 },
   payment: null,
 };
+
+it("removes the previous payout and sign-off action when navigating to a missing claim", async () => {
+  stubApi({ "GET /api/claims/CLM-1002": held });
+  render(
+    <MemoryRouter initialEntries={["/claims/CLM-1002"]}>
+      <AuthContext.Provider value={signedIn}>
+        <Link to="/claims/CLM-9999">Next claim</Link>
+        <App />
+      </AuthContext.Provider>
+    </MemoryRouter>,
+  );
+  await screen.findByRole("button", { name: "Sign off" });
+  expect(
+    screen
+      .getByRole("navigation", { name: "Main" })
+      .querySelector('[aria-current="page"]')?.textContent,
+  ).toBe("Queue");
+  fireEvent.click(screen.getByRole("link", { name: "Next claim" }));
+  expect(screen.queryByRole("button", { name: "Sign off" })).toBeNull();
+  await screen.findByRole("heading", { name: "Claim not found" });
+  expect(screen.queryByText("$1,350.00")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Sign off" })).toBeNull();
+});
 
 it("says when the agent hasn't started", async () => {
   showClaim(claim);
@@ -302,6 +330,7 @@ it("labels an evaluation copy and suppresses sign-off", async () => {
     source_id: "CLM-1002",
   });
   expect(await screen.findByText(/Evaluation claim/)).toBeDefined();
+  expect(screen.getByText("Evaluation complete · payment held")).toBeDefined();
   const view = await decisionPanel();
   expect(view.getByText(/complete without sign-off/)).toBeDefined();
   expect(view.queryByRole("button", { name: "Sign off" })).toBeNull();

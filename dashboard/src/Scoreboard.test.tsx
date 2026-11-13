@@ -21,7 +21,7 @@ it("shows the empty scoreboard and forwards set, size and concurrency", async ()
     "POST /api/evaluations": { status: "accepted" },
   });
   renderAt("/scoreboard");
-  expect(await screen.findByText("No evaluations yet.")).toBeDefined();
+  expect(await screen.findByText(/No evaluations yet/)).toBeDefined();
   const n = screen.getByRole("spinbutton", { name: "Agents at once" });
   expect((n as HTMLInputElement).value).toBe("3");
   fireEvent.change(screen.getByLabelText("Claim set"), {
@@ -103,9 +103,11 @@ it("shows load errors", async () => {
     "GET /api/evaluations": new Refusal(500, "Cannot load evaluations"),
   });
   renderAt("/scoreboard");
-  expect((await screen.findByRole("alert")).textContent).toBe(
-    "Cannot load evaluations",
-  );
+  expect(
+    within(await screen.findByRole("alert")).getByText(
+      "Cannot load evaluations",
+    ),
+  ).toBeDefined();
 });
 
 it("shows readable matches, misses and absent decisions beside handlers", async () => {

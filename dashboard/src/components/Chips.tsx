@@ -6,9 +6,16 @@ import {
   statusLabels,
 } from "../format";
 
-export function StatusChip({ status }: Readonly<{ status: Status }>) {
+export function StatusChip({
+  status,
+  evaluationCopy = false,
+}: Readonly<{ status: Status; evaluationCopy?: boolean }>) {
   return (
-    <span className={`chip status-${status}`}>{statusLabels[status]}</span>
+    <span className={`chip status-${status}`}>
+      {evaluationCopy && status === "waiting_for_sign_off"
+        ? "Evaluation complete · payment held"
+        : statusLabels[status]}
+    </span>
   );
 }
 

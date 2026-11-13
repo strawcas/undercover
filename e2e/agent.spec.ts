@@ -6,7 +6,7 @@ import { post, resumed } from "./api";
 
 test("the claim page shows the agent at work", async ({ page, request }) => {
   await page.goto("/claims/CLM-1003");
-  const heading = page.locator(".claim-heading");
+  const heading = page.locator(".page-header");
   await expect(heading.getByText("Waiting")).toBeVisible();
   await expect(page.getByText(/No steps yet/)).toBeVisible();
 
@@ -66,7 +66,7 @@ test("a sign-off on the dashboard reaches the agent's service", async ({
   expect(refused.status()).toBe(403);
 
   await page.goto("/claims/CLM-1020");
-  const heading = page.locator(".claim-heading");
+  const heading = page.locator(".page-header");
   await expect(heading.getByText("Waiting for sign-off")).toBeVisible();
   expect(await resumed(request)).not.toContain("CLM-1020");
   await page.getByRole("button", { name: "Sign off" }).click();

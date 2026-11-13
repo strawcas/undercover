@@ -1,7 +1,7 @@
 """Round spending and conservative evaluation admission, without orchestration."""
 
 from fastapi import HTTPException
-from sqlalchemy import Connection, func, select
+from sqlalchemy import Connection, func, literal, select, union_all
 
 from backend.database import (
     claims,
@@ -18,46 +18,51 @@ from backend.improvement_models import Quote, Spending
 
 def spending(db: Connection, round_id: str, limit: float) -> Spending:
     """Sum immutable billing facts once, including replies received after stop."""
-    costs = list(
-        db.execute(
-            select(round_model_calls.c.cost).where(
-                round_model_calls.c.round_id == round_id
-            )
-        ).scalars()
-    )
-    claim_costs = list(
-        db.execute(
-            select(model_calls.c.cost)
-            .join(runs, runs.c.run_id == model_calls.c.run_id)
-            .where(runs.c.round_id == round_id)
-        ).scalars()
-    )
-    grades = db.execute(
-        select(evaluation_grades.c.record)
+    billing = union_all(
+        select(
+            literal("improver").label("kind"), round_model_calls.c.cost.label("cost")
+        ).where(round_model_calls.c.round_id == round_id),
+        select(literal("claims").label("kind"), model_calls.c.cost.label("cost"))
+        .join(runs, runs.c.run_id == model_calls.c.run_id)
+        .where(runs.c.round_id == round_id),
+        select(
+            literal("judge").label("kind"),
+            evaluation_grades.c.record["judge_cost"].as_float().label("cost"),
+        )
         .join(runs, runs.c.run_id == evaluation_grades.c.run_id)
-        .where(runs.c.round_id == round_id)
-    ).scalars()
-    judge_costs = [value["judge_cost"] for value in grades]
-    amounts = [
-        sum(value for value in items if value is not None)
-        for items in (costs, claim_costs, judge_costs)
-    ]
-    total = sum(amounts)
+        .where(runs.c.round_id == round_id),
+    ).subquery()
+    rows = db.execute(
+        select(
+            billing.c.kind,
+            func.sum(billing.c.cost).label("total"),
+            func.count().label("replies"),
+            func.count(billing.c.cost).label("known"),
+        ).group_by(billing.c.kind)
+    ).mappings()
+    amounts = {"improver": 0.0, "claims": 0.0, "judge": 0.0}
+    unknown = False
+    for value in rows:
+        amounts[value["kind"]] = value["total"] or 0.0
+        unknown = unknown or value["known"] != value["replies"]
+    total = sum(amounts.values())
     return Spending(
-        improver=amounts[0],
-        claims=amounts[1],
-        judge=amounts[2],
+        improver=amounts["improver"],
+        claims=amounts["claims"],
+        judge=amounts["judge"],
         total=total,
         remaining=max(0, limit - total),
-        unknown=None in costs + claim_costs + judge_costs,
+        unknown=unknown,
     )
 
 
-def lock_round(db: Connection, round_id: str):
-    """Serialize spending admission and billing writes on the parent round."""
+def lock_round(db: Connection, round_id: str, *, shared: bool = False):
+    """Protect parent state; compatible readers still exclude billing and stop."""
     row = (
         db.execute(
-            select(rounds).where(rounds.c.round_id == round_id).with_for_update()
+            select(rounds)
+            .where(rounds.c.round_id == round_id)
+            .with_for_update(read=shared)
         )
         .mappings()
         .first()
@@ -67,9 +72,9 @@ def lock_round(db: Connection, round_id: str):
     return row
 
 
-def admit(db: Connection, round_id: str) -> None:
+def admit(db: Connection, round_id: str, *, shared: bool = True) -> None:
     """Refuse new work after stop or exhaustion, including an unknown charge."""
-    row = lock_round(db, round_id)
+    row = lock_round(db, round_id, shared=shared)
     if row["status"] in ("stopped", "finished"):
         raise HTTPException(409, f"Round is {row['status']}")
     cost = spending(db, round_id, row["record"]["settings"]["spending_limit"])
@@ -94,18 +99,14 @@ def admit_run(db: Connection, run_id: str | None) -> None:
 
 def guard_claim_write(db: Connection, claim_id: str) -> None:
     """Refuse late claim state writes after stop, before taking a claim row lock."""
-    run_id = db.execute(
-        select(claims.c.evaluation_id).where(claims.c.claim_id == claim_id)
-    ).scalar_one_or_none()
-    if run_id is None:
-        return
     run = db.execute(
         select(runs.c.round_id)
-        .where(runs.c.run_id == run_id)
-        .with_for_update(read=True)
+        .join(claims, claims.c.evaluation_id == runs.c.run_id)
+        .where(claims.c.claim_id == claim_id)
+        .with_for_update(read=True, of=runs)
     ).first()
     if run is not None and run.round_id is not None:
-        parent = lock_round(db, run.round_id)
+        parent = lock_round(db, run.round_id, shared=True)
         if parent["status"] in ("stopped", "finished"):
             raise HTTPException(409, f"Round is {parent['status']}")
 

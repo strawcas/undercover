@@ -6,7 +6,7 @@ import { Message } from "./Message";
 
 export function PolicyPanel({ policyId }: Readonly<{ policyId: string }>) {
   const load = useCallback(() => api.getPolicy(policyId), [policyId]);
-  const { data: policy, error } = useLoad(load);
+  const { data: policy, error, reload } = useLoad(load);
 
   return (
     <section className="panel" aria-labelledby="policy-title">
@@ -54,7 +54,7 @@ export function PolicyPanel({ policyId }: Readonly<{ policyId: string }>) {
           </div>
         </dl>
       ) : (
-        <Message error={error} />
+        <Message error={error} retry={reload} />
       )}
     </section>
   );
@@ -62,12 +62,12 @@ export function PolicyPanel({ policyId }: Readonly<{ policyId: string }>) {
 
 export function HistoryPanel({ customerId }: Readonly<{ customerId: string }>) {
   const load = useCallback(() => api.getClaimHistory(customerId), [customerId]);
-  const { data: history, error } = useLoad(load);
+  const { data: history, error, reload } = useLoad(load);
 
   return (
     <section className="panel" aria-labelledby="history-title">
       <h2 id="history-title">Earlier claims</h2>
-      {!history && <Message error={error} />}
+      {!history && <Message error={error} retry={reload} />}
       {history?.length === 0 && <p className="muted">No earlier claims</p>}
       {history && history.length > 0 && (
         <ul className="history">

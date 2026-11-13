@@ -6,7 +6,7 @@ test("the queue lists every claim", async ({ page }) => {
     page.getByRole("heading", { name: "Claims queue" }),
   ).toBeVisible();
   const queue = page.getByRole("table").filter({
-    has: page.getByRole("columnheader", { name: "Claimed", exact: true }),
+    has: page.getByRole("columnheader", { name: "Claimed (USD)", exact: true }),
   });
   await expect(queue.locator("tbody tr")).toHaveCount(25);
   const last = page.getByRole("row").filter({ hasText: "CLM-1025" });

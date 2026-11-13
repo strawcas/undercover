@@ -13,6 +13,7 @@ from backend.dependencies import Database
 from backend.models import Handler
 
 SUPABASE_URL = os.getenv("VITE_SUPABASE_URL", "http://127.0.0.1:8005")
+JWT_CLOCK_SKEW_SECONDS = 5
 keys = jwt.PyJWKClient(f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json")
 bearer = HTTPBearer(auto_error=False)
 Credentials = Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]
@@ -30,6 +31,7 @@ def current_handler(credentials: Credentials, db: Database) -> Handler:
             algorithms=["ES256", "RS256"],
             audience="authenticated",
             issuer=f"{SUPABASE_URL}/auth/v1",
+            leeway=JWT_CLOCK_SKEW_SECONDS,
             options={"require": ["exp", "sub", "email"]},
         )
     except (jwt.InvalidTokenError, jwt.PyJWKClientError) as error:

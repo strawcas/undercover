@@ -9,6 +9,12 @@ export interface Loaded<T> {
   reload: () => void;
 }
 
+interface LoadState<T> {
+  loader: () => Promise<T>;
+  data?: T;
+  error?: Error;
+}
+
 // Loads data once, or again every refreshMs milliseconds when that's given,
 // stopping if the data isn't found, and again whenever reload is called.
 // `load` must keep the same identity between renders, as with useCallback.
@@ -16,7 +22,7 @@ export function useLoad<T>(
   load: () => Promise<T>,
   refreshMs?: number,
 ): Loaded<T> {
-  const [loaded, setLoaded] = useState<Omit<Loaded<T>, "reload">>({});
+  const [loaded, setLoaded] = useState<LoadState<T>>({ loader: load });
   const [version, setVersion] = useState(0);
   const gate = useRef<{ pending: boolean; queued: (() => void) | null }>({
     pending: false,
@@ -32,14 +38,18 @@ export function useLoad<T>(
       load()
         .then(
           (data) => {
-            if (active) setLoaded({ data });
+            if (active) setLoaded({ loader: load, data });
           },
           (error: unknown) => {
-            if (error instanceof ApiError && error.status === 404)
-              clearInterval(timer);
+            const missing = error instanceof ApiError && error.status === 404;
+            if (missing) clearInterval(timer);
             if (active)
               setLoaded((previous) => ({
-                data: previous.data,
+                loader: load,
+                data:
+                  !missing && previous.loader === load
+                    ? previous.data
+                    : undefined,
                 error:
                   error instanceof Error
                     ? error
@@ -68,5 +78,6 @@ export function useLoad<T>(
   const reload = useCallback(() => {
     setVersion((current) => current + 1);
   }, []);
-  return { ...loaded, reload };
+  const current = loaded.loader === load ? loaded : undefined;
+  return { data: current?.data, error: current?.error, reload };
 }

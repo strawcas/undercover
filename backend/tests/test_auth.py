@@ -1,5 +1,7 @@
 """Handler actions verify signatures, identity and permissions."""
 
+import time
+
 import jwt
 import pytest
 from fastapi.testclient import TestClient
@@ -67,3 +69,16 @@ def test_identity_comes_from_the_token(client):
         ).status_code
         == 403
     )
+
+
+@pytest.mark.parametrize(
+    ("claim", "offset", "status"),
+    [("iat", 2, 200), ("iat", 30, 401), ("exp", -30, 401)],
+)
+def test_clock_tolerance_accepts_small_provider_skew_but_refuses_invalid_times(
+    client, claim, offset, status
+):
+    response = client.get(
+        "/api/me", headers=authorization(**{claim: int(time.time()) + offset})
+    )
+    assert response.status_code == status

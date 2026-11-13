@@ -16,6 +16,7 @@ import { CONFIGURATION_PAGE } from "../paths";
 import { RoundChip } from "./Chips";
 import { Diff } from "./Diff";
 import { RoundScores } from "./RoundScores";
+import { ModelComparison } from "./ModelComparison";
 
 import type { ProposalChoice } from "../useRoundActions";
 
@@ -30,21 +31,12 @@ function ProposalModels({
 }>) {
   if (proposal.kind !== "configuration") return null;
   return (
-    <dl className="proposal-models">
-      <div>
-        <dt>Before · version {round.base_version}</dt>
-        <dd>
-          {base?.model ?? "Unavailable"} ·{" "}
-          {base?.reasoning_effort ?? "Unavailable"}
-        </dd>
-      </div>
-      <div>
-        <dt>Proposed model and effort</dt>
-        <dd>
-          {proposal.arguments.model} · {proposal.arguments.reasoning_effort}
-        </dd>
-      </div>
-    </dl>
+    <ModelComparison
+      before={base}
+      after={proposal.arguments}
+      beforeLabel={`Before · version ${String(round.base_version)}`}
+      afterLabel="Proposed model and effort"
+    />
   );
 }
 

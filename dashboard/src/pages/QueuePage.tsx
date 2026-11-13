@@ -3,17 +3,31 @@ import { api, statuses } from "../api";
 import { DecisionChip, StatusChip } from "../components/Chips";
 import { Message } from "../components/Message";
 import { RunPanel } from "../components/RunPanel";
+import { PageHeader } from "../components/PageHeader";
 import { date, label, money, statusLabels } from "../format";
 import { claimPage } from "../paths";
 import { REFRESH_MS, useLoad } from "../useLoad";
 
 export function QueuePage() {
-  const { data: claims, error } = useLoad(api.listClaims, REFRESH_MS);
-  if (!claims) return <Message error={error} />;
+  const { data: claims, error, reload } = useLoad(api.listClaims, REFRESH_MS);
+  const header = (
+    <PageHeader title="Claims queue">
+      Start a dispatch, follow claim progress and review payouts waiting for
+      sign-off.
+    </PageHeader>
+  );
+  if (!claims)
+    return (
+      <>
+        {header}
+        <Message error={error} retry={reload} />
+      </>
+    );
 
   return (
     <>
-      <h1>Claims queue</h1>
+      {header}
+      {error && <Message error={error} retry={reload} />}
       <section className="tiles" aria-label="Claims by state">
         {statuses.map((status) => {
           const count = claims.filter((c) => c.status === status).length;
@@ -30,7 +44,13 @@ export function QueuePage() {
         })}
       </section>
       <RunPanel />
-      <section className="panel table-scroll">
+      {claims.length === 0 && (
+        <p className="message">
+          There are no claims in the queue. New claims will appear here when
+          available.
+        </p>
+      )}
+      <section className="panel table-scroll" aria-label="Claims queue table">
         <table className="table">
           <thead>
             <tr>
@@ -38,11 +58,11 @@ export function QueuePage() {
               <th>Customer</th>
               <th>Type</th>
               <th>Summary</th>
-              <th className="num">Claimed</th>
+              <th className="num">Claimed (USD)</th>
               <th>Submitted</th>
               <th>State</th>
               <th>Decision</th>
-              <th className="num">Payout</th>
+              <th className="num">Payout (USD)</th>
             </tr>
           </thead>
           <tbody>
