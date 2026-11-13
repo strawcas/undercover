@@ -105,6 +105,7 @@ export interface Handler {
   handler_id: string;
   name: string;
   role: string;
+  email: string;
   can_approve_over_limit: boolean;
 }
 
@@ -186,8 +187,29 @@ export class ApiError extends Error {
   }
 }
 
+let accessToken: string | null = null;
+const authFailures = new EventTarget();
+
+export function onUnauthorized(callback: () => void) {
+  authFailures.addEventListener("expired", callback);
+  return () => {
+    authFailures.removeEventListener("expired", callback);
+  };
+}
+
+export function setAccessToken(token: string | null) {
+  accessToken = token;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, init);
+  const requestToken = accessToken;
+  const headers = new Headers(init?.headers);
+  if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+  const response = await fetch(path, { ...init, headers });
+  if (response.status === 401 && requestToken === accessToken) {
+    accessToken = null;
+    authFailures.dispatchEvent(new Event("expired"));
+  }
   if (!response.ok) {
     const body = (await response.json()) as { detail?: unknown };
     const detail =
@@ -211,6 +233,7 @@ const claimPath = (claimId: string) =>
 const evaluationsPath = "/api/evaluations";
 
 export const api = {
+  getCurrentHandler: () => request<Handler>("/api/me"),
   listClaims: () => request<ClaimSummary[]>("/api/claims"),
   getClaim: (claimId: string) => request<Claim>(claimPath(claimId)),
   listSteps: (claimId: string) =>
@@ -242,6 +265,6 @@ export const api = {
     request<EvaluationDetail>(
       `${evaluationsPath}/${encodeURIComponent(runId)}`,
     ),
-  signOff: (claimId: string, handlerId: string) =>
-    post<Claim>(`${claimPath(claimId)}/sign-off`, { handler_id: handlerId }),
+  signOff: (claimId: string) =>
+    post<Claim>(`${claimPath(claimId)}/sign-off`, {}),
 };

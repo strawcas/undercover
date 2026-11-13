@@ -1,5 +1,9 @@
 # Status
 
+Improve phase 1 is complete: handlers sign in through Supabase Auth; all dashboard pages require a session, starts verify a handler, and payout sign-off uses the verified senior handler instead of a selector. Handler emails are seeded and only Dana has over-limit authority. `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` configure the browser; the lab's `HANDLER_PASSWORD` remains private verification configuration. The expanded business schema needs the Improve plan's single final reseed before live use; use isolated SQLite databases for intermediate checks.
+
+Phase 1 checks passed with `.env` absent and restored byte for byte: 240 Python tests (98.77% coverage), 71 Vitest tests (96.68% statement coverage) and 9 Playwright tests. The fresh review found stale authenticated content after rejected revalidation and hidden sign-out failures; fixes clear current-token authentication failures, invalidate old requests and display sign-out errors, with three regressions. The reviewer verified the fixes and approved. Playwright MCP checked protected deep links, Marcus's restored identity, the senior-only held-payout explanation with zero sign-off buttons/selectors, and sign-out back to the login form against local Auth/agent stand-ins on an isolated SQLite database. No unexpected console errors occurred. Preview servers are stopped. No paid model calls or business-database reseed occurred. Phases 2–6 remain in `docs/PLAN_IMPROVE.md`.
+
 The dispatch table in `docs/EDIT_PLAN_1.md` is complete. Its eight columns show the linked claim, customer, state, decision, payout, local start, per-claim elapsed completion time and model cost. Timing uses the first work slice in this run through decision time for declines/referrals or payment time for approvals. Held and incomplete work has explicit labels. Identity/timing freeze with closed outcomes; older snapshots remain readable and missing historical timing stays unavailable. No migration or business-database reseed is needed.
 
 The pilot, harness and durable state builds are complete. The Swarm implementation in `docs/PLAN_SWARM.md` passes all automated checks and the final whole-branch review. Recovery, connections, evaluations and tracing have live verification; two timing observations remain open below.
@@ -42,7 +46,7 @@ Playwright MCP inspected queue, Scoreboard, comparisons and held copied claims a
 
 ## Operational verification
 
-The one live reseed is complete and must not be repeated. The N=3 dispatch `ec2e2739-ec7c-4142-83be-0f34e7c88ed5` was interrupted after CLM-1001, CLM-1008 and CLM-1011 each recorded eight steps on attempt 1. The verified reloader/worker were force-killed and the other dev services stopped. Startup marked that dispatch stopped. N=25 retained those attempts/threads; CLM-1011 later needed its allowed fresh second attempt after finishing without a decision.
+The Swarm verification used its single live reseed; do not repeat that historical sequence. The Improve plan separately authorizes one new reseed for its final live checks. The N=3 dispatch `ec2e2739-ec7c-4142-83be-0f34e7c88ed5` was interrupted after CLM-1001, CLM-1008 and CLM-1011 each recorded eight steps on attempt 1. The verified reloader/worker were force-killed and the other dev services stopped. Startup marked that dispatch stopped. N=25 retained those attempts/threads; CLM-1011 later needed its allowed fresh second attempt after finishing without a decision.
 
 The N=25 dispatch `89457279-d585-4f6f-847d-9653d6d78d36` finished all 25 claims: 18 approvals, 5 declines and 2 referrals. Its wall time was 1,016.226 seconds (16m 56s), versus 19,233.435 seconds of summed active claim time, 18.93 times its wall time. All 25 were observed in progress together; their active slices started within 15.865 seconds. The run recorded 139 model replies costing $0.02620484, with no missing costs. Decisions and payments were unique; held payouts stayed unpaid until sign-off.
 
@@ -71,4 +75,4 @@ Two timing checks are deliberately left unchecked in the plan: payment within fi
 - Claim reservations are process-local. Do not run a CLI claim concurrently with service work on the same claim; backend decisions/payments still have transactional protection.
 - A manually approved claim with no saved graph state cannot resume payment automatically. Normal graph/restart paths save the required state.
 - LangGraph 1.2.12 rethrows handled parallel futures on exit (upstream issue 8277). The dispatcher suppresses only the exact recorded handled exception after every selected worker has confirmed completion; unrelated failures still escape.
-- Handlers can sign off held payouts; rejection, sign-in, real payments and customer messages are outside this build. No AWS resources were created or deleted.
+- Senior handlers can sign off held payouts; claim rejection by handlers, real payments and customer messages remain outside this build. No AWS resources were created or deleted.

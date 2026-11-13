@@ -11,7 +11,7 @@
 
 ## Structure
 
-7. One way to do each thing. The agent reaches the backend only through `agent/api.py` and the dashboard only through `dashboard/src/api.ts`, each with one function per backend operation, named after it. The backend reaches the agent's service only through `backend/agent_service.py`. The base URL and each path are written once, there, and no other module builds a URL or sends a request.
+7. One way to do each thing. The agent reaches the backend only through `agent/api.py` and the dashboard only through `dashboard/src/api.ts`, each with one function per backend operation, named after it. The backend reaches the agent's service only through `backend/agent_service.py`. The dashboard reaches Supabase Auth only through `dashboard/src/supabase.ts`. The base URL and each path are written once, there, and no other module builds a URL or sends a request.
 8. Each module has one job, and its name says what it is. A module uses another through what that module is for, and never borrows its helpers. A helper two modules need goes in a module of its own. No circular imports. Tests follow the same rule: shared test helpers live in their own module, never in another test file.
 9. Write a literal once. A URL, a path, a status or a message used in more than one place is named once, in the module that owns it.
 10. Use the framework's own way before writing your own: FastAPI dependencies and models, LangChain's `context_schema` and `ToolRuntime`, LangGraph's claim `StateGraph`, `ToolNode`, `interrupt()` and checkpointer, a dispatcher `StateGraph` with `Send`, reducers, `RetryPolicy` and an `error_handler`, SQLAlchemy Core, and React hooks/shared components. Check the installed framework APIs.

@@ -4,9 +4,10 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from backend import agent_service
+from backend import agent_service, auth
 from backend.database import engine, seed
 from backend.main import app
+from backend.tests.auth_support import PUBLIC_JWK, authorization
 
 
 @pytest.fixture(autouse=True)
@@ -49,4 +50,11 @@ def agent_calls(agent_answers):
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    return TestClient(app, headers=authorization())
+
+
+@pytest.fixture(autouse=True)
+def auth_keys(monkeypatch):
+    """Verify test signatures locally instead of fetching real project keys."""
+    monkeypatch.setattr(auth, "SUPABASE_URL", "http://test-auth")
+    monkeypatch.setattr(auth.keys, "fetch_data", lambda: {"keys": [PUBLIC_JWK]})

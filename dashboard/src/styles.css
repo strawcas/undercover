@@ -607,3 +607,48 @@ p {
 .step details[open] summary code {
   display: none;
 }
+
+.session {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.stack-form {
+  display: grid;
+  gap: 16px;
+  margin-top: 24px;
+}
+.stack-form label {
+  display: grid;
+  gap: 6px;
+}
+input,
+textarea,
+select,
+button {
+  font: inherit;
+  border-radius: 10px;
+  padding: 9px 14px;
+}
+input,
+textarea,
+select {
+  color: var(--ink);
+  background: var(--inset);
+  border: 1px solid var(--muted);
+}
+button {
+  border: none;
+  background: var(--sea-green);
+  color: var(--midnight);
+  font-weight: 600;
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.sign-in-page {
+  max-width: 560px;
+  padding-top: 12vh;
+}

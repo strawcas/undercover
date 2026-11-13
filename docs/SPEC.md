@@ -40,12 +40,15 @@ Our goal is to handle claims straight through, as accurately as our handlers do.
 - Our handlers' own decisions on these claims are in `data/evals/`. We use them to check the agent's work. The agent must never see them.
 - Amounts are in US dollars.
 
+## Handler sign-in
+
+Handlers sign in with their existing Supabase email/password accounts. There is no sign-up. Every dashboard page needs a signed-in handler and shows their identity and a way to sign out. Starting a dispatch or evaluation requires a verified handler. Payout sign-off records the signed-in handler and requires senior authority: Dana Whitfield can sign off over the limit; Marcus Oyelaran and Priya Raman cannot. The backend enforces these permissions independently of the screen.
+
 ## Our records
 
 Everything is in `data/`, described in `data/README.md`: the claims queue, the policies, the customers, the plans, the handlers, the policy wording and the claims manual. The held-out claims in `data/evals/` are for checking the agent later and stay out of the queue.
 
 ## Not for now
 
-- No sign-in. Everyone who uses the screens sees everything.
 - No real payments.
 - No messages to customers.

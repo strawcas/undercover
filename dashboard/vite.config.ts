@@ -1,7 +1,13 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
-export default defineConfig({
+export default defineConfig(({ command, mode }) => ({
+  envDir:
+    command === "serve" &&
+    mode === "development" &&
+    process.env.NODE_ENV !== "test"
+      ? ".."
+      : false,
   plugins: [react()],
   server: {
     proxy: { "/api": process.env.UNDERCOVER_API ?? "http://127.0.0.1:8000" },
@@ -14,4 +20,4 @@ export default defineConfig({
       thresholds: { statements: 80 },
     },
   },
-});
+}));

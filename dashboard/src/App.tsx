@@ -5,8 +5,18 @@ import { QueuePage } from "./pages/QueuePage";
 import { ScoreboardPage } from "./pages/ScoreboardPage";
 import { EvaluationPage } from "./pages/EvaluationPage";
 import { CLAIM_PAGE, EVALUATION_PAGE, SCOREBOARD_PAGE } from "./paths";
+import { useAuth } from "./auth";
+import { SignInPage } from "./pages/SignInPage";
 
 export function App() {
+  const auth = useAuth();
+  if (auth.loading)
+    return (
+      <main className="page">
+        <p className="message">Restoring your sign-in…</p>
+      </main>
+    );
+  if (!auth.handler) return <SignInPage />;
   return (
     <>
       <header className="header">
@@ -20,8 +30,24 @@ export function App() {
           <NavLink to="/instructions">Instructions</NavLink>
           <NavLink to={SCOREBOARD_PAGE}>Scoreboard</NavLink>
         </nav>
+        <div className="session">
+          <span>{auth.handler.name}</span>
+          <button
+            type="button"
+            onClick={() => {
+              void auth.signOut();
+            }}
+          >
+            Sign out
+          </button>
+        </div>
       </header>
       <main className="page">
+        {auth.error && (
+          <p className="form-error" role="alert">
+            {auth.error}
+          </p>
+        )}
         <Routes>
           <Route path="/" element={<QueuePage />} />
           <Route path={CLAIM_PAGE} element={<ClaimPage />} />

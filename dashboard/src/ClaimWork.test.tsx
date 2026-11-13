@@ -6,7 +6,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import type { Claim, Decision, Handler, Step } from "./api";
+import type { Claim, Decision, Step } from "./api";
 import { time } from "./format";
 import {
   Refusal,
@@ -27,21 +27,6 @@ afterEach(() => {
 });
 
 const decidedAt = "2026-09-27T17:06:16+00:00";
-
-const handlers: Handler[] = [
-  {
-    handler_id: "HND-01",
-    name: "Dana Whitfield",
-    role: "Senior Claims Handler",
-    can_approve_over_limit: true,
-  },
-  {
-    handler_id: "HND-04",
-    name: "Sam Trainee",
-    role: "Trainee",
-    can_approve_over_limit: false,
-  },
-];
 
 const steps: Step[] = [
   {
@@ -73,7 +58,6 @@ function showClaim(shown: Claim, stepsShown: Step[] = []) {
     "GET /api/claims/CLM-1002/steps": stepsShown,
     "GET /api/policies/POL-2002": policy,
     "GET /api/customers/CUS-3002/claims": history,
-    "GET /api/handlers": handlers,
   };
   const fetchMock = stubApi(routes);
   renderAt("/claims/CLM-1002");
@@ -269,11 +253,9 @@ it("lets a handler sign off a held payment", async () => {
   const panel = await decisionPanel();
   expect(panel.getByText(/waits for a handler's sign-off/)).toBeDefined();
   const button = panel.getByRole("button", { name: "Sign off" });
-  expect(button).toHaveProperty("disabled", true);
-
-  const select = panel.getByRole("combobox", { name: "Handler" });
-  expect(await within(select).findByText("Dana Whitfield")).toBeDefined();
-  expect(within(select).queryByText("Sam Trainee")).toBeNull();
+  expect(button).toHaveProperty("disabled", false);
+  expect(panel.getByText("Sign off as Dana Whitfield.")).toBeDefined();
+  expect(panel.queryByRole("combobox")).toBeNull();
 
   const signedOff: Claim = {
     ...held,
@@ -286,7 +268,6 @@ it("lets a handler sign off a held payment", async () => {
     },
   };
   routes["POST /api/claims/CLM-1002/sign-off"] = signedOff;
-  fireEvent.change(select, { target: { value: "HND-01" } });
   routes["GET /api/claims/CLM-1002"] = signedOff;
   fireEvent.click(button);
 
@@ -298,7 +279,7 @@ it("lets a handler sign off a held payment", async () => {
     ([path, request]) =>
       path === "/api/claims/CLM-1002/sign-off" && request?.method === "POST",
   ) ?? [undefined, undefined];
-  expect(init?.body).toBe(JSON.stringify({ handler_id: "HND-01" }));
+  expect(init?.body).toBe(JSON.stringify({}));
 });
 
 it("shows why a sign-off was refused", async () => {
@@ -308,9 +289,6 @@ it("shows why a sign-off was refused", async () => {
     409,
     "Claim CLM-1002 is not waiting for sign-off",
   );
-  const select = panel.getByRole("combobox", { name: "Handler" });
-  await within(select).findByText("Dana Whitfield");
-  fireEvent.change(select, { target: { value: "HND-01" } });
   fireEvent.click(panel.getByRole("button", { name: "Sign off" }));
   expect((await panel.findByRole("alert")).textContent).toBe(
     "Claim CLM-1002 is not waiting for sign-off",

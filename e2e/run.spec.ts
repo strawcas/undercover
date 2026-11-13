@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 import { post, put, AGENT_STAND_IN } from "./api";
 
 // These tests stand in for the dispatcher and a claim agent by calling the

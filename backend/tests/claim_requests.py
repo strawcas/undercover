@@ -1,5 +1,7 @@
 """Requests the backend's tests send to work a claim."""
 
+from backend.tests.auth_support import authorization
+
 
 def start(client, claim_id):
     return client.post(f"/api/claims/{claim_id}/start", json={"thread_id": "t-1"})
@@ -23,7 +25,7 @@ def pay(client, claim_id, amount):
 
 def sign_off(client, claim_id, handler_id):
     return client.post(
-        f"/api/claims/{claim_id}/sign-off", json={"handler_id": handler_id}
+        f"/api/claims/{claim_id}/sign-off", headers=authorization(handler_id)
     )
 
 

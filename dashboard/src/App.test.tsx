@@ -121,7 +121,7 @@ it("shows the agent's instructions read only", async () => {
     within(claim).getByText(/## Contents of the claims manual/),
   ).toBeDefined();
   expect(screen.queryByRole("textbox")).toBeNull();
-  expect(screen.queryByRole("button")).toBeNull();
+  expect(within(claim).queryByRole("button")).toBeNull();
 });
 
 it("says when a page doesn't exist", () => {

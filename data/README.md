@@ -8,7 +8,7 @@ The data behind UnderCover Travel Insurance, a fictional insurer. Everything her
 - `plans.json`: the three plans (Economy, Premium, First) with their limits, waiting periods and deductibles, and the three add-ons.
 - `policies.json`: one policy per trip, with the plan, the add-ons, the purchase date, the trip and the travelers.
 - `customers.json`: contact details and claim history, with the date and a one line summary of each earlier claim. This is personal data.
-- `handlers.json`: the claims handlers.
+- `handlers.json`: the claims handlers, their sign-in emails and permission to sign off payouts over the limit. Only Dana Whitfield has senior authority. Passwords and Supabase Auth users are managed outside the seed data.
 - `claims.json`: the claims queue, twenty-five claims. Each has the customer's story, the items claimed and the supporting documents as text.
 
 ## The documents

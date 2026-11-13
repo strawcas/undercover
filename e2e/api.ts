@@ -1,4 +1,5 @@
 import { type APIRequestContext, expect } from "@playwright/test";
+import { AGENT_STAND_IN } from "./addresses";
 
 // Stands in for the agent by sending to the API through the dashboard's proxy.
 async function send(
@@ -19,7 +20,7 @@ export const put = (request: APIRequestContext, path: string, data: object) =>
   send(request, "PUT", path, data);
 
 // The stand-in for the agent's service, which Playwright starts on its own port.
-export const AGENT_STAND_IN = "http://127.0.0.1:8003";
+export { AGENT_STAND_IN } from "./addresses";
 
 export async function resumed(request: APIRequestContext): Promise<string[]> {
   const response = await request.get(`${AGENT_STAND_IN}/api/resumed`);

@@ -2,6 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { vi } from "vitest";
 import { App } from "./App";
+import { AuthContext, type AuthState } from "./auth";
 import type {
   Claim,
   ClaimSummary,
@@ -40,13 +41,29 @@ export function stubApi(routes: Routes) {
   return fetchMock;
 }
 
-export function renderAt(path: string) {
+export function renderAt(path: string, auth: AuthState = signedIn) {
   render(
     <MemoryRouter initialEntries={[path]}>
-      <App />
+      <AuthContext.Provider value={auth}>
+        <App />
+      </AuthContext.Provider>
     </MemoryRouter>,
   );
 }
+
+export const signedIn: AuthState = {
+  handler: {
+    handler_id: "HND-01",
+    name: "Dana Whitfield",
+    email: "dana.whitfield@undercover.example",
+    role: "Senior Claims Handler",
+    can_approve_over_limit: true,
+  },
+  loading: false,
+  error: null,
+  signIn: vi.fn().mockResolvedValue(undefined),
+  signOut: vi.fn().mockResolvedValue(undefined),
+};
 
 // Finds the panel headed by the given heading, to look inside it.
 export async function panel(heading: string) {

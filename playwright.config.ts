@@ -1,5 +1,5 @@
 import { defineConfig } from "@playwright/test";
-import { AGENT_STAND_IN } from "./e2e/api";
+import { AGENT_STAND_IN, AUTH_STAND_IN } from "./e2e/addresses";
 
 // The tests run their own backend and dashboard, on their own ports and
 // database, so they never touch the servers started by `npm run dev`.
@@ -18,7 +18,12 @@ export default defineConfig({
         UNDERCOVER_DB: "e2e/undercover.db",
         DATABASE_URL: "",
         UNDERCOVER_AGENT: AGENT_STAND_IN,
+        VITE_SUPABASE_URL: AUTH_STAND_IN,
       },
+    },
+    {
+      command: "node e2e/auth_stand_in.ts",
+      url: `${AUTH_STAND_IN}/auth/v1/.well-known/jwks.json`,
     },
     {
       command: "node e2e/agent_stand_in.ts",
@@ -28,7 +33,12 @@ export default defineConfig({
     {
       command: "npx vite dashboard --port 5174 --strictPort",
       url: "http://localhost:5174",
-      env: { UNDERCOVER_API: "http://127.0.0.1:8001" },
+      env: {
+        UNDERCOVER_API: "http://127.0.0.1:8001",
+        VITE_SUPABASE_URL: AUTH_STAND_IN,
+        VITE_SUPABASE_PUBLISHABLE_KEY: "offline-publishable",
+        NODE_ENV: "test",
+      },
     },
   ],
 });

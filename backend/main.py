@@ -1,15 +1,16 @@
 """The UnderCover backend."""
 
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from sqlalchemy import Connection, RowMapping, insert, select, update
 
 from backend import agent_service, evaluations
 from backend import runs as run_records
+from backend.auth import CurrentHandler, SeniorHandler
 from backend.clock import now
 from backend.database import (
     claim_view,
@@ -25,6 +26,7 @@ from backend.database import (
     settings,
     steps,
 )
+from backend.dependencies import Database
 from backend.documents import contents, search, sections, titles
 from backend.models import (
     Claim,
@@ -53,7 +55,6 @@ from backend.models import (
     RunSelectionRequest,
     Section,
     SectionMatch,
-    SignOffRequest,
     StartRequest,
     Status,
     Step,
@@ -78,27 +79,25 @@ app = FastAPI(title="UnderCover", lifespan=lifespan)
 
 
 @app.post("/api/dispatches", operation_id="start_dispatch", status_code=202)
-def start_dispatch(request: DispatchRequest) -> dict[str, str]:
+def start_dispatch(request: DispatchRequest, handler: CurrentHandler) -> dict[str, str]:
     """Ask the agent service to accept a dispatch without creating a run first."""
     return agent_service.start_dispatch(request.concurrency)
 
 
 @app.post("/api/evaluations", operation_id="start_evaluation", status_code=202)
-def start_evaluation(request: EvaluationRequest) -> dict[str, str]:
+def start_evaluation(
+    request: EvaluationRequest, handler: CurrentHandler
+) -> dict[str, str]:
     """Ask the agent service to accept an isolated evaluation."""
     return agent_service.start_evaluation(
         request.set_name, request.tiny, request.concurrency
     )
 
 
-def database() -> Iterator[Connection]:
-    """Open the database for one request, in a transaction committed at its end."""
-    with engine().begin() as connection:
-        yield connection
-
-
-# Committed before the response is sent and before any background task runs.
-Database = Annotated[Connection, Depends(database, scope="function")]
+@app.get("/api/me", operation_id="get_current_handler")
+def get_current_handler(handler: CurrentHandler) -> Handler:
+    """Return the signed-in handler and their permissions."""
+    return handler
 
 
 @app.get("/api/evaluations", operation_id="list_evaluations")
@@ -378,7 +377,7 @@ def pay_claim(claim_id: str, request: PaymentRequest, db: Database) -> Claim:
 
 @app.post("/api/claims/{claim_id}/sign-off", operation_id="sign_off_claim")
 def sign_off_claim(
-    claim_id: str, request: SignOffRequest, db: Database, background: BackgroundTasks
+    claim_id: str, db: Database, background: BackgroundTasks, handler: SeniorHandler
 ) -> Claim:
     """Sign off a held payout as a handler, so the agent picks the claim up and pays."""
     claim = find_claim(db, claim_id, lock=True)
@@ -386,16 +385,6 @@ def sign_off_claim(
         raise HTTPException(409, "Evaluation claims cannot be signed off")
     if claim["status"] != "waiting_for_sign_off":
         raise HTTPException(409, f"Claim {claim_id} is not waiting for sign-off")
-    query = select(handlers).where(handlers.c.handler_id == request.handler_id)
-    row = db.execute(query).mappings().first()
-    if row is None:
-        raise HTTPException(404, f"Handler {request.handler_id} not found")
-    handler = Handler(**row)
-    if not handler.can_approve_over_limit:
-        raise HTTPException(
-            403,
-            f"{handler.name} can't sign off payouts over {dollars(approval_limit(db))}",
-        )
     signed_off_at = now()
     db.execute(
         update(decisions)

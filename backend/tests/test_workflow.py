@@ -167,7 +167,7 @@ def test_over_the_limit_waits_for_sign_off(client):
 def test_a_sign_off_is_recorded_and_the_agent_is_told(client, agent_calls):
     start(client, "CLM-1002")
     decide(client, "CLM-1002", "approve", 1350.0)
-    assert sign_off(client, "CLM-1002", "HND-99").status_code == 404
+    assert sign_off(client, "CLM-1002", "HND-99").status_code == 403
     claim = sign_off(client, "CLM-1002", "HND-01").json()
     assert (claim["status"], claim["payment"]) == ("in_progress", None)
     assert claim["decision"]["signed_off_by"] == "Dana Whitfield"
@@ -241,9 +241,7 @@ def test_sign_off_needs_a_handler_who_can_approve(client, agent_calls):
     decide(client, "CLM-1002", "approve", 1350.0)
     response = sign_off(client, "CLM-1002", "HND-02")
     assert response.status_code == 403
-    assert response.json()["detail"] == (
-        "Marcus Oyelaran can't sign off payouts over $1,000.00"
-    )
+    assert "senior handler" in response.json()["detail"]
     assert agent_calls == []
 
 
@@ -268,4 +266,4 @@ def test_list_handlers(client):
         "Marcus Oyelaran",
         "Priya Raman",
     ]
-    assert all(h["can_approve_over_limit"] for h in handlers)
+    assert [h["can_approve_over_limit"] for h in handlers] == [True, False, False]
