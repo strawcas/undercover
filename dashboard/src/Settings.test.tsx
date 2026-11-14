@@ -46,7 +46,26 @@ it("shows business units, read-only allowed models and senior restrictions", asy
     screen.getByText(/A senior handler is required to change/),
   ).toBeDefined();
   expect(screen.getByText("openai/gpt-6-luna")).toBeDefined();
-  expect(screen.getByText(/0.15 means 15%/)).toBeDefined();
+  expect(screen.getByText(/60% to 70% is 10 points/)).toBeDefined();
+  expect(screen.getByLabelText("Held-out accuracy floor (%)")).toHaveProperty(
+    "value",
+    "60",
+  );
+  expect(
+    screen.getByLabelText("Accuracy noise (percentage points)"),
+  ).toHaveProperty("value", "10");
+  expect(screen.getByLabelText("Grade noise (points)")).toHaveProperty(
+    "value",
+    "0.15",
+  );
+  expect(screen.getByLabelText("Cost per claim tolerance (%)")).toHaveProperty(
+    "value",
+    "100",
+  );
+  expect(screen.getByLabelText("Time per claim tolerance (%)")).toHaveProperty(
+    "value",
+    "25",
+  );
   expect(screen.getByText("No platform settings have changed.")).toBeDefined();
 });
 
@@ -95,6 +114,127 @@ it("requires confirmation, supports cancellation and records saved settings", as
     }),
   );
   expect(await screen.findByText("View changes")).toBeDefined();
+});
+
+it("confirms percentages and percentage points but saves the original API units", async () => {
+  const values = {
+    ...settings.values,
+    objectives: { accuracy: 72.5 / 100, grade: 1.5 },
+    noise: {
+      accuracy: 7.25 / 100,
+      grade: 0.25,
+      cost_per_claim: 17.5 / 100,
+      seconds_per_claim: 12.75 / 100,
+    },
+    tolerance: {
+      accuracy: 8.5 / 100,
+      grade: 0.5,
+      cost_per_claim: 225.5 / 100,
+      seconds_per_claim: 37.5 / 100,
+    },
+  };
+  const updated = {
+    ...settings,
+    values,
+    changes: [
+      {
+        id: 1,
+        handler: "Dana Whitfield",
+        changed_at: "2026-01-01T00:00:00Z",
+        before: settings.values,
+        after: values,
+      },
+    ],
+  };
+  const routes = {
+    "GET /api/settings": settings,
+    "PUT /api/settings": updated,
+  };
+  const fetch = stubApi(routes);
+  renderAt("/settings");
+  await screen.findByLabelText("Held-out accuracy floor (%)");
+  for (const [label, value] of [
+    ["Held-out accuracy floor (%)", "72.5"],
+    ["Held-out grade floor (0–3)", "1.5"],
+    ["Accuracy noise (percentage points)", "7.25"],
+    ["Grade noise (points)", "0.25"],
+    ["Cost per claim noise (%)", "17.5"],
+    ["Time per claim noise (%)", "12.75"],
+    ["Accuracy tolerance (percentage points)", "8.5"],
+    ["Grade tolerance (points)", "0.5"],
+    ["Cost per claim tolerance (%)", "225.5"],
+    ["Time per claim tolerance (%)", "37.5"],
+  ]) {
+    fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  }
+  fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+  const dialog = within(
+    screen.getByRole("dialog", { name: "Save platform settings?" }),
+  );
+  expect(dialog.getByText("72.5%")).toBeDefined();
+  expect(dialog.getByText("7.25 percentage points")).toBeDefined();
+  expect(dialog.getByText("225.5%")).toBeDefined();
+  expect(dialog.getByText("1.5 / 3")).toBeDefined();
+  expect(dialog.queryByText(/"objectives"/)).toBeNull();
+  routes["GET /api/settings"] = updated;
+  fireEvent.click(dialog.getByRole("button", { name: "Save changes" }));
+  expect(await screen.findByText("Settings saved.")).toBeDefined();
+  expect(fetch).toHaveBeenCalledWith(
+    "/api/settings",
+    expect.objectContaining({ method: "PUT", body: JSON.stringify(values) }),
+  );
+  expect(screen.getByLabelText("Held-out accuracy floor (%)")).toHaveProperty(
+    "value",
+    "72.5",
+  );
+  const history = within(
+    await screen.findByRole("region", { name: "Settings history" }),
+  );
+  fireEvent.click(history.getByText("View changes"));
+  expect(
+    within(
+      history.getByRole("region", { name: "Before settings change" }),
+    ).getByText("60%"),
+  ).toBeDefined();
+  expect(
+    within(
+      history.getByRole("region", { name: "After settings change" }),
+    ).getByText("72.5%"),
+  ).toBeDefined();
+});
+
+it("validates displayed accuracy bounds and allows relative thresholds above 100%", async () => {
+  stubApi({ "GET /api/settings": settings });
+  renderAt("/settings");
+  const floor = await screen.findByLabelText<HTMLInputElement>(
+    "Held-out accuracy floor (%)",
+  );
+  const noise = screen.getByLabelText<HTMLInputElement>(
+    "Accuracy noise (percentage points)",
+  );
+  const tolerance = screen.getByLabelText<HTMLInputElement>(
+    "Accuracy tolerance (percentage points)",
+  );
+  for (const input of [floor, noise, tolerance]) {
+    for (const value of ["0", "100"]) {
+      fireEvent.change(input, { target: { value } });
+      expect(input.checkValidity()).toBe(true);
+    }
+    for (const value of ["-0.01", "100.01"]) {
+      fireEvent.change(input, { target: { value } });
+      expect(input.checkValidity()).toBe(false);
+    }
+  }
+  const cost = screen.getByLabelText<HTMLInputElement>(
+    "Cost per claim tolerance (%)",
+  );
+  fireEvent.change(cost, { target: { value: "225.5" } });
+  expect(cost.checkValidity()).toBe(true);
+  const grade = screen.getByLabelText<HTMLInputElement>(
+    "Held-out grade floor (0–3)",
+  );
+  fireEvent.change(grade, { target: { value: "3.01" } });
+  expect(grade.checkValidity()).toBe(false);
 });
 
 it("preserves unsaved inputs and displays a settings refusal", async () => {
@@ -231,21 +371,31 @@ it.each([false, true])(
   },
 );
 
-it("keeps dirty settings and focus through a server refresh", async () => {
-  vi.useFakeTimers({ shouldAdvanceTime: true });
-  const routes = { "GET /api/settings": settings };
-  stubApi(routes);
-  renderAt("/settings");
-  const input = await screen.findByLabelText("Approval limit (USD)");
-  input.focus();
-  fireEvent.change(input, { target: { value: "1200" } });
-  routes["GET /api/settings"] = {
-    ...settings,
-    values: { ...settings.values, payout_approval_limit: 1800 },
-  };
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(REFRESH_MS);
-  });
-  expect(input).toHaveProperty("value", "1200");
-  expect(document.activeElement).toBe(input);
-});
+it.each([
+  { label: "Approval limit (USD)", value: "1200" },
+  { label: "Held-out accuracy floor (%)", value: "72.5" },
+])(
+  "keeps dirty $label and focus through a server refresh",
+  async ({ label, value }) => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const routes = { "GET /api/settings": settings };
+    stubApi(routes);
+    renderAt("/settings");
+    const input = await screen.findByLabelText(label);
+    input.focus();
+    fireEvent.change(input, { target: { value } });
+    routes["GET /api/settings"] = {
+      ...settings,
+      values: {
+        ...settings.values,
+        payout_approval_limit: 1800,
+        objectives: { ...settings.values.objectives, accuracy: 0.9 },
+      },
+    };
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH_MS);
+    });
+    expect(input).toHaveProperty("value", value);
+    expect(document.activeElement).toBe(input);
+  },
+);

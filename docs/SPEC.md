@@ -41,7 +41,7 @@ Configurations and recipes are immutable backend-owned versions. New work pins t
 
 Initial settings are accuracy/grade floors of 0.60/1.00, noise of 0.10/0.15/0.15/0.15 and tolerance of 0.10/0.15/1.00/0.25 for accuracy/grade/cost/time. Accuracy and grade use absolute differences; cost and time use relative differences. Each round starts with a $0.50 limit covering its improver, claim evaluations and judge, with 25 concurrent claim agents. Missing evidence or an unaffordable candidate rolls back. The default claim model is Luna at low effort and the improver uses Luna at medium effort. A configured free-model override disables grading and records default effort.
 
-Every dashboard page has a clear header and consistent controls in light and dark mode. Statuses include words, tables show units, and wide comparisons scroll locally. Held evaluation copies are complete without payout sign-off and stay outside the queue.
+Every dashboard page has a clear header and consistent controls in light and dark mode. Statuses include words, tables show units, and wide comparisons scroll locally. Settings shows accuracy floors as percentages, accuracy noise/tolerance as percentage points, cost/time thresholds as relative percentages, and grades as score points. Save confirmations and settings history use the same units. Held evaluation copies are complete without payout sign-off and stay outside the queue.
 
 ## Rules
 

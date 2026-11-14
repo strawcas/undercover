@@ -8,18 +8,78 @@ import { money, time } from "../format";
 import { getTheme, setTheme, type Theme } from "../theme";
 import { REFRESH_MS, useLoad } from "../useLoad";
 
-const measureNames = {
-  accuracy: "Accuracy",
-  grade: "Grade",
-  cost_per_claim: "Cost per claim",
-  seconds_per_claim: "Time per claim",
+const fieldNames = {
+  approval: "Approval limit (USD)",
+  spending: "Round spending limit (USD)",
+  concurrency: "Agents at once in round evaluations",
+  accuracy: "Held-out accuracy floor (%)",
+  grade: "Held-out grade floor (0–3)",
 };
-const measureMax: Record<keyof Measures, number | undefined> = {
-  accuracy: 1,
-  grade: 3,
-  cost_per_claim: undefined,
-  seconds_per_claim: undefined,
+const measureFields: Record<
+  keyof Measures,
+  { name: string; unit: string; scale: number; max: number | undefined }
+> = {
+  accuracy: { name: "Accuracy", unit: "percentage points", scale: 100, max: 1 },
+  grade: { name: "Grade", unit: "points", scale: 1, max: 3 },
+  cost_per_claim: {
+    name: "Cost per claim",
+    unit: "%",
+    scale: 100,
+    max: undefined,
+  },
+  seconds_per_claim: {
+    name: "Time per claim",
+    unit: "%",
+    scale: 100,
+    max: undefined,
+  },
 };
+const measureKeys = Object.keys(measureFields) as (keyof Measures)[];
+const thresholdGroups = ["noise", "tolerance"] as const;
+
+function measureLabel(key: keyof Measures, group: string) {
+  const field = measureFields[key];
+  return `${field.name} ${group} (${field.unit})`;
+}
+
+function displayNumber(value: number, scale = 1) {
+  return scale === 1 ? value : Number((value * scale).toFixed(10));
+}
+
+function measureValue(key: keyof Measures, value: number) {
+  const field = measureFields[key];
+  const suffix = field.unit === "%" ? "%" : ` ${field.unit}`;
+  return `${String(displayNumber(value, field.scale))}${suffix}`;
+}
+
+function SettingsSummary({ values }: Readonly<{ values: PlatformSettings }>) {
+  const rows = [
+    [fieldNames.approval, money(values.payout_approval_limit)],
+    [fieldNames.spending, money(values.spending_limit)],
+    [fieldNames.concurrency, values.concurrency],
+    [
+      fieldNames.accuracy,
+      `${String(displayNumber(values.objectives.accuracy, 100))}%`,
+    ],
+    [fieldNames.grade, `${String(values.objectives.grade)} / 3`],
+    ...thresholdGroups.flatMap((group) =>
+      measureKeys.map((key) => [
+        measureLabel(key, group),
+        measureValue(key, values[group][key]),
+      ]),
+    ),
+  ];
+  return (
+    <dl className="evaluation-measures">
+      {rows.map(([name, value]) => (
+        <div key={name}>
+          <dt>{name}</dt>
+          <dd className="mono">{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
 
 export function SettingsPage() {
   const { data, error, reload } = useLoad(api.getSettings, REFRESH_MS);
@@ -97,13 +157,14 @@ export function SettingsPage() {
                       {change.handler} · {time(change.changed_at)}
                       <details>
                         <summary>View changes</summary>
-                        <pre className="instructions">
-                          {JSON.stringify(
-                            { before: change.before, after: change.after },
-                            null,
-                            2,
-                          )}
-                        </pre>
+                        <section aria-label="Before settings change">
+                          <h3>Before</h3>
+                          <SettingsSummary values={change.before} />
+                        </section>
+                        <section aria-label="After settings change">
+                          <h3>After</h3>
+                          <SettingsSummary values={change.after} />
+                        </section>
                       </details>
                     </li>
                   ))}
@@ -186,29 +247,31 @@ function SettingsEditor({
         </p>
       )}
       <p className="muted">
-        Accuracy uses a 0–1 fraction and grade a 0–3 score. Noise and tolerance
-        for cost and time are fractions of the old value: 0.15 means 15%.
+        Accuracy is a percentage; its noise and tolerance use percentage points
+        (60% to 70% is 10 points). Grade uses a 0–3 score and score-point
+        changes. Cost and time thresholds are percentages of the baseline: 15%
+        means a relative change of 15%.
       </p>
       <form className="stack-form" onSubmit={submit}>
         <fieldset disabled={!canEdit || sending}>
           <legend>Business limits</legend>
           <div className="settings-grid">
             <NumberField
-              label="Approval limit (USD)"
+              label={fieldNames.approval}
               value={values.payout_approval_limit}
               onChange={(value) => {
                 setValues({ ...values, payout_approval_limit: value });
               }}
             />
             <NumberField
-              label="Round spending limit (USD)"
+              label={fieldNames.spending}
               value={values.spending_limit}
               onChange={(value) => {
                 setValues({ ...values, spending_limit: value });
               }}
             />
             <NumberField
-              label="Agents at once in round evaluations"
+              label={fieldNames.concurrency}
               value={values.concurrency}
               max={25}
               min={1}
@@ -218,8 +281,9 @@ function SettingsEditor({
               }}
             />
             <NumberField
-              label="Held-out accuracy floor"
+              label={fieldNames.accuracy}
               value={values.objectives.accuracy}
+              scale={100}
               max={1}
               onChange={(value) => {
                 setValues({
@@ -229,7 +293,7 @@ function SettingsEditor({
               }}
             />
             <NumberField
-              label="Held-out grade floor"
+              label={fieldNames.grade}
               value={values.objectives.grade}
               max={3}
               onChange={(value) => {
@@ -241,7 +305,7 @@ function SettingsEditor({
             />
           </div>
         </fieldset>
-        {(["noise", "tolerance"] as const).map((group) => (
+        {thresholdGroups.map((group) => (
           <fieldset key={group} disabled={!canEdit || sending}>
             <legend>
               {group === "noise"
@@ -249,12 +313,13 @@ function SettingsEditor({
                 : "Tolerance: allowed regression"}
             </legend>
             <div className="settings-grid">
-              {(Object.keys(measureNames) as (keyof Measures)[]).map((key) => (
+              {measureKeys.map((key) => (
                 <NumberField
                   key={key}
-                  label={`${measureNames[key]} ${group}`}
+                  label={measureLabel(key, group)}
                   value={values[group][key]}
-                  max={measureMax[key]}
+                  scale={measureFields[key].scale}
+                  max={measureFields[key].max}
                   onChange={(value) => {
                     setValues({
                       ...values,
@@ -293,7 +358,7 @@ function SettingsEditor({
           New rounds use these values. Existing decisions retain their approval
           rules.
         </p>
-        <pre className="instructions">{JSON.stringify(values, null, 2)}</pre>
+        <SettingsSummary values={values} />
       </ConfirmDialog>
     </section>
   );
@@ -306,6 +371,7 @@ function NumberField({
   min = 0,
   max,
   step = 0.01,
+  scale = 1,
 }: Readonly<{
   label: string;
   value: number;
@@ -313,6 +379,7 @@ function NumberField({
   min?: number;
   max?: number;
   step?: number;
+  scale?: number;
 }>) {
   return (
     <label>
@@ -320,12 +387,12 @@ function NumberField({
       <input
         type="number"
         required
-        value={value}
-        min={min}
-        max={max}
+        value={displayNumber(value, scale)}
+        min={min * scale}
+        max={max === undefined ? undefined : max * scale}
         step={step}
         onChange={(event) => {
-          onChange(Number(event.target.value));
+          onChange(Number(event.target.value) / scale);
         }}
       />
     </label>
