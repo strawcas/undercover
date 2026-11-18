@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query
+from mangum import Mangum
 from sqlalchemy import Connection, RowMapping, insert, select, update
 
 from backend import (
@@ -21,6 +22,7 @@ from backend.agent_contract import agent_contract
 from backend.auth import CurrentHandler, SeniorHandler, agent_or_handler, require_agent
 from backend.clock import now
 from backend.configuration_models import ClaimConfiguration, ConfigurationHistory
+from backend.dashboard import install_dashboard
 from backend.database import (
     claim_view,
     claims,
@@ -31,6 +33,7 @@ from backend.database import (
     is_seeded,
     payments,
     policies,
+    running_on_lambda,
     seed,
     settings,
     steps,
@@ -82,7 +85,7 @@ ATTEMPTS = 2
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Seed the database on startup if it has no tables yet."""
-    if not is_seeded(engine()):
+    if not running_on_lambda() and not is_seeded(engine()):
         seed(engine())
     yield
 
@@ -116,14 +119,14 @@ def get_current_handler(handler: CurrentHandler) -> Handler:
 
 
 @app.get("/api/evaluations", operation_id="list_evaluations")
-def list_evaluations(db: Database, handler: CurrentHandler) -> list[Evaluation]:
+def list_evaluations(handler: CurrentHandler, db: Database) -> list[Evaluation]:
     """List newest-first evaluations with backend-calculated scores."""
     return evaluations.list_evaluations(db)
 
 
 @app.get("/api/evaluations/{run_id}", operation_id="get_evaluation")
 def get_evaluation(
-    run_id: str, db: Database, handler: CurrentHandler
+    run_id: str, handler: CurrentHandler, db: Database
 ) -> EvaluationDetail:
     """Compare the agent's results with handler labels on isolated copies."""
     return evaluations.get_evaluation(db, run_id)
@@ -293,7 +296,7 @@ def get_current_configuration(db: Database) -> ClaimConfiguration:
 
 @app.get("/api/configurations", operation_id="list_configurations")
 def list_configurations(
-    db: Database, handler: CurrentHandler
+    handler: CurrentHandler, db: Database
 ) -> list[ConfigurationHistory]:
     """List configuration versions and their changes newest first."""
     return [
@@ -319,14 +322,14 @@ def get_configuration(version: int, db: Database) -> ClaimConfiguration:
 
 
 @app.get("/api/settings", operation_id="get_settings")
-def get_settings(db: Database, handler: CurrentHandler) -> SettingsView:
+def get_settings(handler: CurrentHandler, db: Database) -> SettingsView:
     """Show the business settings, allowed models and change history."""
     return platform_settings.view(db)
 
 
 @app.put("/api/settings", operation_id="change_settings")
 def change_settings(
-    request: PlatformSettings, db: Database, handler: SeniorHandler
+    request: PlatformSettings, handler: SeniorHandler, db: Database
 ) -> SettingsView:
     """Change platform settings with the signed-in senior handler's audit trail."""
     return platform_settings.change_settings(db, request, handler)
@@ -357,7 +360,7 @@ def read_section(document: DocumentName, number: int, db: Database) -> Section:
 
 
 @app.get("/api/handlers", operation_id="list_handlers")
-def list_handlers(db: Database, handler: CurrentHandler) -> list[Handler]:
+def list_handlers(handler: CurrentHandler, db: Database) -> list[Handler]:
     """List the claims handlers."""
     rows = db.execute(select(handlers).order_by(handlers.c.handler_id)).mappings()
     return [Handler(**row) for row in rows]
@@ -423,7 +426,7 @@ def record_security_step(
 
 
 @app.get("/api/claims/{claim_id}/steps", operation_id="list_steps")
-def list_steps(claim_id: str, db: Database, handler: CurrentHandler) -> list[Step]:
+def list_steps(claim_id: str, handler: CurrentHandler, db: Database) -> list[Step]:
     """List the steps of the agent's work on a claim, in order."""
     find_claim(db, claim_id)
     query = select(steps).where(steps.c.claim_id == claim_id).order_by(steps.c.step_id)
@@ -544,7 +547,7 @@ def settle_payment(db: Connection, claim_id: str, amount: float, paid_at: str) -
 
 
 @app.post("/api/claims/{claim_id}/sign-off", operation_id="sign_off_claim")
-def sign_off_claim(claim_id: str, db: Database, handler: SeniorHandler) -> Claim:
+def sign_off_claim(claim_id: str, handler: SeniorHandler, db: Database) -> Claim:
     """Record the senior handler's sign-off and pay the approved payout."""
     claim = find_claim(db, claim_id, lock=True)
     if claim["evaluation_id"] is not None:
@@ -623,7 +626,7 @@ def start_run(request: RunRequest, db: Database) -> Run:
 
 
 @app.get("/api/runs/latest", operation_id="get_latest_run")
-def get_latest_run(db: Database, handler: CurrentHandler) -> Run | None:
+def get_latest_run(handler: CurrentHandler, db: Database) -> Run | None:
     """Get the newest dispatch and its member progress."""
     return run_records.latest(db)
 
@@ -635,7 +638,7 @@ def stop_runs(db: Database) -> list[str]:
 
 
 @app.get("/api/runs/active", operation_id="get_active_run")
-def get_active_run(db: Database, handler: CurrentHandler) -> Run | None:
+def get_active_run(handler: CurrentHandler, db: Database) -> Run | None:
     """Read the running dispatch or evaluation for shared dashboard busy controls."""
     return run_records.active(db)
 
@@ -741,3 +744,7 @@ def record_work_slice(
         raise HTTPException(409, "Claim has not been started")
     run_records.record_work_slice(db, claim_id, claim["thread_id"], slice_id, request)
     return {"status": "recorded"}
+
+
+install_dashboard(app)
+handler = Mangum(app, lifespan="off")

@@ -12,8 +12,10 @@
     "dev:agent": "uv run --env-file .env -m uvicorn agent.service:app --port 8002 --reload --reload-dir agent",
     "dev:dashboard": "vite dashboard",
     "seed": "uv run --env-file .env -m backend.seed",
+    "build": "vite build dashboard",
     "format": "uv run ruff format && prettier --write -u dashboard e2e *.config.*",
-    "check": "npm run check:python && npm run check:ts && npm run e2e",
+    "check": "npm run check:server && npm run check:python && npm run check:ts && npm run e2e",
+    "check:server": "uv run --offline --locked --isolated --only-group server python -c \"import backend.main\"",
     "check:python": "uv run ruff format --check && uv run ruff check && pyright && uv run pytest -q",
     "check:ts": "prettier --check -u dashboard e2e *.config.* && eslint dashboard e2e *.config.* && tsc && vitest run --root dashboard --coverage",
     "e2e": "playwright test"

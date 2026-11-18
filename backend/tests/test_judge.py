@@ -38,7 +38,7 @@ def stub_judge(monkeypatch):
     monkeypatch.setattr(
         judge,
         "client",
-        OpenRouter(
+        lambda: OpenRouter(
             api_key="offline", client=transport, server_url="https://unused.invalid"
         ),
     )

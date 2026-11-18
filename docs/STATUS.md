@@ -1,5 +1,33 @@
 # Status
 
+Secure phase 4 builds the dashboard with `npm run build` and serves it alongside the API. Mangum exports `backend.main.handler` with startup disabled. The Lambda transaction-pooler path uses a fresh psycopg connection per request and selects the schema within the transaction.
+
+The shell and root `.env` builds were warning-free and embedded the two public Supabase values. A bundle check verified the agent credential and private sentinels were absent. The Linux x86-64 Python 3.12 archive at `build/undercover-secure-lambda.zip` was 20,312,670 bytes (20.31 MB), with 13 native Linux libraries. The isolated server-group import passed without a model credential and preserved the project virtual environment. The deployment phase check passed with 352 Python tests (96.67% coverage), 119 dashboard unit tests and 11 Playwright tests.
+
+The independent deployment review approved an API-preserving dashboard fallback, tests against the real exported handler and a psycopg-driver stand-in that verified two distinct connections, two closes, disabled prepared statements and schema selection before each application query.
+
+The full-branch review against `main` approved fixes that verify credentials before opening a database connection, preserve billed evaluation screening when stopped checkpoints are cleaned up, and reject approvals below one cent after rounding. The final `npm run check` passed with `.env` absent. It included the isolated server import, 355 Python tests (96.68% coverage), 119 dashboard unit tests (96.31% statement coverage), and 11 Playwright tests. Pytest reported one Mangum event-loop deprecation warning. The local `.env` was restored byte for byte.
+
+## Secure live verification
+
+The single business reseed produced 26 waiting originals. Dana Whitfield signed in through Playwright and saw the empty Scoreboard. The unauthenticated checkpoint-thread route returned 401. The standalone CLI screened CLM-1001, approved and paid it for $420.00. The local services restarted on the same database after the review fixes, and the dashboard accepted one dispatch for the 25 remaining originals.
+
+Dispatch `c5b23830-2743-4c15-bb16-b1ca289ea906` ran at N=25 on Luna low. The dashboard showed CLM-1901's first and only step as a flagged security check, and the referral showed the same reason with a $0 payout. Two ordinary claims, CLM-1011 and CLM-1022, recovered on a second attempt. The dispatch finished with 23 originals decided and three awaiting sign-off, including the CLI claim in the decided count.
+
+Tiny evaluation `505dc3d7-f813-46d8-bbaf-4cb23cea7da7` used the evaluation set at N=5. All five copies passed their security checks and reached a decision. The original queue still held the same 26 claims with the same states. Dana then signed off original CLM-1003. The backend recorded one $3,750.00 payment with Dana's name and matching payment and sign-off timestamps. The paid claim persisted after reload, leaving 24 decided originals and two held.
+
+Dana signed in through Playwright on the standalone built app, confirmed 26 originals, and refreshed `/claims/CLM-1001` with HTTP 200 and the payment still visible. With the Lambda marker and only the three application variables, a signed-in browser request to `/api/claims` returned HTTP 200 through Supabase's transaction pooler on port 6543. The same seeded queue had 24 decided claims and two held, including the recorded CLM-1003 payout and the zero-payout CLM-1901 referral. The browser session was signed out after the check.
+
+| Live work | Recorded calls or grades | Cost (USD) |
+| --- | ---: | ---: |
+| CLI claim model and screen | 6 | 0.001305515 |
+| Dispatch claim models and screens | 170 | 0.029764650 |
+| Tiny evaluation claim models and screens | 35 | 0.005542440 |
+| Explanation judge | 5 | 0.000149982 |
+| **Combined** | | **0.036762587** |
+
+Every reply and grade in these totals had a reported cost.
+
 Secure phase 3 serves the Gateway contract at `/api/agent/openapi.json`. The current limit applies before claim lookup and to the rounded amount saved. Senior sign-off records the signer, payment and decided state in one transaction. Older held approvals preserve their decision limit and prior signer. A resumed checkpoint uses the paid outcome. The dashboard shows the committed response immediately.
 
 The independent review approved regressions for fractional-cent limits, legacy unpaid checkpoints, persistent evaluation holds and stale polls after sign-off. The full offline phase run passed, including 11 Playwright tests. The review follow-up passed the focused Python and dashboard regressions.
@@ -16,7 +44,7 @@ Settings now displays accuracy floors as percentages (60%), accuracy noise/toler
 
 All six Improve phases are complete, with phase commits, independent reviews and the prescribed live verification. Handler sign-in, senior permissions, immutable configuration/recipe versions, audited settings, persisted explanation grades, durable improvement approvals and backend keep/rollback verdicts are built. The dashboard uses shared headers, controls, model comparisons, retry states and resource-owned loading, with local table scrolling and light/dark appearance. Actual live outcomes and remaining operational limits are recorded below.
 
-## Current checks and reviews
+## Improve checks and reviews
 
 The latest offline `npm run check` passed on 14 November 2026 with `.env` temporarily absent and restored byte for byte in `finally`: **314 Python tests (96.42% coverage), 117 Vitest tests (96.53% statements), and 11 Playwright tests**. Thresholds and rules are unchanged; automated tests use local stand-ins, SQLite and fake checkpoints rather than real services. Commits use the normal formatting, lint, type and unit-test hooks; no check is bypassed. The percentage regressions cover decimal inputs, fractional API payloads, before/after history, 0–100 accuracy validation, relative thresholds over 100%, unchanged grade limits and dirty-field focus through polling.
 
@@ -99,10 +127,11 @@ The pilot, harness and durable state builds are complete. The Swarm implementati
 ## Running it
 
 - `uv sync` and `npm install` install dependencies and hooks. `npm run seed` rebuilds the database selected by `.env`, including pristine evaluation sources and isolated handler labels. It resets the queue and clears runs, measurements, evaluation copies and the scoreboard. Reseed when moving from an earlier schema.
-- `npm run dev` starts backend 8000, agent service 8002 and dashboard http://localhost:5173 with `.env`. The backend uses Supabase when DATABASE_URL is set, otherwise SQLite. The agent always needs Postgres for durable checkpoints. Both processes keep at most four database connections.
+- `npm run dev` starts backend 8000, agent service 8002 and dashboard http://localhost:5173 with `.env`. The backend uses Supabase when `DATABASE_URL` is set, otherwise SQLite. The agent needs Postgres for checkpoints and `UNDERCOVER_API_KEY` for service traffic. Both local server processes keep at most four database connections.
 - Start a dispatch from the queue. Choose N from 1 to 25, default 3. The service accepts immediately and reserves one dispatch/evaluation slot; a second start gets 409. An unavailable service produces 503 and no run record.
 - `uv run -m agent CLM-1001` still works one waiting claim. A claim id is required; queue mode and `--cap` are removed. The API address comes from the shell's UNDERCOVER_API (default localhost 8000); model/database/tracing configuration can come from `.env`.
-- A held original claim can be signed off on its claim page. The service reserves the handoff even if the worker is still reaching its pause, resumes that same saved thread and pays it. If the service was away, the next dispatch resumes it.
+- A senior handler can sign off a held original on its claim page. The backend pays the claim in the same transaction and the dashboard shows the paid result immediately.
+- `npm run build` writes `dashboard/dist`. Serve that build and the API together with `uv run --env-file .env -m uvicorn backend.main:app`. See [Deployment](TECH_STACK.md#deployment) for the Function URL configuration and package contents.
 - Start evaluations on `/scoreboard`: evaluation or held-out set, full 25 or tiny 5, N=1 to 25. They need no reseed and work fresh copies through the same graph. Copies never enter the queue or customer history, cannot be signed off and have their checkpoints removed after completion/recovery.
 
 ## Built

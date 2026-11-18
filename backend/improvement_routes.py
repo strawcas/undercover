@@ -29,13 +29,13 @@ class CloseRound(BaseModel):
 
 
 @router.get("/api/rounds", operation_id="list_rounds")
-def list_rounds(db: Database, handler: CurrentHandler) -> list[Round]:
+def list_rounds(handler: CurrentHandler, db: Database) -> list[Round]:
     """Show signed-in handlers round progress and history."""
     return improvements.list_rounds(db)
 
 
 @router.get("/api/recipes", operation_id="list_recipes")
-def list_recipes(db: Database, handler: CurrentHandler) -> list[RecipeHistory]:
+def list_recipes(handler: CurrentHandler, db: Database) -> list[RecipeHistory]:
     """Show versioned recipes and their backend-generated diffs."""
     return configurations.recipe_history(db)
 

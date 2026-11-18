@@ -384,3 +384,31 @@ def test_passed_screen_is_preserved_while_a_claim_waits_for_sign_off(
     assert api.get_claim(claim_id)["payment"]["amount"] == 1350
     assert len(prompts) == 1
     assert sum(s["kind"] == "security" for s in steps_of(client, claim_id)) == 1
+
+
+def test_interrupted_evaluation_keeps_screening_cost_after_checkpoint_cleanup(
+    monkeypatch, screen
+):
+    use_checker(monkeypatch, screen, reply("screen", flagged=False))
+    run = api.start_run(
+        configuration(kind="evaluation", set_name="evaluation", tiny=True)
+    )
+    claim_id = run["members"][0]["claim_id"]
+
+    def stop_before_recording_result(state, runtime):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(harness, "record_screen", stop_before_recording_result)
+    saver = InMemorySaver()
+    graph = graph_on(stub(), saver)
+    with pytest.raises(KeyboardInterrupt):
+        harness.work_claim(claim_id, graph, run["run_id"])
+    attempt = api.get_claim(claim_id)
+    assert attempt["decision"] is None
+    assert graph.get_state(harness.thread_of(attempt)).next == (harness.RECORD_SCREEN,)
+    assert attempt["thread_id"] in api.stop_runs()
+    saver.delete_thread(attempt["thread_id"])
+    assert saver.get_tuple(harness.thread_of(attempt)) is None
+    stopped = api.get_run(run["run_id"])
+    assert stopped["status"] == "stopped"
+    assert stopped["llm_cost"] == pytest.approx(0.00002)

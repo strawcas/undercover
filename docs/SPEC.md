@@ -21,7 +21,8 @@ Our goal is to handle claims straight through, as accurately as our handlers do.
 
 - A handler starts a dispatch from the dashboard, choosing from 1 to 25 claim agents at once, with 3 to start with. Only one dispatch or evaluation runs at a time. Code selects every waiting and in-progress claim, oldest submitted first, without a queue model.
 - Each claim has its own claim agent and saved thread. A restart carries unfinished work on from its last saved step as the same attempt. Decisions and payments happen once even if a step runs again.
-- An approval over the sign-off limit keeps its progress while it waits. When a handler signs off, the service resumes and pays it promptly, including during a dispatch. A signed-off claim remains in progress until paid. If the service is away, the next dispatch picks it up.
+- Before adjudication, a separate model screens the customer's submission for directions to the claims handler or purported prior approval. A flag results in a zero-payout referral with the screening reason and the reference `Security check`. Cleared claims continue through adjudication. The timeline starts with the screening result, and screening calls count toward claim cost. Saved work carries the screen forward. A fresh attempt checks the submission again.
+- A held original approval is paid when a senior handler signs off. The backend records the signer, timestamp, payment and decided state together, including when the agent service is offline.
 - Rate limits and timeouts wait and resume the same attempt, up to three worker tries. An exhausted claim stays in progress for the next dispatch while other claims finish. Other errors before a decision start a fresh attempt in the same dispatch; after two failed attempts the claim is left for a handler. A decision already recorded is retained if payment fails.
 - The dispatch reports its members, cost, active claim time and elapsed time, then summarizes the backend records for handlers. Active time excludes waits for sign-off and process downtime.
 - Evaluations work fresh copies of a labelled set, full or its five tiny claims, through the same claim agents. Copies stay out of the queue, cannot be signed off, and keep their decisions and steps after saved progress is cleared. Stopped evaluations remain stopped.
@@ -45,7 +46,7 @@ Every dashboard page has a clear header and consistent controls in light and dar
 
 ## Rules
 
-- A payout over the configured approval limit ($1,000 initially) needs a senior handler's sign-off. The agent can approve such a claim, but the payment waits until sign-off. The system blocks payment even if the agent tries to pay. Each decision retains its recorded approval limit; a new setting applies to subsequently recorded decisions.
+- A payout over the configured approval limit ($1,000 initially) needs a senior handler's sign-off. The agent can approve a claim above the limit. Agent payment checks the current limit before looking up the claim, and a decision retains the limit recorded with it. An existing hold carries forward after a limit increase. A senior handler can settle an older unpaid approval blocked by a limit reduction. Held evaluation copies stay complete with payment held.
 - Decisions follow the policy wording and the claims manual. The wording comes first, and the manual says how to read it.
 - Our handlers' own decisions on these claims are in `data/evals/`. We use them to check the agent's work. The agent must never see them.
 - Amounts are in US dollars.
@@ -53,6 +54,8 @@ Every dashboard page has a clear header and consistent controls in light and dar
 ## Handler sign-in
 
 Handlers sign in with their existing Supabase email/password accounts. There is no sign-up. Every dashboard page needs a signed-in handler and shows their identity and a way to sign out. Starting a dispatch or evaluation requires a verified handler. Payout sign-off records the signed-in handler and requires senior authority: Dana Whitfield can sign off over the limit; Marcus Oyelaran and Priya Raman cannot. The backend enforces these permissions independently of the screen.
+
+Private calls between the backend and the agent service use the shared agent API key. Shared claim and configuration reads also accept a verified handler. The health endpoint is public.
 
 ## Our records
 

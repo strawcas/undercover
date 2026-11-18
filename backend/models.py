@@ -180,8 +180,8 @@ class DecisionRequest(BaseModel):
     @model_validator(mode="after")
     def check_payout(self) -> Self:
         """An approval pays something, and a decline or referral pays nothing."""
-        if self.decision == "approve" and self.payout == 0:
-            raise ValueError("An approval needs a payout above zero")
+        if self.decision == "approve" and round(self.payout, 2) == 0:
+            raise ValueError("An approval needs a payout of at least one cent")
         if self.decision != "approve" and self.payout != 0:
             raise ValueError("A decline or a referral has a payout of zero")
         return self

@@ -23,6 +23,7 @@ from sqlalchemy import (
     Table,
     Text,
     create_engine,
+    event,
     insert,
     inspect,
     select,
@@ -44,6 +45,7 @@ DATA = ROOT / "data"
 DOCUMENTS = {"policy_wording": "Policy wording", "claims_manual": "Claims manual"}
 SCHEMA = "undercover"
 CONNECTIONS = 4
+LAMBDA_MARKER = "AWS_LAMBDA_FUNCTION_NAME"
 
 metadata = MetaData()
 
@@ -311,6 +313,8 @@ def database_url() -> URL:
     SQLite at UNDERCOVER_DB or undercover.db."""
     if url := os.getenv("DATABASE_URL"):
         postgres = make_url(url).set(drivername="postgresql+psycopg")
+        if running_on_lambda():
+            return postgres
         return postgres.update_query_dict({"options": f"-c search_path={SCHEMA}"})
     path = os.getenv("UNDERCOVER_DB", str(ROOT / "undercover.db"))
     return URL.create("sqlite", database=path)
@@ -322,10 +326,16 @@ def on_postgres(url: URL) -> bool:
 
 
 @cache
-def engine_for(url: URL) -> Engine:
+def engine_for(url: URL, *, lambda_runtime: bool = False) -> Engine:
     """Open a database: Postgres with at most CONNECTIONS connections, or SQLite with
     a connection for each request."""
     if on_postgres(url):
+        if lambda_runtime:
+            db = create_engine(
+                url, poolclass=NullPool, connect_args={"prepare_threshold": None}
+            )
+            event.listen(db, "begin", set_transaction_schema)
+            return db
         return create_engine(
             url,
             pool_size=CONNECTIONS,
@@ -336,9 +346,19 @@ def engine_for(url: URL) -> Engine:
     return create_engine(url, poolclass=NullPool)
 
 
+def set_transaction_schema(db: Connection) -> None:
+    """Select the schema within the Supabase pooler's current transaction."""
+    db.exec_driver_sql(f"SET LOCAL search_path TO {SCHEMA}")
+
+
+def running_on_lambda() -> bool:
+    """Use Lambda's marker to select the transaction pooler settings."""
+    return LAMBDA_MARKER in os.environ
+
+
 def engine() -> Engine:
     """Return the backend's database."""
-    return engine_for(database_url())
+    return engine_for(database_url(), lambda_runtime=running_on_lambda())
 
 
 def location(db: Engine) -> str:

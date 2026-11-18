@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend import agent_key, agent_service, auth, judge
-from backend.database import engine, seed
+from backend.database import LAMBDA_MARKER, engine, seed
 from backend.judge_models import Grade
 from backend.main import app
 from backend.tests.auth_support import (
@@ -21,6 +21,7 @@ def database(tmp_path, monkeypatch):
     """Give every test its own freshly seeded SQLite database, never Postgres."""
     path = tmp_path / "undercover.db"
     monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv(LAMBDA_MARKER, raising=False)
     monkeypatch.delenv("MODEL_NAME", raising=False)
     monkeypatch.setenv(agent_key.ENV_NAME, TEST_AGENT_KEY)
     monkeypatch.setenv("UNDERCOVER_DB", str(path))

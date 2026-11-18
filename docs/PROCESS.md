@@ -4,6 +4,7 @@
 
 `npm run check` runs every check:
 
+- The backend imports in an isolated environment containing the locked `server` dependency group. uv uses its local cache for this check.
 - Python: ruff (lint and format), pyright, and pytest with 80% coverage
 - TypeScript: ESLint, Prettier, tsc, and vitest with 80% coverage
 - Playwright end-to-end tests
@@ -53,6 +54,12 @@ The checks show that the code works, but not that it is fit to merge. Every code
 - Never push.
 - Don't open `data/evals/` unless you're asked to.
 - Everything must work on Windows: write `package.json` scripts as `uv run` commands or `.mjs` files.
+
+## Secure live verification
+
+Use [PLAN_SECURE.md](PLAN_SECURE.md) for the approved sequence. Preserve the local environment and clear `MODEL_NAME` from the file and launching shell. Reseed the business database once before the CLI claim, dispatch, tiny evaluation and senior sign-off. Then run the built backend by itself and check the Supabase transaction pooler with the Lambda marker set.
+
+Assemble the locked server group and Linux wheels in a temporary package directory. Record the zip size and provider-reported spend. Restore the intended environment and run the final offline suite with `.env` temporarily absent. Record unavailable live evidence in the plan and status.
 
 ## Swarm live verification
 

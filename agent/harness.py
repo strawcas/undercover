@@ -217,8 +217,13 @@ def wait_for_sign_off(state: ClaimState, runtime: Runtime[ClaimContext]) -> None
 def screen_claim(state: ClaimState, runtime: Runtime[ClaimContext]) -> dict[str, Any]:
     """Save the screening result before logging it or recording a referral."""
     context = runtime.context
+    attempt = screening.check(context.claim_id, context.run_id)
+    if context.evaluation_id is not None and attempt["usage"] is not None:
+        # Startup discards stopped evaluation checkpoints, so save the charge first.
+        api.record_model_call(context.claim_id, attempt["usage"])
+        attempt["usage"] = None
     return {
-        "screening": screening.check(context.claim_id, context.run_id),
+        "screening": attempt,
         "screen_attempts": 1,
     }
 

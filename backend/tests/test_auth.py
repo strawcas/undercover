@@ -8,7 +8,7 @@ import jwt
 import pytest
 from fastapi.testclient import TestClient
 
-from backend import agent_key, auth
+from backend import agent_key, auth, dependencies
 from backend.main import app
 from backend.tests.auth_support import AGENT_HEADERS, authorization, token
 
@@ -156,6 +156,25 @@ def test_service_authentication_failure_keeps_the_handler_signed_in(
     response = client.post("/api/dispatches", json={"concurrency": 3})
     assert response.status_code == 503
     assert client.get("/api/me").status_code == 200
+
+
+def test_unauthenticated_reads_are_refused_before_opening_a_connection(monkeypatch):
+    def unavailable():
+        pytest.fail("An unauthenticated request tried to open a database connection")
+
+    monkeypatch.setattr(dependencies, "engine", unavailable)
+    routes = TestClient(app)
+    for path in (
+        "/api/claims",
+        "/api/agent/openapi.json",
+        "/api/settings",
+        "/api/rounds",
+    ):
+        assert routes.get(path).status_code == 401
+        assert (
+            routes.get(path, headers={"Authorization": "Bearer invalid"}).status_code
+            == 401
+        )
 
 
 @pytest.mark.parametrize("claims", [{"exp": 1}, {"aud": "other"}, {"iss": "other"}])

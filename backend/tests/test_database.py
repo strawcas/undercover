@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import inspect, text
-from sqlalchemy.pool import QueuePool
+from sqlalchemy import event, inspect, text
+from sqlalchemy.pool import NullPool, QueuePool
 
 from backend import database as storage
 from backend.database import engine, location, seed
@@ -44,6 +44,26 @@ def test_backend_connections_identify_the_application_process(monkeypatch):
     assert opened[0]["connect_args"]["application_name"].startswith(
         "undercover-backend-"
     )
+
+
+def test_lambda_pool_uses_transaction_schema_and_no_prepared_statements(monkeypatch):
+    opened = []
+    create = storage.create_engine
+
+    def capture(url, **kwargs):
+        opened.append(kwargs)
+        return create(url, **kwargs)
+
+    monkeypatch.setattr(storage, "create_engine", capture)
+    monkeypatch.setenv(storage.LAMBDA_MARKER, "undercover")
+    monkeypatch.setenv("DATABASE_URL", SUPABASE.replace(":5432", ":6543"))
+    db = engine()
+    assert db is engine()
+    assert isinstance(db.pool, NullPool)
+    assert db.url.port == 6543
+    assert "options" not in db.url.query
+    assert opened[0]["connect_args"] == {"prepare_threshold": None}
+    assert event.contains(db, "begin", storage.set_transaction_schema)
 
 
 def test_sqlite_is_used_otherwise(database):

@@ -2,6 +2,7 @@
 
 import logging
 import os
+from functools import cache
 from typing import Any
 
 from openrouter import OpenRouter
@@ -56,15 +57,20 @@ QUESTIONS: dict[str, Any] = {
         ),
     },
 }
-client = OpenRouter(api_key=os.getenv("OPENROUTER_API_KEY"), timeout_ms=10_000)
 log = logging.getLogger(__name__)
+
+
+@cache
+def client() -> OpenRouter:
+    """Open the optional explanation judge when evaluation work needs it."""
+    return OpenRouter(api_key=os.getenv("OPENROUTER_API_KEY"), timeout_ms=10_000)
 
 
 def grade(state: dict[str, Any]) -> Grade:
     """Grade one explanation, retaining unavailable results as ungraded."""
     cost = None
     try:
-        response = client.alpha.decisions.create(
+        response = client().alpha.decisions.create(
             model=JEV,
             state=state,
             questions=QUESTIONS,

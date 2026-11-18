@@ -62,6 +62,7 @@ def test_decision_needs_a_claim_in_progress(client):
     ("decision", "payout", "section"),
     [
         ("approve", 0, "Section 3"),
+        ("approve", 0.004, "Section 3"),
         ("decline", 50, "Section 3"),
         ("refer", 10, "Section 3"),
         ("maybe", 0, "Section 3"),
