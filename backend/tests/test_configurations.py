@@ -13,7 +13,7 @@ from backend.main import app
 from backend.models import Handler
 from backend.settings import decision_limit
 from backend.tests.auth_support import authorization
-from backend.tests.claim_requests import decide, pay, start
+from backend.tests.claim_requests import decide, pay, sign_off, start
 from backend.tests.run_requests import start as start_run
 
 
@@ -137,7 +137,9 @@ def test_settings_validation(client, field, value):
     assert client.get("/api/settings").json()["changes"] == []
 
 
-def test_limit_changes_apply_to_new_decisions_only(client):
+def test_a_raised_limit_keeps_held_decisions_and_a_lowered_limit_blocks_agent_payment(
+    client,
+):
     start(client, "CLM-1001")
     decide(client, "CLM-1001", "approve", 1350)
     values = client.get("/api/settings").json()["values"]
@@ -147,7 +149,13 @@ def test_limit_changes_apply_to_new_decisions_only(client):
     start(client, "CLM-1002")
     assert decide(client, "CLM-1002", "approve", 1350).json()["status"] == "in_progress"
     client.put("/api/settings", json=values | {"payout_approval_limit": 500})
-    assert pay(client, "CLM-1002", 1350).status_code == 200
+    refused = pay(client, "CLM-1002", 1350)
+    assert refused.status_code == 403
+    assert "$500.00" in refused.json()["detail"]
+    assert client.get("/api/claims/CLM-1002").json()["sign_off_available"]
+    signed = sign_off(client, "CLM-1002", "HND-01").json()
+    assert signed["payment"]["amount"] == 1350
+    assert not signed["sign_off_available"]
     start(client, "CLM-1003")
     assert (
         decide(client, "CLM-1003", "approve", 501).json()["status"]
@@ -161,6 +169,19 @@ def test_model_catalogue_cannot_be_changed_from_settings(client):
         client.put("/api/settings", json=values | {"models_allowed": {}}).status_code
         == 422
     )
+
+
+def test_current_ceiling_also_applies_to_the_amount_saved_in_cents(client):
+    claim_id = "CLM-1001"
+    values = client.get("/api/settings").json()["values"]
+    client.put("/api/settings", json=values | {"payout_approval_limit": 2000})
+    start(client, claim_id)
+    assert (
+        decide(client, claim_id, "approve", 1000.01).json()["status"] == "in_progress"
+    )
+    client.put("/api/settings", json=values | {"payout_approval_limit": 1000.006})
+    assert pay(client, claim_id, 1000.006).status_code == 403
+    assert client.get(f"/api/claims/{claim_id}").json()["payment"] is None
 
 
 def test_settings_write_requires_a_session(client):

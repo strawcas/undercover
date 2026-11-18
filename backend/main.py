@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from sqlalchemy import Connection, RowMapping, insert, select, update
 
 from backend import (
@@ -17,6 +17,7 @@ from backend import (
 )
 from backend import runs as run_records
 from backend import settings as platform_settings
+from backend.agent_contract import agent_contract
 from backend.auth import CurrentHandler, SeniorHandler, agent_or_handler, require_agent
 from backend.clock import now
 from backend.configuration_models import ClaimConfiguration, ConfigurationHistory
@@ -202,6 +203,7 @@ def to_claim(row: RowMapping | dict[str, Any]) -> Claim:
             "attempts": row["attempts"],
             "decision": decision,
             "payment": payment,
+            "sign_off_available": can_settle_sign_off(row, row["current_limit"]),
             "evaluation_id": row["evaluation_id"],
             "source_id": row["source_id"],
         }
@@ -230,6 +232,16 @@ def add_step(
 def health() -> dict[str, str]:
     """Check that the backend is running."""
     return {"status": "ok"}
+
+
+@app.get(
+    "/api/agent/openapi.json",
+    operation_id="get_agent_openapi",
+    dependencies=shared_read,
+)
+def get_agent_openapi() -> dict[str, Any]:
+    """Describe the eight claim agent operations for the Gateway."""
+    return agent_contract(app)
 
 
 @app.get("/api/claims", operation_id="list_claims", dependencies=shared_read)
@@ -471,59 +483,105 @@ def calculate_payout(claim_id: str, request: PayoutRequest, db: Database) -> Pay
 )
 def pay_claim(claim_id: str, request: PaymentRequest, db: Database) -> Claim:
     """Pay an approved claim its payout once, unless it needs a handler's sign-off."""
+    check_payment_limit(request.amount, platform_settings.approval_limit(db))
     claim = find_claim(db, claim_id, lock=True)
     if claim["decision"] != "approve":
         raise HTTPException(409, f"Claim {claim_id} has not been approved")
+    if claim["status"] == "decided" and claim["paid_at"] is None:
+        # A joined payment can be newer than the snapshot taken before the row lock.
+        claim = find_claim(db, claim_id)
     amount = round(request.amount, 2)
     if claim["paid_at"] is not None:
         if amount == claim["amount"]:
             return to_claim(claim)
         raise HTTPException(409, f"Claim {claim_id} has already been paid")
+    check_payment_limit(
+        max(request.amount, amount), platform_settings.approval_limit(db, lock=True)
+    )
+    check_payment_limit(claim["payout"], claim["approval_limit"])
     if claim["status"] == "waiting_for_sign_off":
-        raise HTTPException(
-            403,
-            f"A payout over {dollars(claim['approval_limit'])} "
-            "needs a handler's sign-off",
-        )
+        raise HTTPException(403, "This payout is held")
     if amount != claim["payout"]:
         raise HTTPException(
             422, f"The amount must be the approved payout of {dollars(claim['payout'])}"
         )
-    db.execute(
-        insert(payments).values(
-            claim_id=claim_id, amount=claim["payout"], paid_at=now()
+    return settle_payment(db, claim_id, amount, now())
+
+
+def check_payment_limit(amount: float, limit: float) -> None:
+    """Apply the configured ceiling before looking for an approved claim."""
+    if needs_sign_off(amount, limit):
+        raise HTTPException(
+            403, f"A payout over {dollars(limit)} needs a handler's sign-off"
         )
+
+
+def can_settle_sign_off(
+    claim: RowMapping | dict[str, Any], current_limit: float
+) -> bool:
+    """Identify an original approval that a senior handler can settle."""
+    if (
+        claim["evaluation_id"] is not None
+        or claim["decision"] != "approve"
+        or claim["paid_at"] is not None
+    ):
+        return False
+    if claim["status"] == "waiting_for_sign_off":
+        return True
+    return claim["status"] == "in_progress" and (
+        claim["signed_off_by"] is not None
+        or needs_sign_off(claim["payout"], current_limit)
+    )
+
+
+def settle_payment(db: Connection, claim_id: str, amount: float, paid_at: str) -> Claim:
+    """Save the payment and complete the claim in the caller's transaction."""
+    db.execute(
+        insert(payments).values(claim_id=claim_id, amount=amount, paid_at=paid_at)
     )
     set_status(db, claim_id, "decided")
     return to_claim(find_claim(db, claim_id))
 
 
 @app.post("/api/claims/{claim_id}/sign-off", operation_id="sign_off_claim")
-def sign_off_claim(
-    claim_id: str, db: Database, background: BackgroundTasks, handler: SeniorHandler
-) -> Claim:
-    """Sign off a held payout as a handler, so the agent picks the claim up and pays."""
+def sign_off_claim(claim_id: str, db: Database, handler: SeniorHandler) -> Claim:
+    """Record the senior handler's sign-off and pay the approved payout."""
     claim = find_claim(db, claim_id, lock=True)
     if claim["evaluation_id"] is not None:
         raise HTTPException(409, "Evaluation claims cannot be signed off")
-    if claim["status"] != "waiting_for_sign_off":
+    if not can_settle_sign_off(claim, platform_settings.approval_limit(db, lock=True)):
         raise HTTPException(409, f"Claim {claim_id} is not waiting for sign-off")
-    signed_off_at = now()
-    db.execute(
-        update(decisions)
-        .where(decisions.c.claim_id == claim_id)
-        .values(signed_off_by=handler.name, signed_off_at=signed_off_at)
-    )
-    set_status(db, claim_id, "in_progress")
-    background.add_task(agent_service.resume_claim, claim_id)
-    return to_claim(
-        dict(claim)
-        | {
-            "status": "in_progress",
-            "signed_off_by": handler.name,
-            "signed_off_at": signed_off_at,
-        }
-    )
+    paid_at = now()
+    if claim["signed_off_by"] is None:
+        db.execute(
+            update(decisions)
+            .where(decisions.c.claim_id == claim_id)
+            .values(signed_off_by=handler.name, signed_off_at=paid_at)
+        )
+    return settle_payment(db, claim_id, claim["payout"], paid_at)
+
+
+@app.post(
+    "/api/claims/{claim_id}/hold-evaluation-payment",
+    operation_id="hold_evaluation_payment",
+    dependencies=agent_only,
+)
+def hold_evaluation_payment(claim_id: str, db: Database) -> Claim:
+    """Retain a held result when the agent's payment for an evaluation was refused."""
+    run_id = find_claim(db, claim_id)["evaluation_id"]
+    if run_id is None:
+        raise HTTPException(409, "Only an unpaid evaluation approval can be held")
+    run_records.validate_run(db, run_id)
+    claim = find_claim(db, claim_id, lock=True)
+    if (
+        claim["decision"] != "approve"
+        or claim["paid_at"] is not None
+        or claim["status"] not in {"in_progress", "waiting_for_sign_off"}
+    ):
+        raise HTTPException(409, "Only an unpaid evaluation approval can be held")
+    if claim["status"] == "in_progress":
+        set_status(db, claim_id, "waiting_for_sign_off")
+    return to_claim(find_claim(db, claim_id))
 
 
 @app.post(

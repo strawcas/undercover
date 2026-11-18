@@ -6,6 +6,7 @@ import logging
 import uuid
 from collections.abc import Callable
 from functools import cache, partial
+from http import HTTPStatus
 from threading import Condition
 from time import monotonic
 from typing import Any, cast
@@ -209,7 +210,7 @@ def call_model(
 
 def wait_for_sign_off(state: ClaimState, runtime: Runtime[ClaimContext]) -> None:
     """Pause unless this execution has the backend's recorded sign-off."""
-    if not runtime.context.signed_off:
+    if runtime.context.signed_off_status is None:
         interrupt({"claim_id": runtime.context.claim_id})
 
 
@@ -257,8 +258,16 @@ def after_screen(state: ClaimState) -> str:
 
 
 def pay(state: ClaimState, runtime: Runtime[ClaimContext]) -> dict[str, Any]:
-    """Pay the approved payout, which the backend refuses unless it may be paid."""
-    claim = api.pay_claim(runtime.context.claim_id, state["decision"]["payout"])
+    """Preserve a recorded sign-off outcome or request an ordinary payout."""
+    if runtime.context.signed_off_status is not None:
+        return {"status": runtime.context.signed_off_status}
+    context = runtime.context
+    try:
+        claim = api.pay_claim(context.claim_id, state["decision"]["payout"])
+    except Refused as refusal:
+        if refusal.status_code != HTTPStatus.FORBIDDEN or context.evaluation_id is None:
+            raise
+        claim = api.hold_evaluation_payment(context.claim_id)
     return {"status": claim["status"]}
 
 
@@ -384,9 +393,9 @@ def run_claim_graph(
         )
 
     error = None
-    paying = bool(claim["decision"] and claim["decision"]["signed_off_by"])
+    signed_off = claim["status"] if paid_on_sign_off(claim) else None
     try:
-        if not paying:
+        if signed_off is None:
             progress()
         graph = graph or execution_graph(version)
         start = (
@@ -402,12 +411,16 @@ def run_claim_graph(
                 start,
                 claim_config(claim, name, run_id),
                 context=ClaimContext(
-                    claim["claim_id"], claim["thread_id"], run_id, signed_off=paying
+                    claim["claim_id"],
+                    claim["thread_id"],
+                    run_id,
+                    signed_off,
+                    claim["evaluation_id"],
                 ),
                 durability="sync",
                 stream_mode="updates",
             ):
-                if (not paying and SCREEN not in update) or PAY in update:
+                if (signed_off is None and SCREEN not in update) or PAY in update:
                     progress()
 
         contextvars.Context().run(execute, graph)
@@ -439,7 +452,7 @@ def settle(claim_id: str, error: str | None) -> str:
 
 def resume_input(graph: ClaimGraph, claim: dict[str, Any]) -> Start:
     """Resume a paused checkpoint or restart a thread with no saved first step."""
-    if claim["decision"] and claim["decision"]["signed_off_by"]:
+    if paid_on_sign_off(claim):
         return Command(resume=True)
     saved = graph.get_state(thread_of(claim))
     if saved.next == (PAUSE,):
@@ -447,6 +460,11 @@ def resume_input(graph: ClaimGraph, claim: dict[str, Any]) -> Start:
     if saved.created_at is None and claim["decision"] is None:
         return begin(claim["claim_id"])
     return None
+
+
+def paid_on_sign_off(claim: dict[str, Any]) -> bool:
+    """Use the recorded payment to recognize a completed senior settlement."""
+    return bool(claim["payment"] and claim["payment"]["signed_off_by"])
 
 
 def work_claim(
@@ -468,5 +486,8 @@ def carry_on(
     version: int | None = None,
 ) -> str:
     """Resume the existing thread and attempt, measuring checkpoint lookup too."""
+    decision = claim["decision"]
+    if decision and decision["signed_off_by"] and not claim["payment"]:
+        return report(claim, "")
     error = run_claim_graph(graph, claim, CARRY_ON, run_id, version)
     return settle(claim["claim_id"], error)

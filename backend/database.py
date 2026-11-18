@@ -292,6 +292,9 @@ claim_view = (
         decisions.c.reason,
         decisions.c.decided_at,
         decisions.c.approval_limit,
+        select(settings.c.payout_approval_limit)
+        .scalar_subquery()
+        .label("current_limit"),
         decisions.c.signed_off_by,
         decisions.c.signed_off_at,
         payments.c.amount,

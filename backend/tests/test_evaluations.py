@@ -6,6 +6,7 @@ from sqlalchemy import delete, func, select, update
 from backend import runs
 from backend.database import claims, engine, evaluation_labels, evaluation_sources, seed
 from backend.scoring import compare
+from backend.tests.claim_requests import decide, pay, sign_off, start
 from backend.tests.evaluation_requests import evaluation
 from backend.tests.run_requests import configuration
 
@@ -94,6 +95,37 @@ def test_seed_loads_both_sets_and_clears_scoreboard(client):
     assert len(client.get("/api/claims").json()) == 26
 
 
+def test_evaluation_closes_with_payment_held_after_a_limit_reduction(client):
+    run = evaluation(client, "evaluation", True)
+    claim_id = run["members"][0]["claim_id"]
+    start(client, claim_id)
+    assert decide(client, claim_id, "approve", 900).json()["status"] == "in_progress"
+    values = client.get("/api/settings").json()["values"]
+    client.put("/api/settings", json=values | {"payout_approval_limit": 500})
+    assert pay(client, claim_id, 900).status_code == 403
+    run_id = run["run_id"]
+    finished = client.post(f"/api/runs/{run_id}/finish").json()
+    assert finished["status"] == "finished"
+    assert finished["members"][0]["claim_status"] == "waiting_for_sign_off"
+    copy = client.get(f"/api/claims/{claim_id}").json()
+    assert copy["status"] == "waiting_for_sign_off"
+    assert copy["payment"] is None
+    assert not copy["sign_off_available"]
+    assert sign_off(client, claim_id, "HND-01").status_code == 409
+    client.put("/api/settings", json=values).raise_for_status()
+    assert pay(client, claim_id, 900).is_error
+    assert client.get(f"/api/claims/{claim_id}").json()["payment"] is None
+
+
+def test_an_agent_cannot_hold_an_original_through_the_evaluation_route(client):
+    claim_id = "CLM-1001"
+    start(client, claim_id)
+    decide(client, claim_id, "approve", 420)
+    response = client.post(f"/api/claims/{claim_id}/hold-evaluation-payment")
+    assert response.status_code == 409
+    assert pay(client, claim_id, 420).status_code == 200
+
+
 def test_original_work_is_not_copied_and_copies_cannot_be_signed_off(
     client, agent_calls
 ):
@@ -132,7 +164,7 @@ def test_original_work_is_not_copied_and_copies_cannot_be_signed_off(
         ).status_code
         == 200
     )
-    assert agent_calls == ["/api/claims/CLM-1001/resume"]
+    assert agent_calls == []
 
 
 @pytest.mark.parametrize(

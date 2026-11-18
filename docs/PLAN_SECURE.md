@@ -40,6 +40,8 @@ Generate the Gateway contract from a FastAPI route allowlist by operation ID. Fa
 
 The agent uses the backend outcome to finish a resumed, signed-off claim without calling payment. Keep checkpoint compatibility at the pause and payment nodes, including a saved node that predates sign-off. Retire the automatic backend-to-agent sign-off handoff.
 
+When a changed ceiling blocks an evaluation payment, the agent records the existing held outcome through an agent-only route. The backend preserves the hold across later settings changes and only allows this operation on an unpaid approval in an active evaluation.
+
 ### Serving and packaging
 
 `backend/main.py` remains the web-server app and exports `handler = Mangum(app, lifespan="off")`. A static-serving module resolves files from `dashboard/dist` relative to the package. When present, the build supplies assets and the dashboard's navigation fallback. API routing keeps its JSON 404s. The dev setup continues to use Vite as a separate server.
@@ -69,10 +71,10 @@ Add the graph entry check and display its result as a labeled security step in t
 
 Serve `GET /api/agent/openapi.json` with the shared-read dependency. Keep one-line docstrings and required inputs. Move payment on sign-off into the backend transaction, then align the agent's resume behavior and the dashboard's sign-off feedback with that response.
 
-- [ ] The document contains exactly `get_claim`, `get_policy`, `get_claim_history`, `search_documents`, `read_section`, `calculate_payout`, `record_decision` and `pay_claim`. All references resolve, the API rules check passes, payment still takes `amount`, and the document has neither `servers` nor an API-key input. The endpoint accepts either credential and returns 401 with neither.
-- [ ] Above-limit payments return the same limit-naming 403 for an unapproved, approved or unknown claim. A changed setting changes that ceiling. An amount exactly at the limit proceeds to normal claim checks. A raised limit leaves a previously held payout subject to its recorded sign-off requirement.
-- [ ] Dana signs off a held original with the agent service stopped. The response and a fresh claim read show `decided`, the one payment and Dana's identity and time. A repeat or concurrent sign-off creates no second payment. A regular handler and an evaluation copy cannot use the action. Test the lowered-limit and legacy unpaid sign-off cases.
-- [ ] Resuming a saved sign-off pause or stale payment node after backend sign-off records zero payment calls and finishes using the paid backend outcome. Within-limit approvals still pay through the normal path. Playwright verifies the held-to-paid transition and the retained signer. Run `npm run check`.
+- [x] The document contains exactly `get_claim`, `get_policy`, `get_claim_history`, `search_documents`, `read_section`, `calculate_payout`, `record_decision` and `pay_claim`. All references resolve, the API rules check passes, payment still takes `amount`, and the document has neither `servers` nor an API-key input. The endpoint accepts either credential and returns 401 with neither.
+- [x] Above-limit payments return the same limit-naming 403 for an unapproved, approved or unknown claim. A changed setting changes that ceiling. An amount exactly at the limit proceeds to normal claim checks. A raised limit leaves a previously held payout subject to its recorded sign-off requirement.
+- [x] Dana signs off a held original with the agent service stopped. The response and a fresh claim read show `decided`, the one payment and Dana's identity and time. A repeat or concurrent sign-off creates no second payment. A regular handler and an evaluation copy cannot use the action. Test the lowered-limit and legacy unpaid sign-off cases.
+- [x] Resuming a saved sign-off pause or stale payment node after backend sign-off records zero payment calls and finishes using the paid backend outcome. Within-limit approvals still pay through the normal path. Playwright verifies the held-to-paid transition and the retained signer. Run `npm run check`.
 
 ## Phase 4 — Build and verify the Lambda package
 

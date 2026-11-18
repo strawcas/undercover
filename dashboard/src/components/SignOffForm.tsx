@@ -1,11 +1,16 @@
 import { useState } from "react";
-import { api } from "../api";
+import { api, type Claim } from "../api";
 import { useAuth } from "../auth";
 
 export function SignOffForm({
   claimId,
   onSignedOff,
-}: Readonly<{ claimId: string; onSignedOff: () => void }>) {
+  previouslySignedOff,
+}: Readonly<{
+  claimId: string;
+  onSignedOff: (paid: Claim) => void;
+  previouslySignedOff: boolean;
+}>) {
   const { handler } = useAuth();
   const [error, setError] = useState<string>();
   const [sending, setSending] = useState(false);
@@ -26,9 +31,11 @@ export function SignOffForm({
 
   return (
     <div className="sign-off-form">
-      <p>Sign off as {handler.name}.</p>
+      {!previouslySignedOff && (
+        <p>Sign off as {handler.name} to pay the approved amount.</p>
+      )}
       <button type="button" disabled={sending} onClick={submit}>
-        Sign off
+        {previouslySignedOff ? "Record payment" : "Sign off"}
       </button>
       {error && (
         <p className="form-error" role="alert">

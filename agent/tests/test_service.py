@@ -57,14 +57,20 @@ def test_round_writes_refuse_direct_unauthenticated_service_calls(
     )
 
 
-def test_a_sign_off_picks_the_claim_up_and_pays_it_once(
-    client, serve, agent_calls, traces
+def test_a_paid_sign_off_can_finish_the_saved_checkpoint(
+    client, serve, agent_calls, traces, monkeypatch
 ):
     model = stub(*decide("approve", 1350.0))
     graph = graph_on(model, InMemorySaver())
     harness.work_claim("CLM-1002", graph)
     signed = client.post("/api/claims/CLM-1002/sign-off", json={"handler_id": "HND-01"})
-    assert agent_calls == ["/api/claims/CLM-1002/resume"]
+    assert agent_calls == []
+    assert signed.json()["payment"]["amount"] == 1350
+
+    def unexpected_payment(*args):
+        pytest.fail("A resumed sign-off should never call payment")
+
+    monkeypatch.setattr(harness.api, "pay_claim", unexpected_payment)
 
     agent = serve(graph)
     response = resume(agent, "CLM-1002")
@@ -82,7 +88,7 @@ def test_a_sign_off_picks_the_claim_up_and_pays_it_once(
         (session, "Carry on"),
     ]
 
-    assert resume(agent, "CLM-1002").status_code == 409
+    assert resume(agent, "CLM-1002").status_code == 202
     assert claim_of(client, "CLM-1002")["payment"] == claim["payment"]
 
 
@@ -93,7 +99,7 @@ def test_a_claim_waiting_for_sign_off_is_not_picked_up(client, serve):
     response = resume(serve(graph), "CLM-1002")
     assert response.status_code == 409
     assert response.json()["detail"] == (
-        "Claim CLM-1002 has no sign-off waiting to be paid"
+        "Claim CLM-1002 has no paid sign-off to resume"
     )
     assert claim_of(client, "CLM-1002")["status"] == "waiting_for_sign_off"
     assert steps_of(client, "CLM-1002") == before

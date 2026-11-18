@@ -122,7 +122,8 @@ def test_unpaid_approvals_remain_unfinished_and_frozen(client, clock, payout):
     clock("2026-11-10T11:00:00+00:00")
     if payout > 1000:
         sign_off(client, CLAIM_ID, "HND-01")
-    pay(client, CLAIM_ID, payout)
+    else:
+        pay(client, CLAIM_ID, payout)
     assert client.get(f"/api/runs/{run_id}").json() == frozen
 
 
@@ -192,7 +193,6 @@ def test_legacy_held_outcome_survives_later_payment(client, clock):
     make_legacy(run_id)
     before = read_member(client, run_id)
     sign_off(client, CLAIM_ID, "HND-01")
-    pay(client, CLAIM_ID, 1350)
     assert read_member(client, run_id) == before
     assert before["claim_status"] == "waiting_for_sign_off"
     assert before["elapsed_seconds"] is None

@@ -21,7 +21,8 @@ class ClaimContext:
     claim_id: str
     thread_id: str
     run_id: str | None = None
-    signed_off: bool = False
+    signed_off_status: str | None = None
+    evaluation_id: str | None = None
 
 
 def keep_last(_: Any, new: Any) -> Any:

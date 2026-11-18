@@ -23,10 +23,8 @@ function progress(claim: Claim): string {
 export function DecisionPanel({
   claim,
   onSignedOff,
-}: Readonly<{ claim: Claim; onSignedOff: () => void }>) {
-  const { decision, payment } = claim;
-  const signedOff = decision && whoAndWhen(decision);
-  const paidSignedOff = payment && whoAndWhen(payment);
+}: Readonly<{ claim: Claim; onSignedOff: (paid: Claim) => void }>) {
+  const { decision } = claim;
 
   return (
     <section className="panel" aria-labelledby="decision-title">
@@ -45,50 +43,73 @@ export function DecisionPanel({
           <p className="small muted">Decided at {time(decision.decided_at)}</p>
         </>
       )}
-      {payment && (
-        <p className="payment">
-          Paid <span className="mono">{money(payment.amount)}</span>
-          {paidSignedOff && `, signed off by ${paidSignedOff}`}
-        </p>
-      )}
-      {decision?.decision === "approve" &&
-        !payment &&
-        claim.status === "in_progress" && (
-          <p className="payment">
-            {signedOff && `Signed off by ${signedOff}. `}
-            Waiting for the agent to pay it.
-          </p>
-        )}
-      {decision && claim.status === "waiting_for_sign_off" && (
-        <HeldPayment
-          claim={claim}
-          payout={decision.payout}
-          onSignedOff={onSignedOff}
-        />
-      )}
+      <PaymentStatus claim={claim} onSignedOff={onSignedOff} />
     </section>
   );
+}
+
+function PaymentStatus({
+  claim,
+  onSignedOff,
+}: Readonly<{ claim: Claim; onSignedOff: (paid: Claim) => void }>) {
+  const { decision, payment, status } = claim;
+  if (payment) {
+    const paidSignedOff = whoAndWhen(payment);
+    return (
+      <p className="payment">
+        Paid <span className="mono">{money(payment.amount)}</span>
+        {paidSignedOff && `, signed off by ${paidSignedOff}`}
+      </p>
+    );
+  }
+  if (decision?.decision !== "approve") return null;
+  if (claim.sign_off_available || status === "waiting_for_sign_off")
+    return (
+      <HeldPayment
+        claim={claim}
+        payout={decision.payout}
+        signedOff={whoAndWhen(decision)}
+        onSignedOff={onSignedOff}
+      />
+    );
+  return status === "in_progress" ? (
+    <p className="payment">Waiting for the agent to pay it.</p>
+  ) : null;
 }
 
 function HeldPayment({
   claim,
   payout,
+  signedOff,
   onSignedOff,
-}: Readonly<{ claim: Claim; payout: number; onSignedOff: () => void }>) {
+}: Readonly<{
+  claim: Claim;
+  payout: number;
+  signedOff: string | null;
+  onSignedOff: (paid: Claim) => void;
+}>) {
   return (
     <div className="sign-off">
-      <p>
-        The payment of <span className="mono">{money(payout)}</span> is over the
-        approval limit
-        {claim.evaluation_id ? "." : " and waits for a handler's sign-off."}
-      </p>
+      {signedOff ? (
+        <p>Signed off by {signedOff}. The payout is ready to be recorded.</p>
+      ) : (
+        <p>
+          The payment of <span className="mono">{money(payout)}</span> is over
+          the approval limit
+          {claim.evaluation_id ? "." : " and waits for a handler's sign-off."}
+        </p>
+      )}
       {claim.evaluation_id ? (
         <p>
           This evaluation is complete without sign-off. No payment is made for
           this held copy.
         </p>
       ) : (
-        <SignOffForm claimId={claim.claim_id} onSignedOff={onSignedOff} />
+        <SignOffForm
+          claimId={claim.claim_id}
+          onSignedOff={onSignedOff}
+          previouslySignedOff={Boolean(signedOff)}
+        />
       )}
     </div>
   );

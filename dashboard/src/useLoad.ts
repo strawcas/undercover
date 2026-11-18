@@ -7,6 +7,7 @@ export interface Loaded<T> {
   data?: T;
   error?: Error;
   reload: () => void;
+  replace: (data: T) => void;
 }
 
 interface LoadState<T> {
@@ -24,9 +25,10 @@ export function useLoad<T>(
 ): Loaded<T> {
   const [loaded, setLoaded] = useState<LoadState<T>>({ loader: load });
   const [version, setVersion] = useState(0);
-  const gate = useRef<{ pending: boolean; queued: (() => void) | null }>({
+  const gate = useRef({
     pending: false,
-    queued: null,
+    queued: null as (() => void) | null,
+    revision: 0,
   });
 
   useEffect(() => {
@@ -35,26 +37,28 @@ export function useLoad<T>(
     const fetchNow = () => {
       if (!active || requests.pending) return;
       requests.pending = true;
+      const revision = requests.revision;
       load()
         .then(
           (data) => {
-            if (active) setLoaded({ loader: load, data });
+            if (active && revision === requests.revision)
+              setLoaded({ loader: load, data });
           },
           (error: unknown) => {
+            if (!active || revision !== requests.revision) return;
             const missing = error instanceof ApiError && error.status === 404;
             if (missing) clearInterval(timer);
-            if (active)
-              setLoaded((previous) => ({
-                loader: load,
-                data:
-                  !missing && previous.loader === load
-                    ? previous.data
-                    : undefined,
-                error:
-                  error instanceof Error
-                    ? error
-                    : new Error("The request failed"),
-              }));
+            setLoaded((previous) => ({
+              loader: load,
+              data:
+                !missing && previous.loader === load
+                  ? previous.data
+                  : undefined,
+              error:
+                error instanceof Error
+                  ? error
+                  : new Error("The request failed"),
+            }));
           },
         )
         .finally(() => {
@@ -78,6 +82,16 @@ export function useLoad<T>(
   const reload = useCallback(() => {
     setVersion((current) => current + 1);
   }, []);
+  const replace = useCallback(
+    (data: T) => {
+      gate.current.revision += 1;
+      setLoaded((previous) =>
+        previous.loader === load ? { loader: load, data } : previous,
+      );
+      reload();
+    },
+    [load, reload],
+  );
   const current = loaded.loader === load ? loaded : undefined;
-  return { data: current?.data, error: current?.error, reload };
+  return { data: current?.data, error: current?.error, reload, replace };
 }

@@ -5,11 +5,20 @@ from dataclasses import dataclass
 from functools import partial
 
 from fastapi import HTTPException
-from sqlalchemy import select, update
+from sqlalchemy import Connection, select, update
 
 from backend import evaluations, improvement_budget, judge
 from backend import runs as run_records
-from backend.database import engine, evaluation_grades, insert_once, runs
+from backend import settings as platform_settings
+from backend.database import (
+    claims,
+    decisions,
+    engine,
+    evaluation_grades,
+    insert_once,
+    payments,
+    runs,
+)
 from backend.judge_models import Grade, undecided
 from backend.models import Comparison, Run
 
@@ -80,6 +89,27 @@ def prepare(run_id: str) -> PreparedEvaluation | Run:
     return PreparedEvaluation(run, items)
 
 
+def hold_blocked_payments(db: Connection, run_id: str) -> None:
+    """Keep unpaid evaluation approvals complete if a lower limit blocked payment."""
+    limit = platform_settings.approval_limit(db)
+    blocked = select(decisions.c.claim_id).where(
+        decisions.c.decision == "approve",
+        decisions.c.payout > limit,
+        ~select(payments.c.claim_id)
+        .where(payments.c.claim_id == decisions.c.claim_id)
+        .exists(),
+    )
+    db.execute(
+        update(claims)
+        .where(
+            claims.c.evaluation_id == run_id,
+            claims.c.status == "in_progress",
+            claims.c.claim_id.in_(blocked),
+        )
+        .values(status="waiting_for_sign_off")
+    )
+
+
 def save_results(run_id: str, results: list[tuple[str, Grade]]) -> Run:
     """Persist grading facts and the final score snapshot in one transaction."""
     with engine().begin() as db:
@@ -104,6 +134,7 @@ def save_results(run_id: str, results: list[tuple[str, Grade]]) -> Run:
             return run_records.get_run(db, run_id)
         if stopped:
             return run_records.finish_run(db, run_id, "stopped")
+        hold_blocked_payments(db, run_id)
         finished = run_records.finish_run(db, run_id)
         evaluation = evaluations.get_evaluation(db, run_id)
         db.execute(

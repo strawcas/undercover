@@ -1,6 +1,5 @@
-"""The agent's service, as the backend calls it: once after each sign-off."""
+"""Forward authenticated backend requests to the agent service."""
 
-import logging
 import os
 from http import HTTPStatus
 from typing import Any
@@ -15,8 +14,6 @@ from backend.models import Handler
 AGENT_URL = os.getenv("UNDERCOVER_AGENT", "http://127.0.0.1:8002")
 
 agent = httpx.Client(base_url=f"{AGENT_URL}/api", timeout=10)
-
-log = logging.getLogger(__name__)
 
 
 def _start(path: str, body: dict[str, Any]) -> dict[str, str]:
@@ -51,18 +48,6 @@ def start_evaluation(set_name: str, tiny: bool, concurrency: int) -> dict[str, s
     return _start(
         "/evaluations", {"set_name": set_name, "tiny": tiny, "concurrency": concurrency}
     )
-
-
-def resume_claim(claim_id: str) -> None:
-    """Ask the agent to pick a claim back up after its sign-off."""
-    try:
-        agent.post(
-            f"/claims/{claim_id}/resume", headers=agent_key.request_headers()
-        ).raise_for_status()
-    except httpx.HTTPError as error:  # the sign-off stands without the agent
-        log.warning(
-            "The agent didn't pick up %s after its sign-off: %s", claim_id, error
-        )
 
 
 def start_round(handler: Handler) -> dict[str, str]:

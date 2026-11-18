@@ -58,7 +58,7 @@ test("the claim page shows the agent at work", async ({ page, request }) => {
   await expect(page.getByText("Approved and paid $500.00.")).toBeVisible();
 });
 
-test("a sign-off on the dashboard reaches the agent's service", async ({
+test("a sign-off on the dashboard records a payment and the signer", async ({
   page,
   request,
 }) => {
@@ -80,14 +80,9 @@ test("a sign-off on the dashboard reaches the agent's service", async ({
   await expect(heading.getByText("Waiting for sign-off")).toBeVisible();
   expect(await resumed(request)).not.toContain("CLM-1020");
   await page.getByRole("button", { name: "Sign off" }).click();
-  await expect(heading.getByText("In progress")).toBeVisible();
-  await expect(page.getByText(/Signed off by Dana Whitfield/)).toBeVisible();
-  await expect.poll(() => resumed(request)).toContain("CLM-1020");
-
-  // The test plays the agent, which pays the claim once it is told.
-  await post(request, "/api/claims/CLM-1020/payment", { amount: 1350 });
   await expect(heading.getByText("Decided")).toBeVisible();
   await expect(
     page.getByText(/^Paid \$1,350\.00, signed off by Dana Whitfield at /),
   ).toBeVisible();
+  expect(await resumed(request)).not.toContain("CLM-1020");
 });

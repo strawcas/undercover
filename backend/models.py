@@ -85,6 +85,7 @@ class Claim(BaseModel):
     attempts: int
     decision: Decision | None
     payment: Payment | None
+    sign_off_available: bool
     evaluation_id: str | None
     source_id: str | None
 

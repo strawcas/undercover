@@ -14,7 +14,7 @@ import { evaluationPage, QUEUE_PAGE } from "../paths";
 export function ClaimPage() {
   const { claimId = "" } = useParams();
   const load = useCallback(() => api.getClaim(claimId), [claimId]);
-  const { data: claim, error, reload } = useLoad(load, REFRESH_MS);
+  const { data: claim, error, reload, replace } = useLoad(load, REFRESH_MS);
   const header = (
     <PageHeader
       title={claim?.summary ?? "Claim"}
@@ -81,7 +81,7 @@ export function ClaimPage() {
           <DocumentsPanel claim={claim} />
         </div>
         <div className="column">
-          <DecisionPanel claim={claim} onSignedOff={reload} />
+          <DecisionPanel claim={claim} onSignedOff={replace} />
           <StepList claimId={claim.claim_id} />
           <PolicyPanel policyId={claim.policy_id} />
           <HistoryPanel customerId={claim.customer_id} />

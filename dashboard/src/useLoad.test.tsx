@@ -124,3 +124,48 @@ it("queues action refreshes behind a pending poll without overlapping or publish
   expect(screen.queryByText("Stale poll")).toBeNull();
   expect(screen.getByText("Fresh after action")).toBeDefined();
 });
+
+it("keeps a committed action response when a stale poll resolves and the refresh fails", async () => {
+  vi.useFakeTimers();
+  let finish: ((value: string) => void) | undefined;
+  const pending = new Promise<string>((resolve) => {
+    finish = resolve;
+  });
+  const load = vi
+    .fn(() => Promise.resolve("Paid"))
+    .mockResolvedValueOnce("Held")
+    .mockReturnValueOnce(pending)
+    .mockRejectedValueOnce(new Error("Refresh unavailable"));
+
+  function Probe() {
+    const { data, error, replace } = useLoad(load, REFRESH_MS);
+    return (
+      <>
+        <p>{data}</p>
+        <p>{error?.message}</p>
+        <button
+          onClick={() => {
+            replace("Paid");
+          }}
+        >
+          Action completed
+        </button>
+      </>
+    );
+  }
+
+  render(<Probe />);
+  await act(async () => {
+    await Promise.resolve();
+  });
+  await act(() => vi.advanceTimersByTimeAsync(REFRESH_MS));
+  expect(load).toHaveBeenCalledTimes(2);
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Action completed" }));
+    finish?.("Held");
+    await pending;
+  });
+  expect(screen.getByText("Paid")).toBeDefined();
+  expect(screen.queryByText("Held")).toBeNull();
+  expect(screen.getByText("Refresh unavailable")).toBeDefined();
+});

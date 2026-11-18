@@ -122,6 +122,7 @@ export const claim: Claim = {
   attempts: 0,
   decision: null,
   payment: null,
+  sign_off_available: false,
   evaluation_id: null,
   source_id: null,
 };

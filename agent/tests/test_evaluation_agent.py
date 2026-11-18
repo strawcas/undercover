@@ -191,6 +191,7 @@ def test_startup_cleans_stopped_evaluation_threads_but_preserves_records(monkeyp
     with TestClient(service.app) as agent:
         assert agent.get("/api/health").status_code == 200
     assert api.get_run(run["run_id"])["status"] == "stopped"
+
     assert api.get_claim(claim_id) == before
     assert saver.get_tuple(harness.thread_of(before)) is None
     later = api.start_run(
@@ -215,3 +216,41 @@ def test_startup_cleans_stopped_evaluation_threads_but_preserves_records(monkeyp
         )["claims"]
     )
     assert api.get_run(run["run_id"])["status"] == "stopped"
+
+
+def test_evaluation_payment_hold_survives_a_restored_limit(client, monkeypatch):
+    run = api.start_run(
+        {
+            "kind": "evaluation",
+            "set_name": "held_out",
+            "tiny": True,
+            "concurrency": 1,
+            "configuration_version": 1,
+            "round_id": None,
+        }
+    )
+    claim_id = run["members"][0]["claim_id"]
+    settings = client.get("/api/settings").json()["values"]
+    pay = api.pay_claim
+
+    def pay_during_lower_limit(claim_id, amount):
+        client.put(
+            "/api/settings", json=settings | {"payout_approval_limit": 500}
+        ).raise_for_status()
+        try:
+            return pay(claim_id, amount)
+        finally:
+            client.put("/api/settings", json=settings).raise_for_status()
+
+    monkeypatch.setattr(api, "pay_claim", pay_during_lower_limit)
+    harness.work_claim(claim_id, graph_on(stub(record("approve", 900))), run["run_id"])
+    copy = api.get_claim(claim_id)
+    assert copy["status"] == "waiting_for_sign_off"
+    assert copy["payment"] is None
+    assert (
+        client.post(f"/api/claims/{claim_id}/payment", json={"amount": 900}).status_code
+        == 403
+    )
+    finished = api.finish_run(run["run_id"])
+    assert finished["members"][0]["claim_status"] == "waiting_for_sign_off"
+    assert api.get_claim(claim_id)["payment"] is None

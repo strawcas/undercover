@@ -1,5 +1,9 @@
 # Status
 
+Secure phase 3 serves the Gateway contract at `/api/agent/openapi.json`. The current limit applies before claim lookup and to the rounded amount saved. Senior sign-off records the signer, payment and decided state in one transaction. Older held approvals preserve their decision limit and prior signer. A resumed checkpoint uses the paid outcome. The dashboard shows the committed response immediately.
+
+The independent review approved regressions for fractional-cent limits, legacy unpaid checkpoints, persistent evaluation holds and stale polls after sign-off. The full offline phase run passed, including 11 Playwright tests. The review follow-up passed the focused Python and dashboard regressions.
+
 Secure phase 2 screens customer submissions before adjudication. A flagged claim receives a zero-payout referral and its timeline shows the check's reason. Parse retries and their usage survive checkpoint replay. A saved receipt can settle against a stopped dispatch when it matches that dispatch's existing claim and thread work slice. The queue seed includes CLM-1901 with its linked records. Both evaluation sets retain their original membership.
 
 The fresh review led to strict structured output that retains truncated replies, a guard for older checkpoints before their first model call, and recovery of saved screening receipts to the dispatch that incurred them. The reviewer approved the fixes. The offline suite passed, including the browser timeline and 26-claim seed. The final focused screening and recovery run passed all 56 tests.

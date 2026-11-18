@@ -166,6 +166,10 @@ def pay_claim(claim_id: str, amount: float) -> dict[str, Any]:
     return _call("POST", f"/claims/{claim_id}/payment", json={"amount": amount})
 
 
+def hold_evaluation_payment(claim_id: str) -> dict[str, Any]:
+    return _call("POST", f"/claims/{claim_id}/hold-evaluation-payment")
+
+
 def fail_claim(claim_id: str, reason: str) -> dict[str, Any]:
     return _call("POST", f"/claims/{claim_id}/failure", json={"reason": reason})
 

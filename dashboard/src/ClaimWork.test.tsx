@@ -282,27 +282,40 @@ it("lets a handler sign off a held payment", async () => {
   expect(panel.getByText(/waits for a handler's sign-off/)).toBeDefined();
   const button = panel.getByRole("button", { name: "Sign off" });
   expect(button).toHaveProperty("disabled", false);
-  expect(panel.getByText("Sign off as Dana Whitfield.")).toBeDefined();
+  expect(
+    panel.getByText("Sign off as Dana Whitfield to pay the approved amount."),
+  ).toBeDefined();
   expect(panel.queryByRole("combobox")).toBeNull();
 
   const signedOff: Claim = {
     ...held,
-    status: "in_progress",
+    status: "decided",
     decision: {
       ...approval,
       payout: 1350,
       signed_off_by: "Dana Whitfield",
       signed_off_at: decidedAt,
     },
+    payment: {
+      amount: 1350,
+      paid_at: decidedAt,
+      signed_off_by: "Dana Whitfield",
+      signed_off_at: decidedAt,
+    },
   };
   routes["POST /api/claims/CLM-1002/sign-off"] = signedOff;
-  routes["GET /api/claims/CLM-1002"] = signedOff;
+  routes["GET /api/claims/CLM-1002"] = new Refusal(
+    503,
+    "Claim refresh unavailable",
+  );
   fireEvent.click(button);
 
-  const waiting = await panel.findByText(/Signed off by Dana Whitfield/);
-  expect(waiting.textContent).toBe(
-    `Signed off by Dana Whitfield at ${time(decidedAt)}. Waiting for the agent to pay it.`,
+  const paid = await panel.findByText(/signed off by Dana Whitfield/);
+  expect(paid.textContent).toBe(
+    `Paid $1,350.00, signed off by Dana Whitfield at ${time(decidedAt)}`,
   );
+  expect(await screen.findByText("Claim refresh unavailable")).toBeDefined();
+  expect(panel.queryByRole("button", { name: "Sign off" })).toBeNull();
   const [, init] = fetchMock.mock.calls.find(
     ([path, request]) =>
       path === "/api/claims/CLM-1002/sign-off" && request?.method === "POST",
@@ -321,6 +334,13 @@ it("shows why a sign-off was refused", async () => {
   expect((await panel.findByRole("alert")).textContent).toBe(
     "Claim CLM-1002 is not waiting for sign-off",
   );
+});
+
+it("offers sign-off when a lowered limit holds an older unpaid approval", async () => {
+  showClaim({ ...held, status: "in_progress", sign_off_available: true });
+  const panel = await decisionPanel();
+  expect(panel.getByRole("button", { name: "Sign off" })).toBeDefined();
+  expect(panel.queryByText("Waiting for the agent to pay it.")).toBeNull();
 });
 
 it("labels an evaluation copy and suppresses sign-off", async () => {

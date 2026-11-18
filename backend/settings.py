@@ -22,9 +22,12 @@ def get_settings(db: Connection) -> PlatformSettings:
     )
 
 
-def approval_limit(db: Connection) -> float:
-    """Return the current limit for a newly recorded decision."""
-    return db.execute(select(settings.c.payout_approval_limit)).scalar_one()
+def approval_limit(db: Connection, *, lock: bool = False) -> float:
+    """Read the current payout limit and hold it steady while paying if requested."""
+    query = select(settings.c.payout_approval_limit)
+    if lock:
+        query = query.with_for_update(read=True)
+    return db.execute(query).scalar_one()
 
 
 def decision_limit() -> ScalarSelect[float]:

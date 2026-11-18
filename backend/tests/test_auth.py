@@ -15,6 +15,7 @@ from backend.tests.auth_support import AGENT_HEADERS, authorization, token
 
 def test_route_inventory_requires_the_right_credential():
     shared = {
+        "get_agent_openapi",
         "list_claims",
         "get_claim",
         "get_policy",
@@ -52,6 +53,7 @@ def test_route_inventory_requires_the_right_credential():
         "record_decision",
         "calculate_payout",
         "pay_claim",
+        "hold_evaluation_payment",
         "fail_claim",
         "start_run",
         "stop_runs",

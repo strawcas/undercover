@@ -7,10 +7,12 @@ import itertools
 import pytest
 from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
+from sqlalchemy import update
 
 from agent import api, harness
 from agent.tests.records import claim_of, steps_of
 from agent.tests.stubs import StubModel, call, decide, graph_on, record, stub
+from backend.database import claims, decisions, engine
 
 
 def stop_while_working(claim_id, saver, *replies):
@@ -193,6 +195,60 @@ def test_finished_without_a_decision_but_stopped_before_it_was_failed(
         " back in the queue"
     )
     assert model.prompts == []
+
+
+def test_stale_payment_node_uses_the_backend_paid_outcome(client, monkeypatch):
+    saver = InMemorySaver()
+    claim_id = "CLM-1001"
+    fail_once(monkeypatch, api, "pay_claim", KeyboardInterrupt())
+    graph = graph_on(stub(record("approve", 900)), saver)
+    with pytest.raises(KeyboardInterrupt):
+        harness.work_claim(claim_id, graph)
+    claim = api.get_claim(claim_id)
+    assert graph.get_state(harness.thread_of(claim)).next == (harness.PAY,)
+    values = client.get("/api/settings").json()["values"]
+    client.put(
+        "/api/settings", json=values | {"payout_approval_limit": 500}
+    ).raise_for_status()
+    client.post(f"/api/claims/{claim_id}/sign-off").raise_for_status()
+    paid = api.get_claim(claim_id)
+    calls = calls_to(monkeypatch, "pay_claim")
+    assert "approve" in harness.carry_on(paid, graph_on(stub(), saver))
+    assert calls == []
+    assert paid["payment"]["amount"] == 900
+    assert graph.get_state(harness.thread_of(paid)).values["status"] == "decided"
+
+
+def test_legacy_signature_keeps_the_pause_until_the_backend_pays(client, monkeypatch):
+    claim_id = "CLM-1002"
+    saver = InMemorySaver()
+    graph = graph_on(stub(record("approve", 1350)), saver)
+    assert "waiting for sign-off" in harness.work_claim(claim_id, graph)
+    with engine().begin() as db:
+        db.execute(
+            update(claims)
+            .where(claims.c.claim_id == claim_id)
+            .values(status="in_progress")
+        )
+        db.execute(
+            update(decisions)
+            .where(decisions.c.claim_id == claim_id)
+            .values(
+                signed_off_by="Dana Whitfield",
+                signed_off_at="2026-07-20T09:00:00+00:00",
+            )
+        )
+    unpaid = api.get_claim(claim_id)
+    thread = harness.thread_of(unpaid)
+    calls = calls_to(monkeypatch, "pay_claim")
+    assert "not paid yet" in harness.carry_on(unpaid, graph)
+    assert graph.get_state(thread).next == (harness.PAUSE,)
+    paid = client.post(f"/api/claims/{claim_id}/sign-off").json()
+    assert harness.carry_on(paid, graph) == f"{claim_id}  approve  $1,350.00"
+    assert calls == []
+    checkpoint = graph.get_state(thread)
+    assert checkpoint.next == ()
+    assert checkpoint.values["status"] == "decided"
 
 
 def test_a_claim_stopped_before_its_first_step_was_saved(client):

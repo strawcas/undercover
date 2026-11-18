@@ -1,5 +1,4 @@
-"""The agent's service: the backend calls it after a handler's sign-off, and it picks
-the claim back up. npm run dev starts it beside the backend and the dashboard."""
+"""Run the local agent service alongside the backend and dashboard."""
 
 import asyncio
 import logging
@@ -229,11 +228,15 @@ def health() -> dict[str, str]:
     "/api/claims/{claim_id}/resume", operation_id="resume_claim", status_code=202
 )
 def resume_claim(claim_id: str, background: BackgroundTasks) -> dict[str, str]:
-    """Pick a claim back up after a handler's sign-off, without waiting for it."""
+    """Accept a checkpoint resume for a claim already paid on sign-off."""
     claim = api.get_claim(claim_id)
-    signed_off = claim["decision"] and claim["decision"]["signed_off_by"]
-    if claim["status"] != api.Status.IN_PROGRESS or not signed_off:
-        raise HTTPException(409, f"Claim {claim_id} has no sign-off waiting to be paid")
+    payment = claim["payment"]
+    if (
+        claim["status"] != api.Status.DECIDED
+        or not payment
+        or not payment["signed_off_by"]
+    ):
+        raise HTTPException(409, f"Claim {claim_id} has no paid sign-off to resume")
     if not queue_resume(claim_id):
         raise HTTPException(409, f"Claim {claim_id} is already being worked")
     background.add_task(resume_owned, claim)

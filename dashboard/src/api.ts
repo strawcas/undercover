@@ -70,6 +70,7 @@ export interface Claim {
   attempts: number;
   decision: Decision | null;
   payment: Payment | null;
+  sign_off_available: boolean;
   evaluation_id: string | null;
   source_id: string | null;
 }
