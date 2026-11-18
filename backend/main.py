@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from sqlalchemy import Connection, RowMapping, insert, select, update
 
 from backend import (
@@ -17,7 +17,7 @@ from backend import (
 )
 from backend import runs as run_records
 from backend import settings as platform_settings
-from backend.auth import CurrentHandler, SeniorHandler
+from backend.auth import CurrentHandler, SeniorHandler, agent_or_handler, require_agent
 from backend.clock import now
 from backend.configuration_models import ClaimConfiguration, ConfigurationHistory
 from backend.database import (
@@ -87,6 +87,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="UnderCover", lifespan=lifespan)
 app.include_router(improvement_router)
+agent_only = [Depends(require_agent)]
+shared_read = [Depends(agent_or_handler)]
 
 
 @app.post("/api/dispatches", operation_id="start_dispatch", status_code=202)
@@ -112,13 +114,15 @@ def get_current_handler(handler: CurrentHandler) -> Handler:
 
 
 @app.get("/api/evaluations", operation_id="list_evaluations")
-def list_evaluations(db: Database) -> list[Evaluation]:
+def list_evaluations(db: Database, handler: CurrentHandler) -> list[Evaluation]:
     """List newest-first evaluations with backend-calculated scores."""
     return evaluations.list_evaluations(db)
 
 
 @app.get("/api/evaluations/{run_id}", operation_id="get_evaluation")
-def get_evaluation(run_id: str, db: Database) -> EvaluationDetail:
+def get_evaluation(
+    run_id: str, db: Database, handler: CurrentHandler
+) -> EvaluationDetail:
     """Compare the agent's results with handler labels on isolated copies."""
     return evaluations.get_evaluation(db, run_id)
 
@@ -221,7 +225,7 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/api/claims", operation_id="list_claims")
+@app.get("/api/claims", operation_id="list_claims", dependencies=shared_read)
 def list_claims(db: Database) -> list[ClaimSummary]:
     """List every claim in the queue, in id order."""
     rows = db.execute(
@@ -230,19 +234,25 @@ def list_claims(db: Database) -> list[ClaimSummary]:
     return [to_summary(row) for row in rows]
 
 
-@app.get("/api/claims/{claim_id}", operation_id="get_claim")
+@app.get("/api/claims/{claim_id}", operation_id="get_claim", dependencies=shared_read)
 def get_claim(claim_id: str, db: Database) -> Claim:
     """Get one claim in full: the story, the items claimed and the documents."""
     return to_claim(find_claim(db, claim_id))
 
 
-@app.get("/api/policies/{policy_id}", operation_id="get_policy")
+@app.get(
+    "/api/policies/{policy_id}", operation_id="get_policy", dependencies=shared_read
+)
 def get_policy(policy_id: str, db: Database) -> Policy:
     """Get a policy: the plan, add-ons, purchase date, trip and travelers."""
     return find_policy(db, policy_id)
 
 
-@app.get("/api/customers/{customer_id}/claims", operation_id="get_claim_history")
+@app.get(
+    "/api/customers/{customer_id}/claims",
+    operation_id="get_claim_history",
+    dependencies=shared_read,
+)
 def get_claim_history(customer_id: str, db: Database) -> list[PreviousClaim]:
     """Get a customer's earlier claims, with the outcome and the amount paid."""
     query = select(customers.c.record).where(customers.c.customer_id == customer_id)
@@ -252,7 +262,11 @@ def get_claim_history(customer_id: str, db: Database) -> list[PreviousClaim]:
     return [PreviousClaim(**claim) for claim in record["previous_claims"]]
 
 
-@app.get("/api/configurations/current", operation_id="get_current_configuration")
+@app.get(
+    "/api/configurations/current",
+    operation_id="get_current_configuration",
+    dependencies=shared_read,
+)
 def get_current_configuration(db: Database) -> ClaimConfiguration:
     """Get the current claim configuration and document contents without scores."""
     return configurations.get_configuration(db, configurations.current_version(db))
@@ -275,7 +289,11 @@ def list_configurations(
     ]
 
 
-@app.get("/api/configurations/{version}", operation_id="get_configuration")
+@app.get(
+    "/api/configurations/{version}",
+    operation_id="get_configuration",
+    dependencies=agent_only,
+)
 def get_configuration(version: int, db: Database) -> ClaimConfiguration:
     """Get an immutable claim configuration and prompt without scores."""
     return configurations.get_configuration(db, version)
@@ -295,7 +313,9 @@ def change_settings(
     return platform_settings.change_settings(db, request, handler)
 
 
-@app.get("/api/documents/search", operation_id="search_documents")
+@app.get(
+    "/api/documents/search", operation_id="search_documents", dependencies=agent_only
+)
 def search_documents(
     query: Annotated[str, Query(min_length=1)], db: Database
 ) -> list[SectionMatch]:
@@ -303,7 +323,11 @@ def search_documents(
     return search(db, query)
 
 
-@app.get("/api/documents/{document}/sections/{number}", operation_id="read_section")
+@app.get(
+    "/api/documents/{document}/sections/{number}",
+    operation_id="read_section",
+    dependencies=agent_only,
+)
 def read_section(document: DocumentName, number: int, db: Database) -> Section:
     """Read one section of the policy wording or the claims manual in full."""
     for section in sections(db, document):
@@ -314,13 +338,15 @@ def read_section(document: DocumentName, number: int, db: Database) -> Section:
 
 
 @app.get("/api/handlers", operation_id="list_handlers")
-def list_handlers(db: Database) -> list[Handler]:
+def list_handlers(db: Database, handler: CurrentHandler) -> list[Handler]:
     """List the claims handlers."""
     rows = db.execute(select(handlers).order_by(handlers.c.handler_id)).mappings()
     return [Handler(**row) for row in rows]
 
 
-@app.post("/api/claims/{claim_id}/start", operation_id="start_claim")
+@app.post(
+    "/api/claims/{claim_id}/start", operation_id="start_claim", dependencies=agent_only
+)
 def start_claim(claim_id: str, request: StartRequest, db: Database) -> Claim:
     """Start work on a waiting claim, which moves it to in progress."""
     improvement_budget.admit_run(db, find_claim(db, claim_id)["evaluation_id"])
@@ -338,7 +364,9 @@ def start_claim(claim_id: str, request: StartRequest, db: Database) -> Claim:
     return to_claim(find_claim(db, claim_id))
 
 
-@app.post("/api/claims/{claim_id}/steps", operation_id="record_step")
+@app.post(
+    "/api/claims/{claim_id}/steps", operation_id="record_step", dependencies=agent_only
+)
 def record_step(claim_id: str, request: StepRequest, db: Database) -> Step:
     """Record one step of the agent's work on a claim."""
     improvement_budget.guard_claim_write(db, claim_id)
@@ -349,14 +377,18 @@ def record_step(claim_id: str, request: StepRequest, db: Database) -> Step:
 
 
 @app.get("/api/claims/{claim_id}/steps", operation_id="list_steps")
-def list_steps(claim_id: str, db: Database) -> list[Step]:
+def list_steps(claim_id: str, db: Database, handler: CurrentHandler) -> list[Step]:
     """List the steps of the agent's work on a claim, in order."""
     find_claim(db, claim_id)
     query = select(steps).where(steps.c.claim_id == claim_id).order_by(steps.c.step_id)
     return [Step(**row) for row in db.execute(query).mappings()]
 
 
-@app.post("/api/claims/{claim_id}/decision", operation_id="record_decision")
+@app.post(
+    "/api/claims/{claim_id}/decision",
+    operation_id="record_decision",
+    dependencies=agent_only,
+)
 def record_decision(claim_id: str, request: DecisionRequest, db: Database) -> Claim:
     """Record a claim's decision once; an approval waits to be paid or signed off."""
     claim = find_claim(db, claim_id, lock=True)
@@ -387,7 +419,11 @@ def record_decision(claim_id: str, request: DecisionRequest, db: Database) -> Cl
     return to_claim(find_claim(db, claim_id))
 
 
-@app.post("/api/claims/{claim_id}/payout", operation_id="calculate_payout")
+@app.post(
+    "/api/claims/{claim_id}/payout",
+    operation_id="calculate_payout",
+    dependencies=agent_only,
+)
 def calculate_payout(claim_id: str, request: PayoutRequest, db: Database) -> Payout:
     """Work out an approval's payout with UnderCover's payout rules; records nothing."""
     policy = find_policy(db, to_claim(find_claim(db, claim_id)).policy_id)
@@ -396,7 +432,9 @@ def calculate_payout(claim_id: str, request: PayoutRequest, db: Database) -> Pay
     )
 
 
-@app.post("/api/claims/{claim_id}/payment", operation_id="pay_claim")
+@app.post(
+    "/api/claims/{claim_id}/payment", operation_id="pay_claim", dependencies=agent_only
+)
 def pay_claim(claim_id: str, request: PaymentRequest, db: Database) -> Claim:
     """Pay an approved claim its payout once, unless it needs a handler's sign-off."""
     claim = find_claim(db, claim_id, lock=True)
@@ -454,7 +492,9 @@ def sign_off_claim(
     )
 
 
-@app.post("/api/claims/{claim_id}/failure", operation_id="fail_claim")
+@app.post(
+    "/api/claims/{claim_id}/failure", operation_id="fail_claim", dependencies=agent_only
+)
 def fail_claim(claim_id: str, request: FailureRequest, db: Database) -> Claim:
     """Put a failed claim back in the queue, or leave it for a handler after two."""
     claim = find_claim(db, claim_id, lock=True)
@@ -468,7 +508,7 @@ def fail_claim(claim_id: str, request: FailureRequest, db: Database) -> Claim:
     return to_claim(find_claim(db, claim_id))
 
 
-@app.post("/api/runs", operation_id="start_run")
+@app.post("/api/runs", operation_id="start_run", dependencies=agent_only)
 def start_run(request: RunRequest, db: Database) -> Run:
     """Create a run recording its execution configuration."""
     if request.round_id is not None:
@@ -491,37 +531,45 @@ def start_run(request: RunRequest, db: Database) -> Run:
 
 
 @app.get("/api/runs/latest", operation_id="get_latest_run")
-def get_latest_run(db: Database) -> Run | None:
+def get_latest_run(db: Database, handler: CurrentHandler) -> Run | None:
     """Get the newest dispatch and its member progress."""
     return run_records.latest(db)
 
 
-@app.post("/api/runs/stop", operation_id="stop_runs")
+@app.post("/api/runs/stop", operation_id="stop_runs", dependencies=agent_only)
 def stop_runs(db: Database) -> list[str]:
     """Mark abandoned runs stopped and return evaluation threads for cleanup."""
     return run_records.stop_runs(db)
 
 
 @app.get("/api/runs/active", operation_id="get_active_run")
-def get_active_run(db: Database) -> Run | None:
+def get_active_run(db: Database, handler: CurrentHandler) -> Run | None:
     """Read the running dispatch or evaluation for shared dashboard busy controls."""
     return run_records.active(db)
 
 
-@app.get("/api/runs/{run_id}", operation_id="get_run")
+@app.get("/api/runs/{run_id}", operation_id="get_run", dependencies=agent_only)
 def get_run(run_id: str, db: Database) -> Run:
     """Read a run with its own measurements and member results."""
     return run_records.get_run(db, run_id)
 
 
-@app.get("/api/runs/{run_id}/threads", operation_id="get_run_threads")
+@app.get(
+    "/api/runs/{run_id}/threads",
+    operation_id="get_run_threads",
+    dependencies=agent_only,
+)
 def get_run_threads(run_id: str, db: Database) -> list[str]:
     """List evaluation checkpoint threads without reading expected outcomes."""
     run_records.run_row(db, run_id)
     return run_records.evaluation_threads(db, run_id)
 
 
-@app.put("/api/runs/{run_id}/claims/{claim_id}", operation_id="record_run_claim")
+@app.put(
+    "/api/runs/{run_id}/claims/{claim_id}",
+    operation_id="record_run_claim",
+    dependencies=agent_only,
+)
 def record_run_claim(
     run_id: str, claim_id: str, request: RunClaimRequest, db: Database
 ) -> dict[str, str]:
@@ -530,7 +578,11 @@ def record_run_claim(
     return {"status": "recorded"}
 
 
-@app.put("/api/runs/{run_id}/selection", operation_id="record_run_selection")
+@app.put(
+    "/api/runs/{run_id}/selection",
+    operation_id="record_run_selection",
+    dependencies=agent_only,
+)
 def record_run_selection(
     run_id: str, request: RunSelectionRequest, db: Database
 ) -> dict[str, str]:
@@ -539,13 +591,19 @@ def record_run_selection(
     return {"status": "recorded"}
 
 
-@app.post("/api/runs/{run_id}/finish", operation_id="finish_run")
+@app.post(
+    "/api/runs/{run_id}/finish", operation_id="finish_run", dependencies=agent_only
+)
 def finish_run(run_id: str) -> Run:
     """Finish a run with a summary built entirely from backend records."""
     return evaluation_completion.finish_run(run_id)
 
 
-@app.post("/api/claims/{claim_id}/model-calls", operation_id="record_model_call")
+@app.post(
+    "/api/claims/{claim_id}/model-calls",
+    operation_id="record_model_call",
+    dependencies=agent_only,
+)
 def record_model_call(
     claim_id: str, request: ModelCallRequest, db: Database
 ) -> dict[str, str]:
@@ -557,7 +615,11 @@ def record_model_call(
     return {"status": "recorded"}
 
 
-@app.post("/api/claims/{claim_id}/admission", operation_id="admit_claim")
+@app.post(
+    "/api/claims/{claim_id}/admission",
+    operation_id="admit_claim",
+    dependencies=agent_only,
+)
 def admit_claim(claim_id: str, request: RunAdmission, db: Database) -> dict[str, str]:
     """Check stop and spending immediately before new claim model work."""
     claim = find_claim(db, claim_id)
@@ -567,14 +629,16 @@ def admit_claim(claim_id: str, request: RunAdmission, db: Database) -> dict[str,
     return {"status": "accepted"}
 
 
-@app.post("/api/runs/{run_id}/stop", operation_id="stop_run")
+@app.post("/api/runs/{run_id}/stop", operation_id="stop_run", dependencies=agent_only)
 def stop_run(run_id: str, db: Database) -> Run:
     """Close one drained run without interrupting another accepted operation."""
     return run_records.finish_run(db, run_id, "stopped")
 
 
 @app.put(
-    "/api/claims/{claim_id}/work-slices/{slice_id}", operation_id="record_work_slice"
+    "/api/claims/{claim_id}/work-slices/{slice_id}",
+    operation_id="record_work_slice",
+    dependencies=agent_only,
 )
 def record_work_slice(
     claim_id: str, slice_id: str, request: WorkSliceRequest, db: Database

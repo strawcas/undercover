@@ -1,4 +1,5 @@
 import { defineConfig } from "@playwright/test";
+import { TEST_AGENT_KEY } from "./e2e/agent_credentials";
 import {
   AGENT_STAND_IN,
   AUTH_STAND_IN,
@@ -23,6 +24,7 @@ export default defineConfig({
         UNDERCOVER_DB: "e2e/undercover.db",
         DATABASE_URL: "",
         UNDERCOVER_AGENT: AGENT_STAND_IN,
+        UNDERCOVER_API_KEY: TEST_AGENT_KEY,
         VITE_SUPABASE_URL: AUTH_STAND_IN,
         OPENROUTER_DECISIONS_URL: JUDGE_STAND_IN,
         OPENROUTER_API_KEY: "offline",

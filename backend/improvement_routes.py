@@ -1,10 +1,10 @@
 """Handler orchestration and internal round operations, kept on distinct routes."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from backend import agent_service, configurations, improvement_budget, improvements
-from backend.auth import CurrentHandler, SeniorHandler
+from backend.auth import CurrentHandler, SeniorHandler, require_agent
 from backend.configuration_models import RecipeHistory
 from backend.dependencies import Database
 from backend.improvement_models import (
@@ -20,6 +20,7 @@ from backend.improvement_models import (
 from backend.models import Handler
 
 router = APIRouter()
+service_router = APIRouter(dependencies=[Depends(require_agent)])
 
 
 class CloseRound(BaseModel):
@@ -63,31 +64,33 @@ def decide_proposal(
     return agent_service.decide_proposal(round_id, proposal_id, request, handler)
 
 
-@router.post("/api/improver/rounds", operation_id="create_round")
+@service_router.post("/api/improver/rounds", operation_id="create_round")
 def create_round(handler: Handler, db: Database) -> Round:
     """Create a round only after the service has reserved its work slot."""
     return improvements.start(db, handler)
 
 
-@router.post("/api/improver/recover", operation_id="recover_rounds")
+@service_router.post("/api/improver/recover", operation_id="recover_rounds")
 def recover_rounds(db: Database) -> list[str]:
     """Close abandoned stretches while retaining pending approval checkpoints."""
     return improvements.recover(db)
 
 
-@router.get("/api/improver/rounds/{round_id}", operation_id="get_round")
+@service_router.get("/api/improver/rounds/{round_id}", operation_id="get_round")
 def get_round(round_id: str, db: Database) -> Round:
     """Read one round for service orchestration without held-out examples."""
     return improvements.get_round(db, round_id)
 
 
-@router.get("/api/improver/rounds/{round_id}/report", operation_id="read_round_results")
+@service_router.get(
+    "/api/improver/rounds/{round_id}/report", operation_id="read_round_results"
+)
 def read_round_results(round_id: str, db: Database) -> dict:
     """Supply the improver's restricted development evidence and aggregates."""
     return improvements.report(db, round_id)
 
 
-@router.post(
+@service_router.post(
     "/api/improver/rounds/{round_id}/baseline", operation_id="prepare_baseline"
 )
 def prepare_baseline(round_id: str, db: Database) -> dict:
@@ -95,7 +98,7 @@ def prepare_baseline(round_id: str, db: Database) -> dict:
     return improvements.baseline(db, round_id)
 
 
-@router.put(
+@service_router.put(
     "/api/improver/rounds/{round_id}/progress", operation_id="record_round_progress"
 )
 def record_round_progress(round_id: str, request: RoundProgress, db: Database) -> Round:
@@ -103,7 +106,7 @@ def record_round_progress(round_id: str, request: RoundProgress, db: Database) -
     return improvements.progress(db, round_id, request)
 
 
-@router.post(
+@service_router.post(
     "/api/improver/rounds/{round_id}/validate", operation_id="validate_proposal"
 )
 def validate_proposal(round_id: str, request: ProposalRequest, db: Database) -> dict:
@@ -111,7 +114,7 @@ def validate_proposal(round_id: str, request: ProposalRequest, db: Database) -> 
     return {"refusal": improvements.validate_proposal(db, round_id, request)}
 
 
-@router.post(
+@service_router.post(
     "/api/improver/rounds/{round_id}/proposals", operation_id="record_pending_proposal"
 )
 def record_pending_proposal(
@@ -121,7 +124,7 @@ def record_pending_proposal(
     return improvements.pending(db, round_id, request)
 
 
-@router.post(
+@service_router.post(
     "/api/improver/rounds/{round_id}/proposals/{proposal_id}/decision",
     operation_id="record_proposal_decision",
 )
@@ -132,13 +135,15 @@ def record_proposal_decision(
     return improvements.decide(db, round_id, proposal_id, request)
 
 
-@router.post("/api/improver/rounds/{round_id}/quote", operation_id="quote_evaluation")
+@service_router.post(
+    "/api/improver/rounds/{round_id}/quote", operation_id="quote_evaluation"
+)
 def quote_evaluation(round_id: str, request: EvaluationQuote, db: Database) -> Quote:
     """Quote a prescribed evaluation against the remaining round budget."""
     return improvements.evaluation_quote(db, round_id, request)
 
 
-@router.post(
+@service_router.post(
     "/api/improver/rounds/{round_id}/admission", operation_id="admit_improver_call"
 )
 def admit_improver_call(round_id: str, db: Database) -> dict[str, str]:
@@ -147,7 +152,7 @@ def admit_improver_call(round_id: str, db: Database) -> dict[str, str]:
     return {"status": "accepted"}
 
 
-@router.post(
+@service_router.post(
     "/api/improver/rounds/{round_id}/sequence-quote",
     operation_id="quote_candidate_sequence",
 )
@@ -156,7 +161,9 @@ def quote_candidate_sequence(round_id: str, db: Database) -> Quote:
     return improvements.sequence_quote(db, round_id)
 
 
-@router.post("/api/improver/rounds/{round_id}/usage", operation_id="record_round_usage")
+@service_router.post(
+    "/api/improver/rounds/{round_id}/usage", operation_id="record_round_usage"
+)
 def record_round_usage(
     round_id: str, request: RoundUsage, db: Database
 ) -> dict[str, str]:
@@ -164,7 +171,7 @@ def record_round_usage(
     return improvements.record_usage(db, round_id, request)
 
 
-@router.post(
+@service_router.post(
     "/api/improver/rounds/{round_id}/verdict", operation_id="apply_round_verdict"
 )
 def apply_round_verdict(round_id: str, db: Database) -> Round:
@@ -172,7 +179,12 @@ def apply_round_verdict(round_id: str, db: Database) -> Round:
     return improvements.apply_verdict(db, round_id)
 
 
-@router.post("/api/improver/rounds/{round_id}/finish", operation_id="finish_round")
+@service_router.post(
+    "/api/improver/rounds/{round_id}/finish", operation_id="finish_round"
+)
 def finish_round(round_id: str, request: CloseRound, db: Database) -> Round:
     """Close or stop a round while preserving an existing verdict."""
     return improvements.finish(db, round_id, request.stopped, request.reason)
+
+
+router.include_router(service_router)

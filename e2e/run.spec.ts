@@ -1,5 +1,5 @@
 import { expect, test } from "./fixtures";
-import { post, put, AGENT_STAND_IN } from "./api";
+import { get, post, put, AGENT_STAND_IN } from "./api";
 import {
   internalRound,
   playEvaluations,
@@ -307,7 +307,7 @@ test("improvement approvals retain feedback, refuse busy work and show the verdi
   await detail.getByRole("button", { name: "Approve testing" }).click();
   await dialog.getByRole("button", { name: "Approve proposal" }).click();
   await expect(dialog.getByText(/already running/)).toBeVisible();
-  const stillPending = await request.get(internalRound(identity));
+  const stillPending = await get(request, internalRound(identity));
   const pending = (await stillPending.json()) as {
     proposals: { proposal_id: string; decision: string | null }[];
   };

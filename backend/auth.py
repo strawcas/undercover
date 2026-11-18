@@ -1,13 +1,15 @@
 """Verify Supabase sign-ins and resolve UnderCover handler permissions."""
 
 import os
+from secrets import compare_digest
 from typing import Annotated
 
 import jwt
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 
+from backend import agent_key
 from backend.database import handlers
 from backend.dependencies import Database
 from backend.models import Handler
@@ -49,6 +51,24 @@ def current_handler(credentials: Credentials, db: Database) -> Handler:
 
 
 CurrentHandler = Annotated[Handler, Depends(current_handler)]
+
+
+def _valid_agent_key(request: Request) -> bool:
+    key = agent_key.configured_key()
+    supplied = request.headers.get(agent_key.HEADER, "")
+    return bool(key) and compare_digest(key.encode(), supplied.encode())
+
+
+def require_agent(request: Request) -> None:
+    """Require the credential used by the agent service and CLI."""
+    if not _valid_agent_key(request):
+        raise HTTPException(401, "A valid agent API key is required")
+
+
+def agent_or_handler(request: Request, credentials: Credentials, db: Database) -> None:
+    """Permit shared reads by the agent or a verified handler."""
+    if not _valid_agent_key(request):
+        current_handler(credentials, db)
 
 
 def senior_handler(handler: CurrentHandler) -> Handler:

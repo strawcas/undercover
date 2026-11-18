@@ -3,10 +3,12 @@ from fastapi import BackgroundTasks, HTTPException
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
 
-from agent import harness, service
+from agent import harness, improver_api, service
 from agent.tests.records import claim_of, steps_of
 from agent.tests.stubs import decide, graph_on, stub
 from api_rules import rule_breaks
+from backend import agent_key
+from backend.tests.auth_support import AGENT_HEADERS
 
 
 @pytest.fixture
@@ -15,7 +17,7 @@ def serve(monkeypatch):
 
     def with_graph(graph):
         monkeypatch.setattr(harness, "execution_graph", lambda version=None: graph)
-        return TestClient(service.app)
+        return TestClient(service.app, headers=AGENT_HEADERS)
 
     return with_graph
 
@@ -30,6 +32,29 @@ def test_the_service_follows_the_api_rules():
 
 def test_health():
     assert TestClient(service.app).get("/api/health").json() == {"status": "ok"}
+
+
+@pytest.mark.parametrize("headers", [{}, {agent_key.HEADER: "wrong"}])
+def test_round_writes_refuse_direct_unauthenticated_service_calls(
+    client, monkeypatch, headers
+):
+    def unexpected(*args):
+        pytest.fail("The service attempted an unauthenticated round write")
+
+    monkeypatch.setattr(improver_api, "start_round", unexpected)
+    monkeypatch.setattr(improver_api, "finish", unexpected)
+    monkeypatch.setattr(improver_api, "decide", unexpected)
+    handler = client.get("/api/me").json()
+    routes = TestClient(service.app, headers=headers)
+    assert routes.post("/api/rounds", json=handler).status_code == 401
+    assert routes.post("/api/rounds/1/stop", json=handler).status_code == 401
+    assert (
+        routes.post(
+            "/api/rounds/1/proposals/1/decision",
+            json={"handler": handler, "decision": "approve", "reason": None},
+        ).status_code
+        == 401
+    )
 
 
 def test_a_sign_off_picks_the_claim_up_and_pays_it_once(

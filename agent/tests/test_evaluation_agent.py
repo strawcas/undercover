@@ -11,6 +11,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy import update
 
 from agent import api, checkpoints, dispatcher, harness, service
+from agent.tests.records import latest
 from agent.tests.stubs import call, graph_on, record, stub
 from backend.database import engine, evaluation_labels
 
@@ -92,7 +93,7 @@ def test_service_works_copies_with_no_labels_and_clears_held_threads(
         assert '"handler_id"' not in prompts
 
 
-def test_same_admission_slot_covers_both_kinds_before_background_creation():
+def test_same_admission_slot_covers_both_kinds_before_background_creation(client):
     background = BackgroundTasks()
     service.start_evaluation(
         service.EvaluationRequest(set_name="held_out", tiny=True, concurrency=5),
@@ -104,7 +105,7 @@ def test_same_admission_slot_covers_both_kinds_before_background_creation():
                 service.DispatchRequest(concurrency=25), BackgroundTasks()
             )
         assert busy.value.status_code == 409
-        assert api.get_latest_run() is None
+        assert latest(client) is None
     finally:
         service.run_slot.release()
 

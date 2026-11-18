@@ -2,11 +2,13 @@
 
 import logging
 import os
+from http import HTTPStatus
 from typing import Any
 
 import httpx
 from fastapi import HTTPException
 
+from backend import agent_key
 from backend.improvement_models import ProposalDecision
 from backend.models import Handler
 
@@ -20,11 +22,15 @@ log = logging.getLogger(__name__)
 def _start(path: str, body: dict[str, Any]) -> dict[str, str]:
     """Forward a start without creating backend state before service acceptance."""
     try:
-        response = agent.post(path, json=body)
+        response = agent.post(path, json=body, headers=agent_key.request_headers())
         response.raise_for_status()
     except httpx.RequestError as error:
         raise HTTPException(503, "The agent's service is unavailable") from error
     except httpx.HTTPStatusError as error:
+        if error.response.status_code == HTTPStatus.UNAUTHORIZED:
+            raise HTTPException(
+                503, "The agent service rejected the backend credential"
+            ) from error
         if "application/json" not in error.response.headers.get("content-type", ""):
             raise HTTPException(
                 503, "The agent's service could not start the run"
@@ -50,7 +56,9 @@ def start_evaluation(set_name: str, tiny: bool, concurrency: int) -> dict[str, s
 def resume_claim(claim_id: str) -> None:
     """Ask the agent to pick a claim back up after its sign-off."""
     try:
-        agent.post(f"/claims/{claim_id}/resume").raise_for_status()
+        agent.post(
+            f"/claims/{claim_id}/resume", headers=agent_key.request_headers()
+        ).raise_for_status()
     except httpx.HTTPError as error:  # the sign-off stands without the agent
         log.warning(
             "The agent didn't pick up %s after its sign-off: %s", claim_id, error

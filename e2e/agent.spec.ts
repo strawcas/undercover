@@ -1,5 +1,6 @@
 import { expect, test } from "./fixtures";
 import { post, resumed } from "./api";
+import { agentHeaders } from "./agent_credentials";
 
 // These tests stand in for the agent by calling the API through the
 // dashboard's proxy, and watch the claim page update without a reload.
@@ -62,6 +63,7 @@ test("a sign-off on the dashboard reaches the agent's service", async ({
   });
   const refused = await request.post("/api/claims/CLM-1020/payment", {
     data: { amount: 1350 },
+    headers: agentHeaders,
   });
   expect(refused.status()).toBe(403);
 

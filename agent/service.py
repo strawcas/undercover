@@ -10,7 +10,7 @@ from threading import Lock
 from typing import Any, Literal
 
 import httpx
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
@@ -25,6 +25,8 @@ from agent.harness import (
     release_claim,
     take_resume,
 )
+from backend import agent_key
+from backend.auth import require_agent
 from backend.improvement_models import HandlerDecision
 from backend.models import Handler
 
@@ -32,6 +34,8 @@ from backend.models import Handler
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Keep the claim graph's checkpointer open while the service runs."""
+    if not agent_key.configured_key():
+        raise RuntimeError(f"{agent_key.ENV_NAME} is missing")
     show_reports()
     with checkpointer() as saver:
         app.state.saver = saver
@@ -40,6 +44,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="UnderCover Agent", lifespan=lifespan)
+internal = APIRouter(dependencies=[Depends(require_agent)])
 run_slot = Lock()
 
 
@@ -107,7 +112,7 @@ def accept_run(
     return {"status": "accepted"}
 
 
-@app.post("/api/dispatches", operation_id="start_dispatch", status_code=202)
+@internal.post("/api/dispatches", operation_id="start_dispatch", status_code=202)
 def start_dispatch(
     request: DispatchRequest, background: BackgroundTasks
 ) -> dict[str, str]:
@@ -123,7 +128,7 @@ def start_dispatch(
     )
 
 
-@app.post("/api/evaluations", operation_id="start_evaluation", status_code=202)
+@internal.post("/api/evaluations", operation_id="start_evaluation", status_code=202)
 def start_evaluation(
     request: EvaluationRequest, background: BackgroundTasks
 ) -> dict[str, str]:
@@ -155,7 +160,7 @@ def work_round(round_id: str, decision: dict | None = None) -> None:
         run_slot.release()
 
 
-@app.post("/api/rounds", operation_id="start_round", status_code=202)
+@internal.post("/api/rounds", operation_id="start_round", status_code=202)
 def start_round(handler: Handler, background: BackgroundTasks) -> dict[str, str]:
     """Reserve a stretch before creating and scheduling a senior handler's round."""
     reserve("improvement round")
@@ -168,7 +173,9 @@ def start_round(handler: Handler, background: BackgroundTasks) -> dict[str, str]
     return {"status": "accepted", "round_id": current["round_id"]}
 
 
-@app.post("/api/rounds/{round_id}/stop", operation_id="stop_round", status_code=202)
+@internal.post(
+    "/api/rounds/{round_id}/stop", operation_id="stop_round", status_code=202
+)
 def stop_round(round_id: str, handler: Handler) -> dict[str, str]:
     """Mark a round stopped immediately, leaving in-flight work to drain."""
     if not handler.can_approve_over_limit:
@@ -177,7 +184,7 @@ def stop_round(round_id: str, handler: Handler) -> dict[str, str]:
     return {"status": "accepted"}
 
 
-@app.post(
+@internal.post(
     "/api/rounds/{round_id}/proposals/{proposal_id}/decision",
     operation_id="decide_proposal",
     status_code=202,
@@ -218,7 +225,9 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/api/claims/{claim_id}/resume", operation_id="resume_claim", status_code=202)
+@internal.post(
+    "/api/claims/{claim_id}/resume", operation_id="resume_claim", status_code=202
+)
 def resume_claim(claim_id: str, background: BackgroundTasks) -> dict[str, str]:
     """Pick a claim back up after a handler's sign-off, without waiting for it."""
     claim = api.get_claim(claim_id)
@@ -229,3 +238,6 @@ def resume_claim(claim_id: str, background: BackgroundTasks) -> dict[str, str]:
         raise HTTPException(409, f"Claim {claim_id} is already being worked")
     background.add_task(resume_owned, claim)
     return {"status": "accepted"}
+
+
+app.include_router(internal)

@@ -10,6 +10,9 @@ from fastapi import BackgroundTasks, HTTPException
 from fastapi.testclient import TestClient
 
 from agent import api, checkpoints, dispatcher, service
+from agent.tests.records import latest
+from backend import agent_key
+from backend.tests.auth_support import AGENT_HEADERS
 from backend.tests.run_requests import configuration
 
 
@@ -19,7 +22,7 @@ def test_admission_reserves_before_creating_backend_run(client, monkeypatch):
         service.DispatchRequest(concurrency=25), background
     ) == {"status": "accepted"}
     try:
-        assert api.get_latest_run() is None
+        assert latest(client) is None
         with pytest.raises(HTTPException) as busy:
             service.start_dispatch(
                 service.DispatchRequest(concurrency=1), BackgroundTasks()
@@ -41,7 +44,7 @@ def test_background_failure_releases_admission(monkeypatch, caplog):
     assert "cannot create run" in caplog.text
 
 
-def test_background_dispatch_does_not_block_health(monkeypatch):
+def test_background_dispatch_does_not_block_health(client, monkeypatch):
     entered, finish = Event(), Event()
 
     def dispatch(*args):
@@ -52,7 +55,10 @@ def test_background_dispatch_does_not_block_health(monkeypatch):
     monkeypatch.setenv("MODEL_NAME", "stub")
     monkeypatch.setattr(service, "checkpointer", lambda: nullcontext(None))
     monkeypatch.setattr(checkpoints, "clear_threads", lambda threads: None)
-    with TestClient(service.app) as agent, ThreadPoolExecutor(max_workers=1) as workers:
+    with (
+        TestClient(service.app, headers=AGENT_HEADERS) as agent,
+        ThreadPoolExecutor(max_workers=1) as workers,
+    ):
         response = workers.submit(
             agent.post, "/api/dispatches", json={"concurrency": 1}
         )
@@ -66,7 +72,7 @@ def test_background_dispatch_does_not_block_health(monkeypatch):
         finally:
             finish.set()
         assert response.result().status_code == 202
-    run = api.get_latest_run()
+    run = latest(client)
     assert run is not None
     assert run["status"] == "finished"
     assert not service.run_slot.locked()
@@ -75,11 +81,23 @@ def test_background_dispatch_does_not_block_health(monkeypatch):
 @pytest.mark.parametrize("n", [0, 26])
 def test_service_concurrency_limits(n):
     assert (
-        TestClient(service.app)
+        TestClient(service.app, headers=AGENT_HEADERS)
         .post("/api/dispatches", json={"concurrency": n})
         .status_code
         == 422
     )
+
+
+def test_startup_requires_the_agent_key_before_initializing_checkpoints(monkeypatch):
+    monkeypatch.delenv(agent_key.ENV_NAME)
+    monkeypatch.setattr(
+        service, "checkpointer", lambda: pytest.fail("opened checkpoints")
+    )
+    with (
+        pytest.raises(RuntimeError, match="UNDERCOVER_API_KEY is missing"),
+        TestClient(service.app),
+    ):
+        pass
 
 
 def test_startup_waits_then_stops_abandoned_runs(monkeypatch):

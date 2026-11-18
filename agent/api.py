@@ -168,10 +168,6 @@ def start_run(configuration: dict[str, Any]) -> dict[str, Any]:
     return _call("POST", "/runs", json=configuration)
 
 
-def get_latest_run() -> dict[str, Any] | None:
-    return _call("GET", "/runs/latest")
-
-
 def get_run(run_id: str) -> dict[str, Any]:
     return _call("GET", f"/runs/{run_id}")
 

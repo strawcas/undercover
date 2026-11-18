@@ -4,11 +4,16 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from backend import agent_service, auth, judge
+from backend import agent_key, agent_service, auth, judge
 from backend.database import engine, seed
 from backend.judge_models import Grade
 from backend.main import app
-from backend.tests.auth_support import PUBLIC_JWK, authorization
+from backend.tests.auth_support import (
+    AGENT_HEADERS,
+    PUBLIC_JWK,
+    TEST_AGENT_KEY,
+    authorization,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -17,6 +22,7 @@ def database(tmp_path, monkeypatch):
     path = tmp_path / "undercover.db"
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("MODEL_NAME", raising=False)
+    monkeypatch.setenv(agent_key.ENV_NAME, TEST_AGENT_KEY)
     monkeypatch.setenv("UNDERCOVER_DB", str(path))
     seed(engine())
     return path
@@ -52,7 +58,7 @@ def agent_calls(agent_answers):
 
 @pytest.fixture
 def client():
-    return TestClient(app, headers=authorization())
+    return TestClient(app, headers=authorization() | AGENT_HEADERS)
 
 
 @pytest.fixture(autouse=True)

@@ -6,6 +6,10 @@ import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 from jwt.algorithms import RSAAlgorithm
 
+from backend import agent_key
+
+TEST_AGENT_KEY = "offline-test-agent-key"
+AGENT_HEADERS = {agent_key.HEADER: TEST_AGENT_KEY}
 ISSUER = "http://test-auth/auth/v1"
 PRIVATE_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 PUBLIC_JWK = RSAAlgorithm.to_jwk(PRIVATE_KEY.public_key(), as_dict=True) | {

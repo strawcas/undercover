@@ -6,6 +6,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { TEST_BACKEND } from "./addresses.ts";
+import { agentHeaders, TEST_AGENT_KEY } from "./agent_credentials.ts";
 
 const backend = process.env.UNDERCOVER_API ?? TEST_BACKEND;
 
@@ -39,7 +40,7 @@ async function forwardRound(
     `${backend}${stopping ? path.replace(/\/stop$/, "/finish") : path}`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...agentHeaders },
       body: stopping
         ? JSON.stringify({ stopped: true, reason: "Stopped by Dana Whitfield" })
         : body,
@@ -54,11 +55,45 @@ async function forwardRound(
 }
 
 function isRound(request: IncomingMessage) {
-  return request.method === "POST" && request.url?.startsWith("/api/rounds");
+  return (
+    request.method === "POST" && Boolean(request.url?.startsWith("/api/rounds"))
+  );
+}
+
+function anonymous(request: IncomingMessage, privatePaths: boolean[]) {
+  return (
+    request.method === "POST" &&
+    privatePaths.some(Boolean) &&
+    request.headers["x-api-key"] !== TEST_AGENT_KEY
+  );
+}
+
+function acceptRun(request: IncomingMessage, response: ServerResponse) {
+  if (busy) {
+    reply(response, 409, {
+      detail: "A dispatch or evaluation is already running",
+    });
+    return;
+  }
+  busy = true;
+  let body = "";
+  request.on("data", (chunk: Buffer) => {
+    body += chunk.toString();
+  });
+  request.on("end", () => {
+    starts.push(JSON.parse(body));
+    reply(response, 202, { status: "accepted" });
+  });
 }
 
 createServer((request, response) => {
   const resume = /^\/api\/claims\/([^/]+)\/resume$/.exec(request.url ?? "");
+  const startsRun =
+    request.url === "/api/dispatches" || request.url === "/api/evaluations";
+  if (anonymous(request, [isRound(request), Boolean(resume), startsRun])) {
+    reply(response, 401, { detail: "A valid agent API key is required" });
+    return;
+  }
   if (isRound(request)) {
     void forwardRound(request, response).catch(() => {
       reply(response, 503, {
@@ -68,25 +103,8 @@ createServer((request, response) => {
   } else if (request.method === "POST" && resume) {
     resumed.push(decodeURIComponent(resume[1]));
     reply(response, 202, { status: "accepted" });
-  } else if (
-    request.method === "POST" &&
-    (request.url === "/api/dispatches" || request.url === "/api/evaluations")
-  ) {
-    if (busy) {
-      reply(response, 409, {
-        detail: "A dispatch or evaluation is already running",
-      });
-      return;
-    }
-    busy = true;
-    let body = "";
-    request.on("data", (chunk: Buffer) => {
-      body += chunk.toString();
-    });
-    request.on("end", () => {
-      starts.push(JSON.parse(body));
-      reply(response, 202, { status: "accepted" });
-    });
+  } else if (request.method === "POST" && startsRun) {
+    acceptRun(request, response);
   } else if (request.url === "/api/starts") {
     reply(response, 200, starts);
   } else if (request.method === "POST" && request.url === "/api/release") {
