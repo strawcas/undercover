@@ -88,6 +88,12 @@ function StepBody({ step }: Readonly<{ step: Step }>) {
         <span className="chip step-failed">Failed</span> {step.content}
       </p>
     );
+  if (step.kind === "security")
+    return (
+      <p>
+        <span className="step-label">Security check</span> {step.content}
+      </p>
+    );
   return (
     <p>
       <span className="step-label">Agent</span> {step.content}

@@ -359,9 +359,10 @@ def seed(db: Engine) -> dict[str, int]:
     """Build the tables afresh from data/ and count what they hold."""
     company = load("company.json")
     handler_rows = load("handlers.json")
-    customer_rows = load("customers.json")
-    policy_rows = load("policies.json")
-    claim_rows = load("claims.json")
+    customer_rows = load("customers.json") + load("security/customers.json")
+    policy_rows = load("policies.json") + load("security/policies.json")
+    evaluation_rows = load("claims.json")
+    claim_rows = evaluation_rows + load("security/claims.json")
     with db.begin() as connection:
         if on_postgres(db.url):
             connection.execute(CreateSchema(SCHEMA, if_not_exists=True))
@@ -473,7 +474,7 @@ def seed(db: Engine) -> dict[str, int]:
             ],
         )
         for set_name, sources, labels in (
-            ("evaluation", claim_rows, load("evals/decisions.json")),
+            ("evaluation", evaluation_rows, load("evals/decisions.json")),
             (
                 "held_out",
                 load("evals/held_out_claims.json"),

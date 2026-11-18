@@ -4,8 +4,23 @@ import pytest
 from fastapi.testclient import TestClient
 from langchain_core.callbacks import BaseCallbackHandler
 
-from agent import api, harness, improver, improver_api
+from agent import api, harness, improver, improver_api, screening
 from backend.main import app
+
+
+@pytest.fixture(autouse=True)
+def screen(monkeypatch):
+    """Clear ordinary test claims without a provider call; return the real checker."""
+    original = screening.check
+    monkeypatch.setattr(
+        screening,
+        "check",
+        lambda *args: {
+            "result": {"instructions_found": False, "reason": "Ordinary submission"},
+            "usage": None,
+        },
+    )
+    return original
 
 
 @pytest.fixture(autouse=True)

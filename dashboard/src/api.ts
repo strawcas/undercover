@@ -8,7 +8,7 @@ export const statuses = [
 export type Status = (typeof statuses)[number];
 export type DecisionKind = "approve" | "decline" | "refer";
 export type StepKind =
-  "tool_call" | "tool_result" | "message" | "reading" | "error";
+  "tool_call" | "tool_result" | "message" | "reading" | "error" | "security";
 
 export interface ClaimSummary {
   claim_id: string;

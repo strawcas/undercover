@@ -8,7 +8,8 @@ Status = Literal[
     "waiting", "in_progress", "waiting_for_sign_off", "decided", "left_for_handler"
 ]
 DecisionKind = Literal["approve", "decline", "refer"]
-StepKind = Literal["tool_call", "tool_result", "message", "reading", "error"]
+OrdinaryStepKind = Literal["tool_call", "tool_result", "message", "reading", "error"]
+StepKind = Literal[OrdinaryStepKind, "security"]
 DocumentName = Literal["policy_wording", "claims_manual"]
 Benefit = Literal[
     "trip_cancellation",
@@ -153,7 +154,13 @@ class StartRequest(BaseModel):
 
 
 class StepRequest(BaseModel):
-    kind: StepKind
+    kind: OrdinaryStepKind
+    content: str = Field(min_length=1)
+
+
+class SecurityStepRequest(BaseModel):
+    kind: Literal["security"]
+    thread_id: str = Field(min_length=1)
     content: str = Field(min_length=1)
 
 

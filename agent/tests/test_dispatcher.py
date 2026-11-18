@@ -36,7 +36,7 @@ def test_concurrency_is_bounded_and_every_claim_is_selected_once(monkeypatch, n)
     run = api.start_run(configuration(concurrency=n))
     result = dispatcher.dispatch(run["run_id"], n)
     assert peak == n
-    assert len(set(worked)) == len(worked) == len(result["results"]) == 25
+    assert len(set(worked)) == len(worked) == len(result["results"]) == 26
     expected = sorted(
         api.list_claims(), key=lambda c: (c["submitted_on"], c["claim_id"])
     )

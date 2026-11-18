@@ -209,7 +209,7 @@ def test_measurement_failure_settles_and_does_not_mask_interrupt(monkeypatch):
     writes = itertools.count()
 
     def fails_at_end(*args):
-        if next(writes):
+        if next(writes) >= 2:  # Allow the initial slice and the recorded screen.
             raise RuntimeError("measurement unavailable")
 
     monkeypatch.setattr(api, "record_work_slice", fails_at_end)

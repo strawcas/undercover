@@ -67,6 +67,12 @@ def test_seed_loads_both_sets_and_clears_scoreboard(client):
             assert (
                 db.execute(select(func.count()).select_from(table)).scalar_one() == 50
             )
+            assert (
+                db.execute(
+                    select(table.c.source_id).where(table.c.source_id == "CLM-1901")
+                ).first()
+                is None
+            )
         assert (
             db.execute(
                 select(func.count())
@@ -85,7 +91,7 @@ def test_seed_loads_both_sets_and_clears_scoreboard(client):
     evaluation(client)
     seed(engine())
     assert client.get("/api/evaluations").json() == []
-    assert len(client.get("/api/claims").json()) == 25
+    assert len(client.get("/api/claims").json()) == 26
 
 
 def test_original_work_is_not_copied_and_copies_cannot_be_signed_off(

@@ -65,6 +65,7 @@ from backend.models import (
     RunSelectionRequest,
     Section,
     SectionMatch,
+    SecurityStepRequest,
     StartRequest,
     Status,
     Step,
@@ -142,6 +143,12 @@ def find_claim(db: Connection, claim_id: str, lock: bool = False) -> RowMapping:
     query = claim_view.where(claims.c.claim_id == claim_id)
     if lock:
         improvement_budget.guard_claim_write(db, claim_id)
+        if db.dialect.name == "sqlite":
+            db.execute(
+                update(claims)
+                .where(claims.c.claim_id == claim_id)
+                .values(thread_id=claims.c.thread_id)
+            )
         query = query.with_for_update(of=claims)
     row = db.execute(query).mappings().first()
     if row is None:
@@ -367,13 +374,40 @@ def start_claim(claim_id: str, request: StartRequest, db: Database) -> Claim:
 @app.post(
     "/api/claims/{claim_id}/steps", operation_id="record_step", dependencies=agent_only
 )
-def record_step(claim_id: str, request: StepRequest, db: Database) -> Step:
+def record_step(
+    claim_id: str, request: StepRequest | SecurityStepRequest, db: Database
+) -> Step:
     """Record one step of the agent's work on a claim."""
+    if isinstance(request, SecurityStepRequest):
+        return record_security_step(db, claim_id, request)
     improvement_budget.guard_claim_write(db, claim_id)
     thread_id = find_claim(db, claim_id)["thread_id"]
     if thread_id is None:
         raise HTTPException(409, f"Claim {claim_id} has not been started")
     return add_step(db, claim_id, thread_id, request.kind, request.content)
+
+
+def record_security_step(
+    db: Connection, claim_id: str, request: SecurityStepRequest
+) -> Step:
+    """Return the existing step if a saved screening result is replayed."""
+    claim = find_claim(db, claim_id, lock=True)
+    if claim["thread_id"] != request.thread_id:
+        raise HTTPException(409, f"Claim {claim_id} is on a different attempt")
+    saved = (
+        db.execute(
+            select(steps).where(
+                steps.c.claim_id == claim_id,
+                steps.c.thread_id == request.thread_id,
+                steps.c.kind == request.kind,
+            )
+        )
+        .mappings()
+        .first()
+    )
+    if saved is not None:
+        return Step(**saved)
+    return add_step(db, claim_id, request.thread_id, request.kind, request.content)
 
 
 @app.get("/api/claims/{claim_id}/steps", operation_id="list_steps")

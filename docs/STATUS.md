@@ -1,5 +1,9 @@
 # Status
 
+Secure phase 2 screens customer submissions before adjudication. A flagged claim receives a zero-payout referral and its timeline shows the check's reason. Parse retries and their usage survive checkpoint replay. A saved receipt can settle against a stopped dispatch when it matches that dispatch's existing claim and thread work slice. The queue seed includes CLM-1901 with its linked records. Both evaluation sets retain their original membership.
+
+The fresh review led to strict structured output that retains truncated replies, a guard for older checkpoints before their first model call, and recovery of saved screening receipts to the dispatch that incurred them. The reviewer approved the fixes. The offline suite passed, including the browser timeline and 26-claim seed. The final focused screening and recovery run passed all 56 tests.
+
 Secure phase 1 is complete. Agent-only backend operations require `UNDERCOVER_API_KEY`. Shared reads accept either the agent key or a verified Supabase handler token. Handler authority and attribution come from the token. Both sides authenticate private calls between the backend and the agent service, and the service checks for its key before recovery.
 
 The independent review identified the risk of accepting a forwarded handler identity from an unauthenticated service caller. Private service routes now authenticate the backend before acting, and an upstream credential rejection becomes a 503 so handlers keep their dashboard sessions. The reviewer verified both fixes. `npm run check` passed with 325 Python tests (96.58% coverage), 117 dashboard unit tests and 11 Playwright tests. Live verification is scheduled after phase 4.

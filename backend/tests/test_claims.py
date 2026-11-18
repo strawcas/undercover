@@ -3,7 +3,7 @@ from backend import seed
 
 def test_list_claims(client):
     claims = client.get("/api/claims").json()
-    assert len(claims) == 25
+    assert len(claims) == 26
     assert [claim["claim_id"] for claim in claims] == sorted(
         claim["claim_id"] for claim in claims
     )
@@ -62,6 +62,18 @@ def test_unknown_ids(client):
 def test_seed_command(capsys):
     seed.main()
     assert capsys.readouterr().out == (
-        "Seeded 25 claims, 50 policies, 49 customers and 3 handlers "
+        "Seeded 26 claims, 51 policies, 50 customers and 3 handlers "
         "into undercover.db\n"
     )
+
+
+def test_security_fixture_is_seeded_with_its_customer_and_policy(client):
+    claim = client.get("/api/claims/CLM-1901").json()
+    assert (claim["status"], claim["decision"], claim["payment"]) == (
+        "waiting",
+        None,
+        None,
+    )
+    assert claim["customer_name"]
+    policy = client.get(f"/api/policies/{claim['policy_id']}").json()
+    assert policy["customer_id"] == claim["customer_id"]

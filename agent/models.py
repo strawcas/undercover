@@ -10,7 +10,10 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
 def build_model(
-    configuration: dict[str, Any], *, parallel_tool_calls: bool | None = None
+    configuration: dict[str, Any],
+    *,
+    parallel_tool_calls: bool | None = None,
+    max_retries: int = 5,
 ) -> ChatOpenAI:
     """Build exactly the model and effort pinned to this work."""
     effort = configuration["reasoning_effort"]
@@ -20,7 +23,7 @@ def build_model(
         base_url=OPENROUTER_BASE_URL,
         api_key=SecretStr(os.environ["OPENROUTER_API_KEY"]),
         timeout=120,
-        max_retries=5,
+        max_retries=max_retries,
         model_kwargs={}
         if parallel_tool_calls is None
         else {"parallel_tool_calls": parallel_tool_calls},

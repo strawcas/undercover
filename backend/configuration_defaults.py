@@ -5,10 +5,10 @@ import os
 DEFAULT_MODEL = "openai/gpt-6-luna"
 
 
-def initial_model() -> dict[str, str]:
-    """Resolve the explicit free-model override before creating version one."""
+def initial_model(effort: str = "low") -> dict[str, str]:
+    """Resolve the model override or use Luna with the caller's default effort."""
     override = os.getenv("MODEL_NAME")
     return {
         "model": override or DEFAULT_MODEL,
-        "reasoning_effort": "default" if override else "low",
+        "reasoning_effort": "default" if override else effort,
     }

@@ -5,12 +5,12 @@ import uuid
 from langchain_core.messages import AIMessage, BaseMessage
 
 
-def model_reply(reply: BaseMessage, run_id: str | None) -> dict:
+def model_reply(reply: BaseMessage | None, run_id: str | None) -> dict:
     """Preserve unavailable token counts and OpenRouter's actual reported cost."""
     usage = reply.usage_metadata if isinstance(reply, AIMessage) else None
-    reported = reply.response_metadata.get("token_usage") or {}
+    reported = (reply.response_metadata.get("token_usage") if reply else None) or {}
     return {
-        "reply_id": reply.id or str(uuid.uuid4()),
+        "reply_id": (reply.id if reply else None) or str(uuid.uuid4()),
         "run_id": run_id,
         "input_tokens": usage.get("input_tokens") if usage else None,
         "output_tokens": usage.get("output_tokens") if usage else None,

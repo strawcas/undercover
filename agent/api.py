@@ -12,7 +12,9 @@ backend = backend_client.client()
 DecisionKind = Literal["approve", "decline", "refer"]
 APPROVE: DecisionKind = "approve"
 DocumentName = Literal["policy_wording", "claims_manual"]
-StepKind = Literal["tool_call", "tool_result", "message", "reading", "error"]
+StepKind = Literal[
+    "tool_call", "tool_result", "message", "reading", "error", "security"
+]
 Benefit = Literal[
     "trip_cancellation",
     "trip_interruption",
@@ -139,8 +141,12 @@ def stop_run(run_id: str) -> dict[str, Any]:
     return _call("POST", f"/runs/{run_id}/stop")
 
 
-def record_step(claim_id: str, kind: StepKind, content: str) -> dict[str, Any]:
+def record_step(
+    claim_id: str, kind: StepKind, content: str, *, thread_id: str | None = None
+) -> dict[str, Any]:
     body = {"kind": kind, "content": content}
+    if thread_id is not None:
+        body["thread_id"] = thread_id
     return _call("POST", f"/claims/{claim_id}/steps", json=body)
 
 

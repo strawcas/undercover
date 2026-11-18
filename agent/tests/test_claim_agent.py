@@ -26,6 +26,8 @@ def test_the_graph():
     graph = graph_on(stub()).get_graph()
     assert set(graph.nodes) == {
         "__start__",
+        "screen_claim",
+        "record_screen",
         "agent",
         "tools",
         "wait_for_sign_off",
@@ -34,7 +36,13 @@ def test_the_graph():
     }
     edges = {(e.source, e.target, e.conditional) for e in graph.edges}
     assert edges == {
-        ("__start__", "agent", False),
+        ("__start__", "screen_claim", False),
+        ("screen_claim", "record_screen", False),
+        ("record_screen", "agent", True),
+        ("record_screen", "__end__", True),
+        ("record_screen", "screen_claim", True),
+        ("agent", "screen_claim", True),
+        ("agent", "record_screen", True),
         ("agent", "tools", True),
         ("agent", "__end__", True),
         ("tools", "agent", True),
@@ -65,7 +73,8 @@ def test_approves_and_the_graph_pays_within_the_limit(client, caplog):
     assert claim["payment"]["amount"] == 420.0
     assert len(claim["thread_id"]) == 36
 
-    steps = steps_of(client, "CLM-1001")
+    security, *steps = steps_of(client, "CLM-1001")
+    assert security["kind"] == "security"
     assert [s["kind"] for s in steps] == ["tool_call", "tool_result"] * 4
     assert steps[0]["content"] == "get_claim()"
     assert steps[1]["content"].startswith('get_claim: {"claim_id": "CLM-1001"')
@@ -145,7 +154,7 @@ def test_reading_a_section_is_recorded(client):
     )
     work("CLM-1004", model)
 
-    steps = [(s["kind"], s["content"]) for s in steps_of(client, "CLM-1004")]
+    steps = [(s["kind"], s["content"]) for s in steps_of(client, "CLM-1004")[1:]]
     assert steps[0] == (
         "tool_call",
         'read_section(document="claims_manual", number=9)',
@@ -202,7 +211,7 @@ def test_working_out_the_payout(client):
         *decide("approve", 420.0),
     )
     assert work("CLM-1001", model) == "CLM-1001  approve  $420.00"
-    result = steps_of(client, "CLM-1001")[1]
+    result = steps_of(client, "CLM-1001")[2]
     assert result["kind"] == "tool_result"
     content = result["content"].removeprefix("calculate_payout: ")
     assert json.loads(content)["payout"] == 420.0

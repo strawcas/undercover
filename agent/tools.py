@@ -11,6 +11,7 @@ from langgraph.graph.message import add_messages
 from langgraph.types import Command
 
 from agent import api
+from agent.screening import ScreenAttempt
 
 
 @dataclass
@@ -18,6 +19,7 @@ class ClaimContext:
     """The claim a claim agent is working on."""
 
     claim_id: str
+    thread_id: str
     run_id: str | None = None
     signed_off: bool = False
 
@@ -36,6 +38,8 @@ class ClaimState(TypedDict):
     model_calls: Annotated[int, operator.add]
     decision: Annotated[dict[str, Any], keep_last]
     status: Annotated[str, keep_last]
+    screening: ScreenAttempt
+    screen_attempts: Annotated[int, operator.add]
 
 
 @tool

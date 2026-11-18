@@ -13,6 +13,11 @@ test("the claim page shows the agent at work", async ({ page, request }) => {
 
   await post(request, "/api/claims/CLM-1003/start", { thread_id: "e2e-1" });
   await post(request, "/api/claims/CLM-1003/steps", {
+    kind: "security",
+    thread_id: "e2e-1",
+    content: "Passed. Ordinary submission.",
+  });
+  await post(request, "/api/claims/CLM-1003/steps", {
     kind: "tool_call",
     content: 'get_claim(claim_id="CLM-1003")',
   });
@@ -21,6 +26,9 @@ test("the claim page shows the agent at work", async ({ page, request }) => {
     content: 'get_claim: {"claim_id":"CLM-1003"}',
   });
   await expect(heading.getByText("In progress")).toBeVisible();
+  await expect(page.locator(".steps li").first()).toContainText(
+    "Security check Passed. Ordinary submission.",
+  );
   await expect(
     page.getByText("The agent is working on this claim."),
   ).toBeVisible();

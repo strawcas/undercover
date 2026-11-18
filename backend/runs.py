@@ -368,31 +368,47 @@ def evaluation_threads(db: Connection, run_id: str | None) -> list[str]:
     return list(db.execute(current.union(slices, history)).scalars())
 
 
-def validate_run(db: Connection, run_id: str | None) -> None:
-    """Reject a measurement referring to an unknown run."""
-    if run_id is not None:
-        row = db.execute(
-            select(runs.c.status)
-            .where(runs.c.run_id == run_id)
-            .with_for_update(read=True)
-        ).first()
-        if row is None:
-            raise HTTPException(404, "Run not found")
-        if row.status != "running":
-            raise HTTPException(409, "Run has finished")
+def has_work_slice(db: Connection, run_id: str, claim_attempt: tuple[str, str]) -> bool:
+    """Verify that this dispatch had already started work on the same attempt."""
+    claim_id, thread_id = claim_attempt
+    query = select(work_slices.c.slice_id).where(
+        work_slices.c.run_id == run_id,
+        work_slices.c.claim_id == claim_id,
+        work_slices.c.thread_id == thread_id,
+    )
+    return db.execute(query.limit(1)).first() is not None
+
+
+def validate_run(
+    db: Connection, run_id: str | None, claim_attempt: tuple[str, str] | None = None
+) -> str | None:
+    """Validate live work or a model receipt recovered from a stopped dispatch."""
+    if run_id is None:
+        return None
+    row = db.execute(
+        select(runs.c.status, runs.c.kind, runs.c.round_id)
+        .where(runs.c.run_id == run_id)
+        .with_for_update(read=True)
+    ).first()
+    if row is None:
+        raise HTTPException(404, "Run not found")
+    if row.status != "running" and not (
+        row.status == "stopped"
+        and row.kind == "dispatch"
+        and claim_attempt is not None
+        and has_work_slice(db, run_id, claim_attempt)
+    ):
+        raise HTTPException(409, "Run has finished")
+    return row.round_id
 
 
 def record_model_call(
     db: Connection, claim_id: str, thread_id: str, request: ModelCallRequest
 ) -> None:
     """Save each provider reply once, preserving unavailable measurements."""
-    validate_run(db, request.run_id)
-    if request.run_id is not None:
-        round_id = db.execute(
-            select(runs.c.round_id).where(runs.c.run_id == request.run_id)
-        ).scalar_one()
-        if round_id is not None:
-            lock_round(db, round_id)
+    round_id = validate_run(db, request.run_id, (claim_id, thread_id))
+    if round_id is not None:
+        lock_round(db, round_id)
     insert_once(
         db,
         model_calls,

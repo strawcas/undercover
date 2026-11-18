@@ -59,11 +59,11 @@ Add `UNDERCOVER_API_KEY` to the local `.env` during implementation if absent. Ge
 
 Add the graph entry check and display its result as a labeled security step in the existing claim timeline. Extend `backend/database.py` to seed the additional queue claim, policy and customer from `data/security/`. Keep `data/claims.json` as the original evaluation source and leave the security decision in the lab fixture.
 
-- [ ] A flagged stub result writes a referral for $0 with the screen's reason, `Security check` as the section, and no payment. The screen is the first visible step and the adjudication model receives zero calls. A pass records the first step and proceeds through the existing claim path.
-- [ ] Stub tests verify the complete customer input, result field order, Luna with effort `none` and the override with effort omitted. Changing the pinned claim configuration leaves screening behavior intact.
-- [ ] Two unreadable results followed by a valid result produce three attributable call records and one screening step. Three unreadable results, a model error and a timeout all block adjudication and follow the existing failure or worker retry rules. Recorded failures identify the security check. Tests check reported costs and unavailable usage, including the evaluation totals.
-- [ ] Checkpoint tests resume a passed screen and a paused claim without calling the checker again. Restarting from a first message screens again. Replaying a saved result records one security step and at most one decision for that attempt.
-- [ ] A disposable seed has 26 waiting originals, including CLM-1901 with its linked records. Neither evaluation set, full or tiny, includes CLM-1901, and seeded evaluation membership and labels match the baseline. Run `npm run check`.
+- [x] A flagged stub result writes a referral for $0 with the screen's reason, `Security check` as the section, and no payment. The screen is the first visible step and the adjudication model receives zero calls. A pass records the first step and proceeds through the existing claim path.
+- [x] Stub tests verify the complete customer input, result field order, Luna with effort `none` and the override with effort omitted. Changing the pinned claim configuration leaves screening behavior intact.
+- [x] Two unreadable results followed by a valid result produce three attributable call records and one screening step. Three unreadable results, a model error and a timeout all block adjudication and follow the existing failure or worker retry rules. Recorded failures identify the security check. Tests check reported costs and unavailable usage, including the evaluation totals.
+- [x] Checkpoint tests resume a passed screen and a paused claim without calling the checker again. Restarting from a first message screens again. Replaying a saved result records one security step and at most one decision for that attempt.
+- [x] A disposable seed has 26 waiting originals, including CLM-1901 with its linked records. Neither evaluation set, full or tiny, includes CLM-1901, and seeded evaluation membership and labels match the baseline. Run `npm run check`.
 
 ## Phase 3 — Publish the agent contract and pay on sign-off
 

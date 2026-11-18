@@ -59,7 +59,7 @@ def test_startup_seeds_a_missing_or_empty_database(database, empty):
     if empty:
         database.touch()
     with TestClient(app) as client:
-        assert len(client.get("/api/claims", headers=AGENT_HEADERS).json()) == 25
+        assert len(client.get("/api/claims", headers=AGENT_HEADERS).json()) == 26
 
 
 def test_seed_drops_the_retired_table_before_parent_tables():

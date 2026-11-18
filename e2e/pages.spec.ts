@@ -8,8 +8,8 @@ test("the queue lists every claim", async ({ page }) => {
   const queue = page.getByRole("table").filter({
     has: page.getByRole("columnheader", { name: "Claimed (USD)", exact: true }),
   });
-  await expect(queue.locator("tbody tr")).toHaveCount(25);
-  const last = page.getByRole("row").filter({ hasText: "CLM-1025" });
+  await expect(queue.locator("tbody tr")).toHaveCount(26);
+  const last = page.getByRole("row").filter({ hasText: "CLM-1901" });
   await expect(last.getByText("Waiting")).toBeVisible();
 });
 

@@ -30,7 +30,7 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
 from langgraph.types import Command, interrupt
 
-from agent import api, checkpoints, measurements, models
+from agent import api, checkpoints, measurements, models, screening
 from agent.backend_client import Refused
 from agent.tools import CLAIM_TOOLS, ClaimContext, ClaimState
 
@@ -44,6 +44,8 @@ CLAIM_MODEL_CALLS = 30
 NO_DECISION = "The agent finished without recording a decision"
 WORK_CLAIM = "Work claim"
 CARRY_ON = "Carry on"
+SCREEN = "screen_claim"
+RECORD_SCREEN = "record_screen"
 AGENT = "agent"
 TOOLS = "tools"
 PAUSE = "wait_for_sign_off"
@@ -179,10 +181,16 @@ def call_model(
     runtime: Runtime[ClaimContext],
     llm: Runnable[LanguageModelInput, BaseMessage],
     instructions: Callable[[], SystemMessage],
-) -> dict[str, Any]:
+) -> Command[str]:
     """Ask the model for its next step, up to CLAIM_MODEL_CALLS times in all, and
     record its reply on the claim."""
     calls = state["model_calls"]
+    attempt = state.get("screening")
+    if not calls:
+        if not attempt or attempt["result"] is None:
+            return Command(goto=SCREEN)
+        if attempt["result"]["instructions_found"]:
+            return Command(goto=RECORD_SCREEN)
     if calls >= CLAIM_MODEL_CALLS:
         message = f"The claim agent made {calls} model calls without finishing"
         raise TooManyModelCalls(message)
@@ -193,7 +201,10 @@ def call_model(
         measurements.model_reply(reply, runtime.context.run_id),
     )
     record_reply(runtime.context.claim_id, reply)
-    return {"messages": [reply], "model_calls": 1}
+    return Command(
+        update={"messages": [reply], "model_calls": 1},
+        goto=TOOLS if isinstance(reply, AIMessage) and reply.tool_calls else END,
+    )
 
 
 def wait_for_sign_off(state: ClaimState, runtime: Runtime[ClaimContext]) -> None:
@@ -202,16 +213,53 @@ def wait_for_sign_off(state: ClaimState, runtime: Runtime[ClaimContext]) -> None
         interrupt({"claim_id": runtime.context.claim_id})
 
 
+def screen_claim(state: ClaimState, runtime: Runtime[ClaimContext]) -> dict[str, Any]:
+    """Save the screening result before logging it or recording a referral."""
+    context = runtime.context
+    return {
+        "screening": screening.check(context.claim_id, context.run_id),
+        "screen_attempts": 1,
+    }
+
+
+def record_screen(state: ClaimState, runtime: Runtime[ClaimContext]) -> dict[str, Any]:
+    """Record the saved result once and refer any flagged claim."""
+    context, attempt = runtime.context, state["screening"]
+    if attempt["usage"] is not None:
+        api.record_model_call(context.claim_id, attempt["usage"])
+    result = attempt["result"]
+    if result is None:
+        if state["screen_attempts"] >= screening.MAX_ATTEMPTS:
+            raise RuntimeError(
+                f"{screening.SECTION} could not read the model response "
+                f"after {screening.MAX_ATTEMPTS} tries"
+            )
+        return {}
+    flagged, reason = result["instructions_found"], result["reason"]
+    label = "Flagged" if flagged else "Passed"
+    api.record_step(
+        context.claim_id, "security", f"{label}. {reason}", thread_id=context.thread_id
+    )
+    if flagged:
+        claim = api.record_decision(
+            context.claim_id, "refer", 0, screening.SECTION, reason
+        )
+        return {"decision": claim["decision"], "status": claim["status"]}
+    return {}
+
+
+def after_screen(state: ClaimState) -> str:
+    """Send only cleared claims to the adjudication model."""
+    result = state["screening"]["result"]
+    if result is None:
+        return SCREEN
+    return END if result["instructions_found"] else AGENT
+
+
 def pay(state: ClaimState, runtime: Runtime[ClaimContext]) -> dict[str, Any]:
     """Pay the approved payout, which the backend refuses unless it may be paid."""
     claim = api.pay_claim(runtime.context.claim_id, state["decision"]["payout"])
     return {"status": claim["status"]}
-
-
-def after_agent(state: ClaimState) -> str:
-    """Run the tools the model asked for, or stop: it finished without a decision."""
-    reply = state["messages"][-1]
-    return TOOLS if isinstance(reply, AIMessage) and reply.tool_calls else END
 
 
 def after_tools(state: ClaimState) -> str:
@@ -240,9 +288,12 @@ def claim_graph(
         return SystemMessage(value["prompt"])
 
     builder = StateGraph(ClaimState, context_schema=ClaimContext)
+    builder.add_node(SCREEN, screen_claim)
+    builder.add_node(RECORD_SCREEN, record_screen)
     builder.add_node(
         AGENT,
         partial(call_model, llm=llm.bind_tools(CLAIM_TOOLS), instructions=instructions),
+        destinations=(SCREEN, RECORD_SCREEN, TOOLS, END),
     )
     builder.add_node(
         TOOLS,
@@ -250,8 +301,9 @@ def claim_graph(
     )
     builder.add_node(PAUSE, wait_for_sign_off)
     builder.add_node(PAY, pay)
-    builder.add_edge(START, AGENT)
-    builder.add_conditional_edges(AGENT, after_agent, [TOOLS, END])
+    builder.add_edge(START, SCREEN)
+    builder.add_edge(SCREEN, RECORD_SCREEN)
+    builder.add_conditional_edges(RECORD_SCREEN, after_screen, [SCREEN, AGENT, END])
     builder.add_conditional_edges(TOOLS, after_tools, [AGENT, PAUSE, PAY, END])
     builder.add_edge(PAUSE, PAY)
     builder.add_edge(PAY, END)
@@ -349,11 +401,13 @@ def run_claim_graph(
             for update in ready.stream(
                 start,
                 claim_config(claim, name, run_id),
-                context=ClaimContext(claim["claim_id"], run_id, signed_off=paying),
+                context=ClaimContext(
+                    claim["claim_id"], claim["thread_id"], run_id, signed_off=paying
+                ),
                 durability="sync",
                 stream_mode="updates",
             ):
-                if not paying or PAY in update:
+                if (not paying and SCREEN not in update) or PAY in update:
                     progress()
 
         contextvars.Context().run(execute, graph)

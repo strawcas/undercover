@@ -55,8 +55,8 @@ def test_completion_freezes_all_members_in_one_database_batch(client):
         frozen = client.post(f"/api/runs/{run_id}/finish").json()
     finally:
         event.remove(database, "before_cursor_execute", capture)
-    assert batches == [(True, 25)]
-    assert len(frozen["members"]) == 25
+    assert batches == [(True, 26)]
+    assert len(frozen["members"]) == 26
     assert all(member["customer_name"] for member in frozen["members"])
 
 
