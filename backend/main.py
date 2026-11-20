@@ -356,10 +356,77 @@ def start_claim(claim_id: str, request: StartRequest, db: Database) -> Claim:
             status="in_progress",
             thread_id=request.thread_id,
             latest_calculation=None,
+            memory_pending=False,
             attempts=claims.c.attempts + 1,
         )
     )
     return to_claim(find_claim(db, claim_id))
+
+
+def original_for_memory(db: Connection, claim_id: str, thread_id: str) -> RowMapping:
+    """Lock the original claim and verify the memory receipt's attempt."""
+    find_claim(db, claim_id, lock=True)
+    claim = find_claim(db, claim_id)
+    require_attempt(claim, thread_id)
+    if claim["evaluation_id"] is not None:
+        raise HTTPException(409, "Customer memory is available for original claims")
+    return claim
+
+
+@app.get(
+    "/api/agent/pending-memory",
+    operation_id="list_pending_memory",
+    dependencies=agent_only,
+)
+def list_pending_memory(db: Database) -> list[str]:
+    """List recorded originals whose memory events still need saving."""
+    query = (
+        select(claims.c.claim_id)
+        .join(decisions, decisions.c.claim_id == claims.c.claim_id)
+        .where(claims.c.memory_pending.is_(True), claims.c.evaluation_id.is_(None))
+        .order_by(decisions.c.decided_at, claims.c.claim_id)
+    )
+    return list(db.execute(query).scalars())
+
+
+@app.post(
+    "/api/claims/{claim_id}/prepare-memory",
+    operation_id="prepare_memory",
+    dependencies=agent_only,
+)
+def prepare_memory(
+    claim_id: str, request: StartRequest, db: Database
+) -> dict[str, str]:
+    """Mark an original attempt to save memory after recording its decision."""
+    claim = original_for_memory(db, claim_id, request.thread_id)
+    if claim["decision"] is None:
+        if claim["status"] != "in_progress":
+            raise HTTPException(409, "The claim is not in progress")
+        db.execute(
+            update(claims)
+            .where(claims.c.claim_id == claim_id)
+            .values(memory_pending=True)
+        )
+    return {"status": "ready"}
+
+
+@app.post(
+    "/api/claims/{claim_id}/finish-memory",
+    operation_id="finish_memory",
+    dependencies=agent_only,
+)
+def finish_memory(claim_id: str, request: StartRequest, db: Database) -> dict[str, str]:
+    """Mark the original decision's memory receipt as saved."""
+    claim = original_for_memory(db, claim_id, request.thread_id)
+    if claim["decision"] is None:
+        raise HTTPException(409, "The claim has no recorded decision")
+    if claim["memory_pending"]:
+        db.execute(
+            update(claims)
+            .where(claims.c.claim_id == claim_id)
+            .values(memory_pending=False)
+        )
+    return {"status": "saved"}
 
 
 @app.post(

@@ -20,9 +20,15 @@ def main(args: list[str]) -> None:
     parser.add_argument("claim_id", help="work this one claim")
     options = parser.parse_args(args)
     with checkpointer() as saver:
-        configuration = api.get_current_configuration()
-        graph = claim_graph(models.build_model(configuration), saver, configuration)
         try:
+            claim = api.get_claim(options.claim_id)
+            configuration = api.get_current_configuration()
+            graph = claim_graph(
+                models.build_model(configuration),
+                saver,
+                configuration,
+                evaluation=claim["evaluation_id"] is not None,
+            )
             work_claim(options.claim_id, graph)
         except Refused as refusal:
             parser.exit(1, f"{options.claim_id}  not started: {refusal}\n")

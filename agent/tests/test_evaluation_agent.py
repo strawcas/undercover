@@ -30,7 +30,7 @@ def test_service_works_copies_with_no_labels_and_clears_held_threads(
     saver = InMemorySaver()
     models = []
 
-    def build(version=None):
+    def build(version=None, **options):
         llm = stub(
             call("get_claim"),
             call("get_policy"),
@@ -152,7 +152,9 @@ def test_exhausted_and_failed_copies_clear_all_attempts(client, monkeypatch, tra
     else:
         first = [graph_on(stub(RuntimeError("failed")), saver) for _ in range(2)]
     graphs = iter(first + [graph_on(stub(record("refer", 0)), saver) for _ in range(4)])
-    monkeypatch.setattr(harness, "execution_graph", lambda version=None: next(graphs))
+    monkeypatch.setattr(
+        harness, "execution_graph", lambda version=None, **options: next(graphs)
+    )
     monkeypatch.setattr(checkpoints.state, "pool", object())
     monkeypatch.setattr(checkpoints, "PostgresSaver", lambda pool: saver)
     assert service.run_slot.acquire(blocking=False)

@@ -38,11 +38,18 @@ from agent import (
     context_client,
     gateway,
     measurements,
+    memory,
     models,
     screening,
 )
 from agent.backend_client import Refused
-from agent.tools import CLAIM_TOOLS, CONTEXT_TOOLS, ClaimContext, ClaimState
+from agent.tools import (
+    CLAIM_TOOLS,
+    CONTEXT_TOOLS,
+    ClaimContext,
+    ClaimState,
+    search_memory,
+)
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +67,7 @@ AGENT = "agent"
 TOOLS = "tools"
 PAUSE = "wait_for_sign_off"
 PAY = "pay"
+SAVE_MEMORY = "save_memory"
 GATEWAY_REFUSAL = "Gateway refused: "
 
 
@@ -107,7 +115,9 @@ def take_resume(claim_id: str) -> None:
         owned_claims.add(claim_id)
 
 
-def execution_graph(version: int | None = None) -> ClaimGraph:
+def execution_graph(
+    version: int | None = None, *, evaluation: bool = False
+) -> ClaimGraph:
     """Give each execution its own saver on the initialized process pool."""
     configuration = (
         api.get_current_configuration()
@@ -118,6 +128,7 @@ def execution_graph(version: int | None = None) -> ClaimGraph:
         models.build_model(configuration),
         checkpoints.new_saver(),
         configuration,
+        evaluation=evaluation,
     )
 
 
@@ -332,12 +343,9 @@ def after_payment(state: ClaimState, runtime: Runtime[ClaimContext]) -> str:
     return END
 
 
-def after_tools(state: ClaimState) -> str:
-    """Go back to the model until a decision is recorded, then pay an approval, after
-    a sign-off if the backend holds it, or stop."""
+def after_decision(state: ClaimState) -> str:
+    """Send a recorded decision to payment, sign-off or completion."""
     decision, status = state["decision"], state["status"]
-    if not decision:
-        return AGENT
     if status == api.Status.WAITING_FOR_SIGN_OFF:
         return PAUSE
     if decision["decision"] == api.APPROVE and status == api.Status.IN_PROGRESS:
@@ -345,10 +353,28 @@ def after_tools(state: ClaimState) -> str:
     return END
 
 
+def after_tools(state: ClaimState, runtime: Runtime[ClaimContext]) -> str:
+    """Continue adjudication or save an original decision before settlement."""
+    if not state["decision"]:
+        return AGENT
+    return SAVE_MEMORY if runtime.store is not None else after_decision(state)
+
+
+def save_memory(state: ClaimState, runtime: Runtime[ClaimContext]) -> dict[str, Any]:
+    """Save the recorded decision and minimal claim after adjudication."""
+    if runtime.store is not None:
+        memory.save_decision(
+            runtime.store, runtime.context.memory_claim, state["decision"]
+        )
+    return {}
+
+
 def claim_graph(
     llm: BaseChatModel,
     saver: BaseCheckpointSaver[Any],
     configuration: dict[str, Any] | None = None,
+    *,
+    evaluation: bool = False,
 ) -> ClaimGraph:
     """Build the claim agent's graph, which saves its progress after every step."""
 
@@ -362,6 +388,9 @@ def claim_graph(
     via = gateway.configured()
     knowledge = context_client.configured(via)
     tools = CLAIM_TOOLS + CONTEXT_TOOLS
+    store = memory.configured(evaluation=evaluation)
+    if store is not None:
+        tools.append(search_memory)
     builder = StateGraph(ClaimState, context_schema=ClaimContext)
     builder.add_node(SCREEN, screen_claim)
     builder.add_node(RECORD_SCREEN, record_screen)
@@ -385,13 +414,17 @@ def claim_graph(
     )
     builder.add_node(PAUSE, wait_for_sign_off)
     builder.add_node(PAY, partial(pay, via=via))
+    builder.add_node(SAVE_MEMORY, save_memory)
     builder.add_edge(START, SCREEN)
     builder.add_edge(SCREEN, RECORD_SCREEN)
     builder.add_conditional_edges(RECORD_SCREEN, after_screen, [SCREEN, AGENT, END])
-    builder.add_conditional_edges(TOOLS, after_tools, [AGENT, PAUSE, PAY, END])
+    builder.add_conditional_edges(
+        TOOLS, after_tools, [AGENT, SAVE_MEMORY, PAUSE, PAY, END]
+    )
+    builder.add_conditional_edges(SAVE_MEMORY, after_decision, [PAUSE, PAY, END])
     builder.add_edge(PAUSE, PAY)
     builder.add_conditional_edges(PAY, after_payment, [PAUSE, END])
-    return builder.compile(checkpointer=saver)
+    return builder.compile(checkpointer=saver, store=store)
 
 
 def thread_of(claim: dict[str, Any]) -> RunnableConfig:
@@ -472,7 +505,9 @@ def run_claim_graph(
     try:
         if signed_off is None:
             progress()
-        graph = graph or execution_graph(version)
+        graph = graph or execution_graph(
+            version, evaluation=claim["evaluation_id"] is not None
+        )
         start = (
             begin(claim["claim_id"])
             if name == WORK_CLAIM
@@ -493,6 +528,7 @@ def run_claim_graph(
                     evaluation_id=claim["evaluation_id"],
                     policy_id=claim["policy_id"],
                     customer_id=claim["customer_id"],
+                    memory_claim=memory.claim_fields(claim),
                 ),
                 durability="sync",
                 stream_mode="updates",

@@ -47,6 +47,9 @@ def test_route_inventory_requires_the_right_credential():
     service = {
         "get_configuration",
         "start_claim",
+        "list_pending_memory",
+        "prepare_memory",
+        "finish_memory",
         "record_step",
         "record_decision",
         "calculate_payout",

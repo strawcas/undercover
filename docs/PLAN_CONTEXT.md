@@ -83,16 +83,19 @@ Add `langgraph-checkpoint-aws` and use `AgentCoreMemoryStore` in the AWS CLI's r
 
 Add a checkpointed graph step after a model-recorded decision and before a payout or sign-off wait. Save two events using the customer ID as actor and the claim ID as session. The customer event contains summary, benefit claimed, incident date and place, and claimed items. The agent event contains decision, payout, section and reason. Stories and supporting documents stay on the claim. A flagged screen referral goes directly to completion. A normal model-recorded referral is eligible to save.
 
+Before writing an eligible decision, the graph opens a private attempt-bound memory receipt. Recovery can find it even after a decline or senior settlement. The agent starts one background recovery sweep at startup and can retry after releasing the dispatch slot. The AWS client initializes at the first memory operation and uses bounded request timeouts. Once both events succeed, the app closes the receipt.
+
 Use a stable write identity per recorded decision and event role so resuming a partially completed step does not duplicate a remote event. Verify the installed store's write behavior during implementation. If the store ignores the key as described in the brief, supply the same stable `clientToken` on each replay through the memory adapter's event write. Use a stand-in to exercise the provider request and a replay after a partial save. [AgentCore CreateEvent API](https://docs.aws.amazon.com/bedrock-agentcore/latest/APIReference/API_CreateEvent.html)
 
 Update `backend/instructions/claim.md` with the available sources and their roles, including official claim history for repeat claims. Update the tool-list sentence in the current improver instructions in `agent/improver.py` to describe the new context tools and memory's availability outside evaluations.
 
-- [ ] A stand-in store sees two correctly attributed, allowlisted events for a model-recorded original decision, including a held approval that has yet to be paid. Resuming the same decision, including across a partial save and later sign-off, leaves one event per role.
-- [ ] Tests with story and document sentinels verify those values stay out of events. Flagged security referrals and evaluation copies cause zero store calls.
-- [ ] Search stays under the app-owned customer's namespace, returns only text, excludes this claim's summary and can return other summaries or facts for this customer. A second customer's results are unavailable to the model.
-- [ ] A provider save failure logs a warning and preserves the decision and ordinary payment flow. A provider search failure returns a refusal the model can act on.
-- [ ] A graph built with memory unset offers no memory tool and needs no AWS credentials. The evaluation graph omits the tool even when memory is configured, including when the evaluator is the improver. Direct dev operation with memory off is also verified in the final live sequence.
-- [ ] `npm run check` passes.
+- [x] A stand-in store sees two correctly attributed, allowlisted events for a model-recorded original decision, including a held approval that has yet to be paid. Resuming the same decision, including across a partial save and later sign-off, leaves one event per role.
+- [x] The next dispatch recovers interrupted memory saves for a declined or signed-off original. Stalled recovery leaves decided claims visible and the next dispatch can reserve its slot.
+- [x] Tests with story and document sentinels verify those values stay out of events. Flagged security referrals and evaluation copies cause zero store calls.
+- [x] Search stays under the app-owned customer's namespace, returns only text, excludes this claim's summary and can return other summaries or facts for this customer. A second customer's results are unavailable to the model.
+- [x] A provider save failure logs a warning and preserves the decision and ordinary payment flow. A provider search failure returns a refusal the model can act on.
+- [x] A graph built with memory unset offers no memory tool and needs no AWS credentials. The evaluation graph omits the tool even when memory is configured, including when the evaluator is the improver.
+- [x] `npm run check` passes with 386 Python tests, 120 dashboard unit tests and 11 Playwright tests.
 
 ## Phase 5 — Show the work on the claim page
 

@@ -29,9 +29,11 @@ from agent import checkpoints, improver_api, measurements, models, run_execution
 ROUND_MODEL_CALLS = 30
 INSTRUCTIONS = """Your goal is an accurate, well-grounded and efficient claims agent,
 within the business objectives, comparison rule and spending limit in your results.
-The claim agent works from its instructions plus the policy wording and claims manual,
-the claim, its policy and the customer's earlier claims. Its tools search and read
-sections, calculate payouts, record decisions and pay approved claims.
+The claim agent works from its instructions, the claim, its policy and official
+history. Its tools look up terms, describe fields, read plans and claim rules,
+search reference facts and documents, read sections, calculate payouts and
+record decisions. For originals it can search customer memory when configured.
+The graph handles approved payments.
 Your changes generalize to claims and never name an individual claim. Only the allowed
 models and efforts are available. Handler approvals authorize testing; only the
 backend's held-out rule makes a configuration current. Rejection feedback is evidence

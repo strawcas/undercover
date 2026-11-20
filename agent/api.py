@@ -156,6 +156,18 @@ def start_claim(claim_id: str, thread_id: str) -> dict[str, Any]:
     return _call("POST", f"/claims/{claim_id}/start", json={"thread_id": thread_id})
 
 
+def list_pending_memory() -> list[str]:
+    return _call("GET", "/agent/pending-memory")
+
+
+def prepare_memory(claim_id: str, thread_id: str) -> None:
+    _call("POST", f"/claims/{claim_id}/prepare-memory", json={"thread_id": thread_id})
+
+
+def finish_memory(claim_id: str, thread_id: str) -> None:
+    _call("POST", f"/claims/{claim_id}/finish-memory", json={"thread_id": thread_id})
+
+
 def admit_claim(claim_id: str, run_id: str | None) -> dict[str, str]:
     return _call("POST", f"/claims/{claim_id}/admission", json={"run_id": run_id})
 

@@ -2,7 +2,7 @@
 
 import json
 import operator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Annotated, Any, TypedDict
 
 from langchain.tools import ToolRuntime, tool
@@ -10,7 +10,7 @@ from langchain_core.messages import AnyMessage, ToolMessage
 from langgraph.graph.message import add_messages
 from langgraph.types import Command
 
-from agent import api
+from agent import api, memory
 from agent.context_client import ContextClient
 from agent.gateway import Gateway
 from agent.screening import ScreenAttempt
@@ -31,6 +31,7 @@ class ClaimContext:
     gateway: Gateway | None = None
     knowledge: ContextClient | None = None
     configuration_version: int | None = None
+    memory_claim: dict[str, Any] = field(default_factory=dict)
 
 
 def keep_last(_: Any, new: Any) -> Any:
@@ -166,6 +167,8 @@ def record_decision(
 ) -> Command:
     """Record the decision on your claim, once, which ends your work on it."""
     context = runtime.context
+    if runtime.store is not None:
+        api.prepare_memory(context.claim_id, context.thread_id)
     claim = api.record_decision(
         context.claim_id,
         {
@@ -196,6 +199,18 @@ CLAIM_TOOLS = [
     calculate_payout,
     record_decision,
 ]
+
+
+@tool
+def search_memory(query: str, runtime: ToolRuntime[ClaimContext]) -> str:
+    """Search what we remember about this claim's customer from earlier claims."""
+    context = runtime.context
+    if runtime.store is None:
+        raise RuntimeError("The claim graph has no customer memory store")
+    return json.dumps(
+        memory.search(runtime.store, context.customer_id, context.claim_id, query)
+    )
+
 
 CONTEXT_TOOLS = [
     lookup_term,

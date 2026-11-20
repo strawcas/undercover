@@ -22,7 +22,7 @@ def test_cli_sends_the_key_loaded_after_import(monkeypatch, tmp_path):
     monkeypatch.setattr(console, "show_reports", lambda: None)
     monkeypatch.setattr(checkpoints, "checkpointer", lambda: nullcontext(None))
     monkeypatch.setattr(models, "build_model", lambda configuration: configuration)
-    monkeypatch.setattr(harness, "claim_graph", lambda model, *args: model)
+    monkeypatch.setattr(harness, "claim_graph", lambda model, *args, **options: model)
     configured = []
     monkeypatch.setattr(
         harness, "work_claim", lambda claim, graph: configured.append(graph)
@@ -31,10 +31,13 @@ def test_cli_sends_the_key_loaded_after_import(monkeypatch, tmp_path):
     call = backend_client.call
 
     def capture(backend, method, path, **request):
-        sent.append(agent_key.configured_key())
+        sent.append((path, agent_key.configured_key()))
         return call(backend, method, path, **request)
 
     monkeypatch.setattr(backend_client, "call", capture)
     runpy.run_module("agent.__main__", run_name="__main__")
-    assert sent == [TEST_AGENT_KEY]
+    assert sent == [
+        ("/claims/CLM-1001", TEST_AGENT_KEY),
+        ("/configurations/current", TEST_AGENT_KEY),
+    ]
     assert configured[0]["version"] == 1

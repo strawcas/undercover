@@ -32,6 +32,7 @@ def test_the_graph():
         "tools",
         "wait_for_sign_off",
         "pay",
+        "save_memory",
         "__end__",
     }
     edges = {(e.source, e.target, e.conditional) for e in graph.edges}
@@ -48,10 +49,14 @@ def test_the_graph():
         ("tools", "agent", True),
         ("tools", "wait_for_sign_off", True),
         ("tools", "pay", True),
+        ("tools", "save_memory", True),
         ("tools", "__end__", True),
         ("wait_for_sign_off", "pay", False),
         ("pay", "__end__", True),
         ("pay", "wait_for_sign_off", True),
+        ("save_memory", "wait_for_sign_off", True),
+        ("save_memory", "pay", True),
+        ("save_memory", "__end__", True),
     }
 
 

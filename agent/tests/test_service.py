@@ -16,7 +16,9 @@ def serve(monkeypatch):
     """Run the agent's service, without its lifespan, on a given claim graph."""
 
     def with_graph(graph):
-        monkeypatch.setattr(harness, "execution_graph", lambda version=None: graph)
+        monkeypatch.setattr(
+            harness, "execution_graph", lambda version=None, **options: graph
+        )
         return TestClient(service.app, headers=AGENT_HEADERS)
 
     return with_graph
@@ -122,7 +124,9 @@ def test_an_unknown_claim(serve):
 
 def test_sign_off_is_queued_before_current_worker_releases(client, monkeypatch):
     graph = graph_on(stub(*decide("approve", 1350)))
-    monkeypatch.setattr(harness, "execution_graph", lambda version=None: graph)
+    monkeypatch.setattr(
+        harness, "execution_graph", lambda version=None, **options: graph
+    )
     harness.work_claim("CLM-1002", graph)
     client.post("/api/claims/CLM-1002/sign-off", json={"handler_id": "HND-01"})
     assert harness.reserve_claim("CLM-1002")

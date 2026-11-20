@@ -75,7 +75,9 @@ def graph(monkeypatch):
     saver = InMemorySaver()
     monkeypatch.setattr(cli, "checkpointer", lambda: nullcontext(saver))
     monkeypatch.setattr(models, "build_model", lambda configuration: "model")
-    monkeypatch.setattr(cli, "claim_graph", lambda llm, s, configuration: (llm, s))
+    monkeypatch.setattr(
+        cli, "claim_graph", lambda llm, s, configuration, **options: (llm, s)
+    )
     return ("model", saver)
 
 

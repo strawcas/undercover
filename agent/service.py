@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from threading import Lock
 from typing import Any, Literal
@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from agent import api, checkpoints, improver, improver_api, run_execution
+from agent import api, checkpoints, improver, improver_api, memory, run_execution
 from agent.backend_client import Refused
 from agent.checkpoints import checkpointer
 from agent.console import show_reports
@@ -39,7 +39,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     with checkpointer() as saver:
         app.state.saver = saver
         await recover()
-        yield
+        recovery = asyncio.create_task(run_in_threadpool(memory.recover_pending))
+        try:
+            yield
+        finally:
+            recovery.cancel()
+            with suppress(asyncio.CancelledError):
+                await recovery
 
 
 app = FastAPI(title="UnderCover Agent", lifespan=lifespan)
@@ -93,6 +99,8 @@ def work_run(selection: dict[str, Any]) -> None:
         log.exception("The run stopped before it finished")
     finally:
         run_slot.release()
+    if selection["kind"] == "dispatch":
+        memory.recover_pending()
 
 
 def reserve(owner: str) -> None:

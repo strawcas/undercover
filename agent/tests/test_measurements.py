@@ -138,7 +138,7 @@ def test_payment_resume_does_not_wait_for_instructions_or_telemetry(
     elapsed = [0.0]
     monkeypatch.setattr(harness, "monotonic", lambda: elapsed[0])
 
-    def prepare(version=None):
+    def prepare(version=None, **options):
         elapsed[0] = 4.0
         graph = graph_on(stub(), saver)
         monkeypatch.setattr(graph, "get_state", unavailable)
@@ -194,7 +194,7 @@ def test_dispatch_attributes_its_measurements(monkeypatch):
     monkeypatch.setattr(
         harness,
         "execution_graph",
-        lambda version=None: graph_on(stub(record("refer", 0))),
+        lambda version=None, **options: graph_on(stub(record("refer", 0))),
     )
     run_id = api.start_run(configuration())["run_id"]
     dispatcher.dispatch(run_id, 1)

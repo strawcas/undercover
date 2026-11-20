@@ -19,8 +19,10 @@ class StubModel(GenericFakeChatModel):
     and keeps the prompts it was sent."""
 
     prompts: list[list[BaseMessage]] = []
+    tool_names: list[str] = []
 
     def bind_tools(self, tools, **kwargs):
+        self.tool_names = [tool.name for tool in tools]
         return self
 
     def _generate(self, messages, stop=None, run_manager=None, **kwargs):
