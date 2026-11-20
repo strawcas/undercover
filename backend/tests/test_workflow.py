@@ -25,14 +25,16 @@ def test_start_needs_a_thread_id(client):
 def test_steps(client):
     assert (
         client.post(
-            "/api/claims/CLM-1001/steps", json={"kind": "message", "content": "Hi"}
+            "/api/claims/CLM-1001/steps",
+            json={"kind": "message", "content": "Hi", "thread_id": "t-1"},
         ).status_code
         == 409
     )
     start(client, "CLM-1001")
     for kind, content in (("tool_call", "get_claim"), ("tool_result", "{}")):
         response = client.post(
-            "/api/claims/CLM-1001/steps", json={"kind": kind, "content": content}
+            "/api/claims/CLM-1001/steps",
+            json={"kind": kind, "content": content, "thread_id": "t-1"},
         )
         assert response.status_code == 200
     steps = client.get("/api/claims/CLM-1001/steps").json()
@@ -49,9 +51,19 @@ def test_steps(client):
 def test_step_kind_must_be_known(client):
     start(client, "CLM-1001")
     response = client.post(
-        "/api/claims/CLM-1001/steps", json={"kind": "thought", "content": "Hmm"}
+        "/api/claims/CLM-1001/steps",
+        json={"kind": "thought", "content": "Hmm", "thread_id": "t-1"},
     )
     assert response.status_code == 422
+
+
+def test_steps_require_the_active_attempt(client):
+    start(client, "CLM-1001")
+    response = client.post(
+        "/api/claims/CLM-1001/steps",
+        json={"kind": "message", "content": "Late result", "thread_id": "old"},
+    )
+    assert response.status_code == 409
 
 
 def test_decision_needs_a_claim_in_progress(client):

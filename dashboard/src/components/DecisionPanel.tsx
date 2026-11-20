@@ -1,5 +1,5 @@
-import type { Claim, Payment } from "../api";
-import { money, time } from "../format";
+import type { Claim, Payment, PayoutCalculation } from "../api";
+import { money, time, timestamp } from "../format";
 import { DecisionChip } from "./Chips";
 import { SignOffForm } from "./SignOffForm";
 
@@ -40,11 +40,57 @@ export function DecisionPanel({
           </div>
           <p className="section-ref">{decision.section}</p>
           <p className="reason">{decision.reason}</p>
-          <p className="small muted">Decided at {time(decision.decided_at)}</p>
+          <dl className="facts">
+            <div>
+              <dt>Decided by</dt>
+              <dd>{decision.decided_by}</dd>
+            </div>
+            <div>
+              <dt>Decided at</dt>
+              <dd>
+                <time dateTime={decision.decided_at}>
+                  {timestamp(decision.decided_at)}
+                </time>
+              </dd>
+            </div>
+            <div>
+              <dt>Manual version</dt>
+              <dd className="mono">{decision.manual_version}</dd>
+            </div>
+          </dl>
+          {decision.calculation && <Calculation value={decision.calculation} />}
         </>
       )}
       <PaymentStatus claim={claim} onSignedOff={onSignedOff} />
     </section>
+  );
+}
+
+function Calculation({ value }: Readonly<{ value: PayoutCalculation }>) {
+  return (
+    <>
+      <h3 id="payout-calculation">Payout calculation</h3>
+      <div className="table-scroll">
+        <table className="table" aria-labelledby="payout-calculation">
+          <thead>
+            <tr>
+              <th scope="col">Line</th>
+              <th scope="col" className="num">
+                Amount
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {value.calculation.map((line, index) => (
+              <tr key={`${String(index)}-${line.step}`}>
+                <td>{line.step}</td>
+                <td className="num mono">{money(line.amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 

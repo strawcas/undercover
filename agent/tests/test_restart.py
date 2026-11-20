@@ -86,7 +86,7 @@ def test_a_claim_stopped_partway_carries_on_from_its_last_step(client):
     assert earlier == ["get_claim", "get_policy"]
     steps = steps_of(client, "CLM-1001")
     assert steps[: len(before)] == before
-    assert len(steps) == len(before) + 4
+    assert len(steps) == len(before) + 5
     assert {s["thread_id"] for s in steps} == {claim["thread_id"]}
     assert "error" not in {s["kind"] for s in steps}
 

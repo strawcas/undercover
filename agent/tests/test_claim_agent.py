@@ -82,12 +82,14 @@ def test_approves_and_the_graph_pays_within_the_limit(client, caplog):
 
     security, *steps = steps_of(client, "CLM-1001")
     assert security["kind"] == "security"
-    assert [s["kind"] for s in steps] == ["tool_call", "tool_result"] * 5
+    assert [s["kind"] for s in steps] == ["tool_call", "tool_result"] * 5 + [
+        "tool_call"
+    ]
     assert steps[0]["content"] == "get_claim()"
     assert '"claim_id": "CLM-1001"' in steps[1]["content"]
     assert steps[8]["content"].startswith("record_decision(")
     assert steps[9]["content"].startswith('record_decision: {"claim_id": "CLM-1001"')
-    assert "pay_claim" not in "".join(s["content"] for s in steps)
+    assert steps[-1]["content"] == "pay_claim(amount=420.0)"
     assert {s["thread_id"] for s in steps} == {claim["thread_id"]}
 
 
@@ -150,6 +152,21 @@ def test_a_refused_decision_goes_back_to_the_model(client):
     assert isinstance(refusal, ToolMessage)
     assert refusal.text.startswith("Refused with status 422: ")
     assert "Claims manual section 14" in refusal.text
+    steps = steps_of(client, "CLM-1001")
+    [timeline_refusal] = [step for step in steps if step["kind"] == "refusal"]
+    assert timeline_refusal["content"]["source"] == "App"
+    assert timeline_refusal["content"]["reason"].startswith("Claims manual section 14")
+    decision_calls = [
+        step
+        for step in steps
+        if step["kind"] == "tool_call"
+        and step["content"].startswith("record_decision(")
+    ]
+    assert (
+        decision_calls[0]["step_id"]
+        < timeline_refusal["step_id"]
+        < decision_calls[1]["step_id"]
+    )
     assert claim_of(client, "CLM-1001")["payment"]["amount"] == 420.0
 
 
@@ -168,16 +185,22 @@ def test_reading_a_section_is_recorded(client):
         'read_section(document="claims_manual", number=9)',
     )
     assert steps[1][1].startswith('read_section: {"document": "claims_manual"')
-    assert steps[2] == ("reading", "Claims manual, section 9: Repeat claims")
+    kind, lookup = steps[2]
+    assert kind == "lookup"
+    assert lookup["subject"] == "Claims manual, section 9: Repeat claims"
+    assert lookup["sources"][0]["file"] == "claims_manual.md"
     assert steps[4] == (
-        "tool_result",
-        "read_section: Refused: Section 15 of the claims manual not found",
+        "refusal",
+        {
+            "source": "Context layer",
+            "reason": "Section 15 of the claims manual not found",
+        },
     )
     assert steps[5] == ("tool_call", 'search_documents(query="wild animal")')
     assert steps[6][1].startswith(
         'search_documents: {"matches": [{"document": "claims_manual"'
     )
-    assert [s for s in steps if s[0] == "reading"] == [steps[2]]
+    assert [s for s in steps if s[0] == "lookup"] == [steps[2], steps[7]]
 
 
 def test_a_section_with_bad_arguments_goes_back_to_the_model(client):
@@ -185,7 +208,65 @@ def test_a_section_with_bad_arguments_goes_back_to_the_model(client):
         call("read_section", document="handbook", number=1), *decide("refer", 0)
     )
     assert work("CLM-1004", model) == "CLM-1004  refer  $0.00"
-    assert "reading" not in {s["kind"] for s in steps_of(client, "CLM-1004")}
+    assert "lookup" not in {s["kind"] for s in steps_of(client, "CLM-1004")}
+
+
+def test_typed_timeline_steps_are_attempt_bound_and_memory_saves_need_receipts(
+    client,
+):
+    thread_id = "claim-timeline-attempt"
+    client.post(
+        "/api/claims/CLM-1001/start", json={"thread_id": thread_id}
+    ).raise_for_status()
+    base = "/api/claims/CLM-1001/steps"
+    forged = client.post(
+        base,
+        json={
+            "kind": "memory_save",
+            "content": {"messages": [{"role": "agent", "text": "unconfirmed"}]},
+            "thread_id": thread_id,
+        },
+    )
+    assert forged.status_code == 422
+    stale = client.post(
+        base,
+        json={
+            "kind": "lookup",
+            "content": {
+                "subject": "Policy wording",
+                "sources": [
+                    {
+                        "file": "policy_wording.md",
+                        "system": "Policies",
+                        "owner": "Legal",
+                        "reviewed": "2026-09-01",
+                    }
+                ],
+            },
+            "thread_id": "previous-attempt",
+        },
+    )
+    assert stale.status_code == 409
+    invalid_date = client.post(
+        base,
+        json={
+            "kind": "lookup",
+            "content": {
+                "subject": "Policy wording",
+                "sources": [
+                    {
+                        "file": "policy_wording.md",
+                        "system": "Policies",
+                        "owner": "Legal",
+                        "reviewed": "2026-99-01",
+                    }
+                ],
+            },
+            "thread_id": thread_id,
+        },
+    )
+    assert invalid_date.status_code == 422
+    assert steps_of(client, "CLM-1001") == []
 
 
 def test_working_out_the_payout(client):

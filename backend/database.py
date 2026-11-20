@@ -180,7 +180,7 @@ steps = Table(
     Column("claim_id", Text, ForeignKey("claims.claim_id"), nullable=False),
     Column("thread_id", Text, nullable=False),
     Column("kind", Text, nullable=False),
-    Column("content", Text, nullable=False),
+    Column("content", JSON, nullable=False),
     Column("created_at", Text, nullable=False),
 )
 rounds = Table(

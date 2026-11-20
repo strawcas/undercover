@@ -1,7 +1,6 @@
 """Build and execute the durable claim graph, with one saver per execution."""
 
 import contextvars
-import json
 import logging
 import uuid
 from collections.abc import Callable
@@ -40,6 +39,7 @@ from agent import (
     measurements,
     memory,
     models,
+    observations,
     screening,
 )
 from agent.backend_client import Refused
@@ -68,7 +68,6 @@ TOOLS = "tools"
 PAUSE = "wait_for_sign_off"
 PAY = "pay"
 SAVE_MEMORY = "save_memory"
-GATEWAY_REFUSAL = "Gateway refused: "
 
 
 claim_lock = Condition()
@@ -164,22 +163,17 @@ class TooManyModelCalls(Exception):
 def refusal(error: Exception) -> str:
     """Show the model why a tool was refused, and let any other error stop the agent."""
     if isinstance(error, Refused):
-        return f"Refused with status {error}"
+        detail = error.detail
+        if isinstance(detail, list):
+            detail = " ".join(
+                item["msg"].removeprefix("Value error, ") for item in detail
+            )
+        return f"{observations.APP_REFUSAL}{error.status_code}: {detail}"
     if isinstance(error, gateway.GatewayDenied):
-        return f"{GATEWAY_REFUSAL}{error}"
+        return f"{observations.GATEWAY_REFUSAL}{error}"
     if isinstance(error, ToolException):
-        return f"Refused: {error}"
+        return f"{observations.TOOL_REFUSAL}{error}"
     raise error
-
-
-def record_reply(claim_id: str, reply: BaseMessage) -> None:
-    """Record the model's reply on the claim: its text, then each tool it calls."""
-    if reply.text:
-        api.record_step(claim_id, "message", reply.text)
-    if isinstance(reply, AIMessage):
-        for call in reply.tool_calls:
-            args = ", ".join(f"{k}={json.dumps(v)}" for k, v in call["args"].items())
-            api.record_step(claim_id, "tool_call", f"{call['name']}({args})")
 
 
 def record_result(
@@ -207,13 +201,7 @@ def record_result(
         message = result
     else:
         message = cast(dict[str, Any], result.update)["messages"][0]
-    claim_id = context.claim_id
-    if message.status == "error" and message.text.startswith(GATEWAY_REFUSAL):
-        api.record_step(claim_id, "refusal", message.text)
-    else:
-        api.record_step(claim_id, "tool_result", f"{message.name}: {message.text}")
-    if message.artifact:
-        api.record_step(claim_id, *message.artifact)
+    observations.record_tool_result(context, request.tool_call["name"], message, via)
     return result
 
 
@@ -222,6 +210,7 @@ def call_model(
     runtime: Runtime[ClaimContext],
     llm: Runnable[LanguageModelInput, BaseMessage],
     instructions: Callable[[], SystemMessage],
+    via: gateway.Gateway | None,
 ) -> Command[str]:
     """Ask the model for its next step, up to CLAIM_MODEL_CALLS times in all, and
     record its reply on the claim."""
@@ -241,7 +230,7 @@ def call_model(
         runtime.context.claim_id,
         measurements.model_reply(reply, runtime.context.run_id),
     )
-    record_reply(runtime.context.claim_id, reply)
+    observations.record_reply(runtime.context, reply, via)
     return Command(
         update={"messages": [reply], "model_calls": 1},
         goto=TOOLS if isinstance(reply, AIMessage) and reply.tool_calls else END,
@@ -317,8 +306,12 @@ def pay(
     if runtime.context.signed_off_status is not None:
         return {"status": runtime.context.signed_off_status}
     context = runtime.context
+    amount = state["decision"]["payout"]
     try:
-        amount = state["decision"]["payout"]
+        observations.record_call(context, "pay_claim", {"amount": amount}, via)
+    except Exception as error:
+        log.warning("%s could not record the payment call: %s", context.claim_id, error)
+    try:
         claim = (
             api.pay_claim(context.claim_id, amount, via=via)
             if via
@@ -328,8 +321,10 @@ def pay(
         claim = api.hold_gateway_payment(context.claim_id, str(denied))
     except Refused as denied:
         if denied.status_code != HTTPStatus.FORBIDDEN or context.evaluation_id is None:
+            observations.record_refusal(context, "pay_claim", refusal(denied))
             raise
         claim = api.hold_evaluation_payment(context.claim_id)
+        observations.record_refusal(context, "pay_claim", refusal(denied))
     return {"status": claim["status"]}
 
 
@@ -396,7 +391,9 @@ def claim_graph(
     builder.add_node(RECORD_SCREEN, record_screen)
     builder.add_node(
         AGENT,
-        partial(call_model, llm=llm.bind_tools(tools), instructions=instructions),
+        partial(
+            call_model, llm=llm.bind_tools(tools), instructions=instructions, via=via
+        ),
         destinations=(SCREEN, RECORD_SCREEN, TOOLS, END),
     )
     builder.add_node(

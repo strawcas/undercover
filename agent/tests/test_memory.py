@@ -15,7 +15,7 @@ from langgraph.store.memory import InMemoryStore
 
 from agent import api, checkpoints, harness, memory, models, screening, service
 from agent.tests.queue_setup import leave_waiting
-from agent.tests.records import claim_of, latest
+from agent.tests.records import claim_of, latest, steps_of
 from agent.tests.stubs import calculate, call, graph_on, record, stub
 from backend.tests.run_requests import configuration
 
@@ -31,11 +31,12 @@ class Store(InMemoryStore):
         self.writes = []
         self.searches = []
         self.unavailable = False
+        self.fail_agent = False
         self.interrupt = False
 
     def put(self, namespace, key, value, index=None, **kwargs):
         message = value["message"]
-        if self.unavailable:
+        if self.unavailable or (self.fail_agent and message.type == "ai"):
             raise EndpointConnectionError(endpoint_url=SERVICE)
         if self.interrupt and message.type == "ai":
             raise KeyboardInterrupt
@@ -112,15 +113,62 @@ def test_saves_two_events_once_across_a_partial_save_and_sign_off(client, store)
     signed = client.post(f"/api/claims/{CLAIM}/sign-off").json()
     harness.carry_on(signed, graph)
     assert len(store.writes) == 3
+    [saved] = [
+        step for step in steps_of(client, CLAIM) if step["kind"] == "memory_save"
+    ]
+    assert {message["role"] for message in saved["content"]["messages"]} == {
+        "customer",
+        "agent",
+    }
 
 
-def test_search_skips_this_claim_and_any_other_customer(store):
+def test_search_skips_this_claim_and_any_other_customer(client, store):
     query = "earlier claims"
     model = stub(call("search_memory", query=query), record("decline", 0))
     harness.work_claim(CLAIM, graph_on(model))
     assert store.searches == [(("customers", CUSTOMER), query)]
     assert json.loads(model.prompts[-1][-1].text) == ["Customer fact", "Earlier claim"]
     assert "search_memory" in model.tool_names
+    [searched] = [
+        step for step in steps_of(client, CLAIM) if step["kind"] == "memory_search"
+    ]
+    assert searched["content"] == {
+        "query": query,
+        "results": ["Customer fact", "Earlier claim"],
+    }
+
+
+def test_confirmed_partial_memory_save_is_visible_until_recovery(client, store):
+    model = stub(calculate(1350), record("approve", 1350))
+    store.fail_agent = True
+    harness.work_claim(CLAIM, graph_on(model))
+    assert api.list_pending_memory() == [CLAIM]
+    [partial] = [
+        step for step in steps_of(client, CLAIM) if step["kind"] == "memory_save"
+    ]
+    assert partial["content"]["messages"] == [
+        {
+            "role": "customer",
+            "text": next(iter(store.events.values())).text,
+        }
+    ]
+
+    store.fail_agent = False
+    memory.recover_pending()
+    assert api.list_pending_memory() == []
+    saved = [step for step in steps_of(client, CLAIM) if step["kind"] == "memory_save"]
+    roles = [
+        message["role"] for step in saved for message in step["content"]["messages"]
+    ]
+    assert roles == ["customer", "agent"]
+    saved_count = len(saved)
+    write_count = len(store.writes)
+    memory.recover_pending()
+    assert (
+        len([step for step in steps_of(client, CLAIM) if step["kind"] == "memory_save"])
+        == saved_count
+    )
+    assert len(store.writes) == write_count
 
 
 @pytest.mark.parametrize(("decision", "payout"), [("decline", 0), ("approve", 1350)])

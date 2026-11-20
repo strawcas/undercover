@@ -7,16 +7,17 @@ The data behind UnderCover Travel Insurance, a fictional insurer. Everything her
 - `company.json`: company settings, including the initial $1,000 payout approval limit.
 - `improvement_settings.json`: initial business objectives, noise/tolerance, round budget and evaluation concurrency. Together with the approval limit these seed database-owned settings; senior handlers' later edits are audited there.
 - `allowed_models.json`: file-owned model identifiers, allowed reasoning efforts and numeric input/output prices in US dollars per million tokens. The dashboard lists these without editing them. An explicit `MODEL_NAME` seeds the free-model override as the sole zero-price entry at `default` effort.
-- `plans.json`: the three plans (Economy, Premium, First) with their limits, waiting periods and deductibles, and the three add-ons.
+- `../context/plans.yaml` supplies the three plans, their limits, waiting periods, deductibles and add-ons. `plans.json` is the original seed reference copy.
 - `policies.json`: one policy per trip, with the plan, the add-ons, the purchase date, the trip and the travelers.
 - `customers.json`: contact details and claim history, with the date and a one line summary of each earlier claim. This is personal data.
 - `handlers.json`: the claims handlers, their sign-in emails and permission to sign off payouts over the limit. Only Dana Whitfield has senior authority. Passwords and Supabase Auth users are managed outside the seed data.
 - `claims.json` provides the twenty-five original queue claims, each with the customer's story, items and supporting documents as text. The queue seed also includes CLM-1901.
 
-## The documents
+## Governance documents
 
-- `policy_wording.md`: the contract with the customer. Short enough to fit in a prompt.
-- `claims_manual.md`: the internal handling manual. Longer, and it holds rules the wording does not, such as the third claim in 12 months, losses to wild animals and meals without receipts.
+- `../context/policy_wording.md` is the versioned customer contract.
+- `../context/claims_manual.md` is the versioned claims handling manual. New decisions record which version was in force.
+- The local `policy_wording.md` and `claims_manual.md` copies are original seed references. The backend seeds document bodies, versions and numbered contents from `context/`. The context service provides section search and reads with file provenance.
 
 ## The evaluation set
 

@@ -1,10 +1,10 @@
 # Process
 
-`uv sync` and `npm install` at the repo root install everything, including a git pre-commit hook. `npm run dev` starts the backend, the agent's service and the dashboard, passing them `.env`. `npm run seed` rebuilds the database `npm run dev` uses, on Supabase when `DATABASE_URL` is in `.env`. The agent always needs `DATABASE_URL`, where it saves its progress.
+`uv sync` and `npm install` at the repo root install everything, including a git pre-commit hook. `npm run dev` starts the backend, agent service, context service and dashboard. `npm run seed` rebuilds the database used by dev, on Supabase when `DATABASE_URL` is in `.env`. The agent always needs `DATABASE_URL` for its checkpoints. The local context service needs only the governance files in its package.
 
 `npm run check` runs every check:
 
-- The backend imports in an isolated environment containing the locked `server` dependency group. uv uses its local cache for this check.
+- The backend and context server import in separate isolated environments containing the locked `server` and `context` groups. uv uses its local cache for these checks.
 - Python: ruff (lint and format), pyright, and pytest with 80% coverage
 - TypeScript: ESLint, Prettier, tsc, and vitest with 80% coverage
 - Playwright end-to-end tests
@@ -54,6 +54,10 @@ The checks show that the code works, but not that it is fit to merge. Every code
 - Never push.
 - Don't open `data/evals/` unless you're asked to.
 - Everything must work on Windows: write `package.json` scripts as `uv run` commands or `.mjs` files.
+
+## Context live verification
+
+Follow the final sequence in [PLAN_CONTEXT.md](PLAN_CONTEXT.md). Use the default model with `MODEL_NAME` unset and run the unsigned local context route with memory disabled. Preserve the environment and record the seed completion and run IDs. Reseed once, work CLM-1005 and CLM-1006, then run one N=25 dispatch and one five-claim evaluation of the evaluation set. Use Playwright MCP to inspect both originals' decision records and provenance. Report claim-agent and judge charges from the stored usage. Run the final offline suite with `.env` temporarily absent and restore it in a cleanup block.
 
 ## Secure live verification
 

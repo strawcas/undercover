@@ -82,50 +82,77 @@ def lookup(
     return knowledge.call(operation, **arguments)
 
 
-@tool
-def lookup_term(term: str, runtime: ToolRuntime[ClaimContext]) -> str:
+ObservedAnswer = tuple[str, tuple[api.StepKind, dict[str, Any]]]
+
+
+def sourced_answer(subject: str, answer: dict[str, Any]) -> ObservedAnswer:
+    """Return context to the model and its lookup sources to the timeline."""
+    if "source" in answer:
+        sources = [answer["source"]]
+    else:
+        matches = {hit["source"]["file"]: hit["source"] for hit in answer["matches"]}
+        sources = list(matches.values()) or answer["sources"]
+    step = {"subject": subject, "sources": sources}
+    return json.dumps(answer), ("lookup", step)
+
+
+@tool(response_format="content_and_artifact")
+def lookup_term(term: str, runtime: ToolRuntime[ClaimContext]) -> ObservedAnswer:
     """Find a policy term's definition and the sections it comes from."""
-    return json.dumps(lookup(runtime, "lookup_term", term=term))
+    return sourced_answer(f'Term "{term}"', lookup(runtime, "lookup_term", term=term))
 
 
-@tool
-def describe_fields(record: RecordName, runtime: ToolRuntime[ClaimContext]) -> str:
+@tool(response_format="content_and_artifact")
+def describe_fields(
+    record: RecordName, runtime: ToolRuntime[ClaimContext]
+) -> ObservedAnswer:
     """Describe the fields of a claim, policy or previous claim."""
-    return json.dumps(lookup(runtime, "describe_fields", record=record))
+    subject = f"Fields for {record.replace('_', ' ')}"
+    return sourced_answer(subject, lookup(runtime, "describe_fields", record=record))
 
 
-@tool
-def get_plan(plan: PlanName, runtime: ToolRuntime[ClaimContext]) -> str:
+@tool(response_format="content_and_artifact")
+def get_plan(plan: PlanName, runtime: ToolRuntime[ClaimContext]) -> ObservedAnswer:
     """Read one plan's limits, waiting periods, deductible and add-ons."""
-    return json.dumps(lookup(runtime, "get_plan", plan=plan))
+    return sourced_answer(
+        f"{plan.capitalize()} plan", lookup(runtime, "get_plan", plan=plan)
+    )
 
 
-@tool
-def get_claim_rules(runtime: ToolRuntime[ClaimContext]) -> str:
+@tool(response_format="content_and_artifact")
+def get_claim_rules(runtime: ToolRuntime[ClaimContext]) -> ObservedAnswer:
     """Read the rules claims operations applies when handling a claim."""
-    return json.dumps(lookup(runtime, "get_claim_rules"))
+    return sourced_answer("Claim rules", lookup(runtime, "get_claim_rules"))
 
 
-@tool
-def search_reference_data(query: str, runtime: ToolRuntime[ClaimContext]) -> str:
+@tool(response_format="content_and_artifact")
+def search_reference_data(
+    query: str, runtime: ToolRuntime[ClaimContext]
+) -> ObservedAnswer:
     """Find outside facts containing every word of a query."""
-    return json.dumps(lookup(runtime, "search_reference_data", query=query))
+    return sourced_answer(
+        f'Reference data search for "{query}"',
+        lookup(runtime, "search_reference_data", query=query),
+    )
 
 
-@tool
-def search_documents(query: str, runtime: ToolRuntime[ClaimContext]) -> str:
+@tool(response_format="content_and_artifact")
+def search_documents(query: str, runtime: ToolRuntime[ClaimContext]) -> ObservedAnswer:
     """Find the sections of the wording and the manual containing one word or phrase."""
-    return json.dumps(lookup(runtime, "search_documents", query=query))
+    return sourced_answer(
+        f'Document search for "{query}"',
+        lookup(runtime, "search_documents", query=query),
+    )
 
 
 @tool(response_format="content_and_artifact")
 def read_section(
     document: DocumentName, number: int, runtime: ToolRuntime[ClaimContext]
-) -> tuple[str, tuple[api.StepKind, str]]:
+) -> ObservedAnswer:
     """Read one section of the policy wording or the claims manual in full."""
     section = lookup(runtime, "read_section", document=document, number=number)
     read = f"{section['document_title']}, section {number}: {section['title']}"
-    return json.dumps(section), ("reading", read)
+    return sourced_answer(read, section)
 
 
 @tool
@@ -201,15 +228,14 @@ CLAIM_TOOLS = [
 ]
 
 
-@tool
-def search_memory(query: str, runtime: ToolRuntime[ClaimContext]) -> str:
+@tool(response_format="content_and_artifact")
+def search_memory(query: str, runtime: ToolRuntime[ClaimContext]) -> ObservedAnswer:
     """Search what we remember about this claim's customer from earlier claims."""
     context = runtime.context
     if runtime.store is None:
         raise RuntimeError("The claim graph has no customer memory store")
-    return json.dumps(
-        memory.search(runtime.store, context.customer_id, context.claim_id, query)
-    )
+    result = memory.search(runtime.store, context.customer_id, context.claim_id, query)
+    return json.dumps(result), ("memory_search", {"query": query, "results": result})
 
 
 CONTEXT_TOOLS = [

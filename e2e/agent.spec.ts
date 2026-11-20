@@ -20,10 +20,48 @@ test("the claim page shows the agent at work", async ({ page, request }) => {
   await post(request, "/api/claims/CLM-1003/steps", {
     kind: "tool_call",
     content: 'get_claim(claim_id="CLM-1003")',
+    thread_id: "e2e-1",
   });
   await post(request, "/api/claims/CLM-1003/steps", {
     kind: "tool_result",
     content: 'get_claim: {"claim_id":"CLM-1003"}',
+    thread_id: "e2e-1",
+  });
+  const lookup = {
+    kind: "lookup",
+    thread_id: "e2e-1",
+    content: {
+      subject: "Claims manual, section 14",
+      sources: [
+        {
+          file: "claims_manual.md",
+          system: "Claims operations",
+          owner: "Head of claims operations",
+          reviewed: "2026-09-01",
+        },
+      ],
+    },
+  };
+  await post(request, "/api/claims/CLM-1003/steps", lookup);
+  await post(request, "/api/claims/CLM-1003/steps", lookup);
+  await post(request, "/api/claims/CLM-1003/steps", {
+    kind: "refusal",
+    thread_id: "e2e-1",
+    content: {
+      source: "App",
+      reason: "Claims manual section 14 requires a calculation.",
+    },
+  });
+  await post(request, "/api/claims/CLM-1003/steps", {
+    kind: "memory_search",
+    thread_id: "e2e-1",
+    content: {
+      query: "Earlier baggage claims",
+      results: ["A previous baggage loss"],
+    },
+  });
+  await post(request, "/api/claims/CLM-1003/prepare-memory", {
+    thread_id: "e2e-1",
   });
   await expect(heading.getByText("In progress")).toBeVisible();
   await expect(page.locator(".steps li").first()).toContainText(
@@ -36,6 +74,11 @@ test("the claim page shows the agent at work", async ({ page, request }) => {
   await expect(
     page.getByText('get_claim: {"claim_id":"CLM-1003"}').first(),
   ).toBeVisible();
+  const context = page.getByRole("region", { name: "Context used" });
+  await expect(context.getByText("Claims manual, section 14")).toHaveCount(1);
+  await expect(context.getByText(/Head of claims operations/)).toBeVisible();
+  await expect(page.getByText("Refused by App")).toBeVisible();
+  await expect(page.getByText("A previous baggage loss")).toBeVisible();
 
   await decide(request, "CLM-1003", {
     decision: "approve",
@@ -47,15 +90,39 @@ test("the claim page shows the agent at work", async ({ page, request }) => {
     has: page.getByRole("heading", { name: "Decision" }),
   });
   await expect(decision.getByText("Approved")).toBeVisible();
+  await expect(
+    decision.getByText("UnderCover Agent (configuration 1)"),
+  ).toBeVisible();
+  await expect(decision.getByText("2026.2")).toBeVisible();
+  await expect(
+    decision.getByRole("table", { name: "Payout calculation" }),
+  ).toContainText("Less the deductible");
+  await post(request, "/api/claims/CLM-1003/finish-memory", {
+    thread_id: "e2e-1",
+    messages: [
+      { role: "customer", text: "Customer summary contents" },
+      { role: "agent", text: "Recorded approval contents" },
+    ],
+  });
+  await expect(page.getByText("Saved to memory")).toBeVisible();
+  await page.getByText("Agent decision", { exact: true }).click();
+  await expect(page.getByText("Recorded approval contents")).toBeVisible();
   await expect(heading.getByText("In progress")).toBeVisible();
   await post(request, "/api/claims/CLM-1003/payment", { amount: 500 });
   await post(request, "/api/claims/CLM-1003/steps", {
     kind: "message",
     content: "Approved and paid $500.00.",
+    thread_id: "e2e-1",
   });
   await expect(heading.getByText("Decided")).toBeVisible();
   await expect(decision.getByText("Paid $500.00")).toBeVisible();
   await expect(page.getByText("Approved and paid $500.00.")).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const widths = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    document: document.documentElement.scrollWidth,
+  }));
+  expect(widths.document).toBeLessThanOrEqual(widths.viewport);
 });
 
 test("a sign-off on the dashboard records a payment and the signer", async ({

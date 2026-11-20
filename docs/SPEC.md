@@ -11,9 +11,10 @@ UnderCover sells travel insurance on three plans: Economy, Premium and First. Ou
 We want an AI agent, the UnderCover Agent, to work the queue the way a handler does. For each claim it should:
 
 - read the claim, the customer's policy and claim history, and the sections of the policy wording and the claims manual it needs
+- use the context layer's definitions, plans, claim rules, field descriptions and outside facts as needed
 - approve, decline or refer the claim
 - work out the payout when it approves
-- explain the decision in two or three sentences, along with the relevant section of the policy
+- record the decision, payout, calculation for an approval, relevant sections, a reason in two or three sentences, who made the decision, the time and the claims manual's version
 
 Our goal is to handle claims straight through, as accurately as our handlers do.
 
@@ -29,7 +30,7 @@ Our goal is to handle claims straight through, as accurately as our handlers do.
 
 ## What the team needs to see
 
-- The queue and each claim in full, with its status, decision, reasons and work recorded step by step, including failed attempts and sections read.
+- The queue and each claim in full, with its complete decision, payout calculation and a timeline of tool calls, sourced lookups, memory searches and saves, refusals and failed attempts. Context used groups unique lookups by source file.
 - Controls to start a dispatch, its linked claims and progress, its own model cost and time, and a records-built summary naming held payouts and unresolved claims.
 - A Scoreboard to start evaluations on either labelled set and compare newest-first results: decision match, payout accuracy within a dollar, explanation grade, cost of mistakes, straight-through rate, model cost per claim, active time per claim and run elapsed time. Each result opens handler and agent decisions/reasons/references side by side, shows the explanation's F/C/B/A letter, numerical score and same-grounds/section checks, and links to copied claims. Judge cost is separate from claim-agent cost. Undecided copies count as referrals and receive F; unavailable judge results are excluded from the average.
 - A Configuration page showing the current claim-agent version, its instructions/model/reasoning effort, provenance, version history, changes and read-only document contents. Every dispatch and evaluation records the version it uses.
@@ -48,6 +49,8 @@ Every dashboard page has a clear header and consistent controls in light and dar
 
 - A payout over the configured approval limit ($1,000 initially) needs a senior handler's sign-off. The agent can approve a claim above the limit. Agent payment checks the current limit before looking up the claim, and a decision retains the limit recorded with it. An existing hold carries forward after a limit increase. A senior handler can settle an older unpaid approval blocked by a limit reduction. Held evaluation copies stay complete with payment held.
 - Decisions follow the policy wording and the claims manual. The wording comes first, and the manual says how to read it.
+- An approval uses the app's latest calculation for that attempt. The decision records the configuration version used by the UnderCover Agent, or the security check as maker of its own referrals.
+- Configured Gateway Policy covers the model's forwarded tools and graph payment. If the Gateway holds an original payout, a senior handler can settle it through the app.
 - Our handlers' own decisions on these claims are in `data/evals/`. We use them to check the agent's work. The agent must never see them.
 - Amounts are in US dollars.
 
@@ -59,7 +62,11 @@ Private calls between the backend and the agent service use the shared agent API
 
 ## Our records
 
-Everything is in `data/`, described in `data/README.md`: the claims queue, the policies, the customers, the plans, the handlers, the policy wording and the claims manual. The held-out claims in `data/evals/` are for checking the agent later and stay out of the queue.
+`data/` contains the queue, policies, customers, handlers and seed settings. The held-out claims in `data/evals/` support evaluation separately from the queue. [Seed data](../data/README.md)
+
+Data governance owns the read-only files under `context/`. Seeding takes the plans and the two versioned documents from those files. The agent reads definitions, plans, rules, reference data and document sections through the context service.
+
+When memory is configured, the agent remembers a cleared original claim by saving its summary, benefit, incident date and place, items and recorded decision as two events scoped to its customer. The story and supporting documents stay on the claim. The official history governs the repeat-claims rule. Customer memory is available to original-claim graphs.
 
 ## Not for now
 

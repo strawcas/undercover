@@ -27,7 +27,6 @@ log = logging.getLogger(__name__)
 CLAIM_FIELDS = ("summary", "claim_type", "incident_date", "incident_location", "items")
 DECISION_FIELDS = ("decision", "payout", "section", "reason")
 SEARCH_LIMIT = 5
-EVENTS_PER_DECISION = 2
 CREATE_EVENT = "provide-client-params.bedrock-agentcore.CreateEvent"
 REQUEST_LIMITS = Config(
     connect_timeout=3, read_timeout=5, retries={"total_max_attempts": 1}
@@ -109,12 +108,19 @@ def claim_fields(claim: dict[str, Any]) -> dict[str, Any]:
 def save_decision(
     store: BaseStore, claim: dict[str, Any], decision: dict[str, Any]
 ) -> None:
-    """Save both events and settle the durable receipt when they succeed."""
+    """Report acknowledged events so the app can settle the receipt."""
     saved = remember(store, claim, decision)
-    if len(saved) != EVENTS_PER_DECISION:
+    if not saved:
         return
+    messages = [
+        {
+            "role": "customer" if message.type == "human" else "agent",
+            "text": message.text,
+        }
+        for message in saved
+    ]
     try:
-        api.finish_memory(claim["claim_id"], claim["thread_id"])
+        api.finish_memory(claim["claim_id"], claim["thread_id"], messages)
     except (Refused, httpx.RequestError) as error:
         log.warning(
             "%s could not settle its memory receipt: %s", claim["claim_id"], error

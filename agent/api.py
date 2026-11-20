@@ -13,8 +13,17 @@ backend = backend_client.client()
 DecisionKind = Literal["approve", "decline", "refer"]
 APPROVE: DecisionKind = "approve"
 StepKind = Literal[
-    "tool_call", "tool_result", "message", "reading", "error", "security", "refusal"
+    "tool_call",
+    "tool_result",
+    "message",
+    "reading",
+    "error",
+    "security",
+    "refusal",
+    "lookup",
+    "memory_search",
 ]
+StepContent = str | dict[str, Any]
 Benefit = Literal[
     "trip_cancellation",
     "trip_interruption",
@@ -164,8 +173,14 @@ def prepare_memory(claim_id: str, thread_id: str) -> None:
     _call("POST", f"/claims/{claim_id}/prepare-memory", json={"thread_id": thread_id})
 
 
-def finish_memory(claim_id: str, thread_id: str) -> None:
-    _call("POST", f"/claims/{claim_id}/finish-memory", json={"thread_id": thread_id})
+def finish_memory(
+    claim_id: str, thread_id: str, messages: list[dict[str, str]]
+) -> None:
+    _call(
+        "POST",
+        f"/claims/{claim_id}/finish-memory",
+        json={"thread_id": thread_id, "messages": messages},
+    )
 
 
 def admit_claim(claim_id: str, run_id: str | None) -> dict[str, str]:
@@ -177,11 +192,14 @@ def stop_run(run_id: str) -> dict[str, Any]:
 
 
 def record_step(
-    claim_id: str, kind: StepKind, content: str, *, thread_id: str | None = None
+    claim_id: str,
+    kind: StepKind,
+    content: StepContent,
+    *,
+    thread_id: str,
 ) -> dict[str, Any]:
     body = {"kind": kind, "content": content}
-    if thread_id is not None:
-        body["thread_id"] = thread_id
+    body["thread_id"] = thread_id
     return _call("POST", f"/claims/{claim_id}/steps", json=body)
 
 

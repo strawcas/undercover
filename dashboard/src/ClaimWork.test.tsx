@@ -76,7 +76,16 @@ const approval: Decision = {
   payout: 420,
   section: "Section 5, Baggage and Personal Effects",
   reason: "The suitcase was lost by the carrier.",
+  calculation: {
+    payout: 420,
+    calculation: [
+      { step: "Covered expense", amount: 470 },
+      { step: "Less the deductible", amount: -50 },
+    ],
+  },
+  decided_by: "UnderCover Agent (configuration 1)",
   decided_at: decidedAt,
+  manual_version: "2026.2",
   signed_off_by: null,
   signed_off_at: null,
   gateway_hold: null,
@@ -152,18 +161,30 @@ it("says when a claim is left for a handler", async () => {
   ).toBeDefined();
 });
 
-it("shows the sections read once each, and failed attempts", async () => {
-  const read = (step_id: number, content: string): Step => ({
+it("groups lookups by source without repeating a lookup in Context used", async () => {
+  const source = {
+    file: "policy_wording.md",
+    system: "Published policy documents",
+    owner: "Legal",
+    reviewed: "2026-09-01",
+  };
+  const lookup = (step_id: number): Step => ({
     step_id,
     thread_id: "t-1",
-    kind: "reading",
-    content,
+    kind: "lookup",
+    content: { subject: "Policy wording, section 3", sources: [source] },
     created_at: decidedAt,
   });
   showClaim({ ...claim, attempts: 1 }, [
-    read(1, "Policy wording, section 3: Trip Delay"),
-    read(2, "Claims manual, section 10: Meals without receipts"),
-    read(3, "Policy wording, section 3: Trip Delay"),
+    lookup(1),
+    lookup(2),
+    {
+      step_id: 3,
+      thread_id: "t-1",
+      kind: "reading",
+      content: "Earlier read in the claims manual",
+      created_at: decidedAt,
+    },
     {
       step_id: 4,
       thread_id: "t-1",
@@ -172,16 +193,16 @@ it("shows the sections read once each, and failed attempts", async () => {
       created_at: decidedAt,
     },
   ]);
-  const heading = await screen.findByRole("heading", { name: "Sections read" });
-  const list = within(heading.parentElement ?? document.body).getAllByRole(
-    "listitem",
+  const used = within(
+    await screen.findByRole("region", { name: "Context used" }),
   );
-  expect(list.map((item) => item.textContent)).toEqual([
-    "Policy wording, section 3: Trip Delay",
-    "Claims manual, section 10: Meals without receipts",
-  ]);
-  const reading = screen.getAllByText("Read");
-  expect(reading).toHaveLength(3);
+  expect(used.getAllByText("policy_wording.md")).toHaveLength(1);
+  expect(used.getAllByText("Policy wording, section 3")).toHaveLength(1);
+  expect(
+    used.getByText(/Published policy documents · Legal · Reviewed/),
+  ).toBeDefined();
+  expect(screen.getAllByText("Looked up")).toHaveLength(2);
+  expect(screen.getByText("Earlier read in the claims manual")).toBeDefined();
   const failed = screen.getByText("Failed");
   expect(failed.className).toBe("chip step-failed");
   expect(failed.parentElement?.textContent).toBe(
@@ -189,12 +210,53 @@ it("shows the sections read once each, and failed attempts", async () => {
   );
 });
 
-it("lists no sections when the agent has read none", async () => {
+it("keeps the Context used panel hidden until there is a lookup", async () => {
   showClaim(approved, steps);
   expect(
     await screen.findByText('get_claim(claim_id="CLM-1002")'),
   ).toBeDefined();
-  expect(screen.queryByText("Sections read")).toBeNull();
+  expect(screen.queryByText("Context used")).toBeNull();
+});
+
+it("shows memory searches, saved events and Gateway refusals", async () => {
+  const fields = { thread_id: "t-1", created_at: decidedAt };
+  showClaim(approved, [
+    {
+      ...fields,
+      step_id: 1,
+      kind: "memory_search",
+      content: { query: "Previous claim", results: ["A passport loss"] },
+    },
+    {
+      ...fields,
+      step_id: 2,
+      kind: "memory_search",
+      content: { query: "Earlier delay", results: [] },
+    },
+    {
+      ...fields,
+      step_id: 3,
+      kind: "memory_save",
+      content: {
+        messages: [
+          { role: "customer", text: "Claim summary saved" },
+          { role: "agent", text: "Decision saved" },
+        ],
+      },
+    },
+    {
+      ...fields,
+      step_id: 4,
+      kind: "refusal",
+      content: { source: "Gateway", reason: "Policy refused the call" },
+    },
+  ]);
+  expect(await screen.findByText("A passport loss")).toBeDefined();
+  expect(screen.getByText("No earlier memories found.")).toBeDefined();
+  expect(screen.getByText("Claim summary saved")).toBeDefined();
+  expect(screen.getByText("Decision saved")).toBeDefined();
+  expect(screen.getByText("Refused by Gateway")).toBeDefined();
+  expect(screen.getByText("Policy refused the call")).toBeDefined();
 });
 
 it("says when the agent is working", async () => {
@@ -210,6 +272,15 @@ it("shows an approval and its payment", async () => {
   expect(panel.getAllByText("$420.00")).toHaveLength(2);
   expect(panel.getByText(approval.section)).toBeDefined();
   expect(panel.getByText(approval.reason)).toBeDefined();
+  expect(panel.getByText("UnderCover Agent (configuration 1)")).toBeDefined();
+  expect(panel.getByText("2026.2")).toBeDefined();
+  const calculation = within(
+    panel.getByRole("table", { name: "Payout calculation" }),
+  );
+  expect(
+    calculation.getByRole("row", { name: /Less the deductible/ }).textContent,
+  ).toContain("$50.00");
+  expect(calculation.getByText("$470.00")).toBeDefined();
   expect(panel.getByText(/^Paid/).textContent).toBe("Paid $420.00");
 });
 
@@ -236,7 +307,12 @@ it("shows a payment with its sign-off", async () => {
 it("shows a decline without a payout", async () => {
   showClaim({
     ...approved,
-    decision: { ...approval, decision: "decline", payout: 0 },
+    decision: {
+      ...approval,
+      decision: "decline",
+      payout: 0,
+      calculation: null,
+    },
     payment: null,
   });
   const panel = await decisionPanel();

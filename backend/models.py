@@ -1,18 +1,19 @@
 """The shapes of the backend's requests and responses."""
 
+from datetime import date
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 Status = Literal[
     "waiting", "in_progress", "waiting_for_sign_off", "decided", "left_for_handler"
 ]
 DecisionKind = Literal["approve", "decline", "refer"]
 SECTION_14 = "Claims manual section 14"
-OrdinaryStepKind = Literal[
-    "tool_call", "tool_result", "message", "reading", "error", "refusal"
+OrdinaryStepKind = Literal["tool_call", "tool_result", "message", "reading", "error"]
+StepKind = Literal[
+    OrdinaryStepKind, "security", "lookup", "memory_search", "memory_save", "refusal"
 ]
-StepKind = Literal[OrdinaryStepKind, "security"]
 Benefit = Literal[
     "trip_cancellation",
     "trip_interruption",
@@ -143,11 +144,45 @@ class Handler(BaseModel):
     can_approve_over_limit: bool
 
 
+class Source(BaseModel):
+    file: str
+    system: str
+    owner: str
+    reviewed: date
+
+
+class Lookup(BaseModel):
+    subject: str
+    sources: list[Source] = Field(min_length=1)
+
+
+class MemorySearch(BaseModel):
+    query: str
+    results: list[str]
+
+
+class MemoryMessage(BaseModel):
+    role: Literal["customer", "agent"]
+    text: str = Field(min_length=1)
+
+
+class MemorySave(BaseModel):
+    messages: list[MemoryMessage]
+
+
+class Refusal(BaseModel):
+    source: Literal["Gateway", "App", "Context layer", "Customer memory", "Tool"]
+    reason: str
+
+
+StepContent = str | Lookup | MemorySearch | MemorySave | Refusal
+
+
 class Step(BaseModel):
     step_id: int
     thread_id: str
     kind: StepKind
-    content: str
+    content: StepContent
     created_at: str
 
 
@@ -155,15 +190,50 @@ class StartRequest(BaseModel):
     thread_id: str = Field(min_length=1)
 
 
-class StepRequest(BaseModel):
+class FinishMemoryRequest(StartRequest):
+    messages: list[MemoryMessage] = Field(min_length=1, max_length=2)
+
+    @field_validator("messages")
+    @classmethod
+    def unique_roles(cls, messages: list[MemoryMessage]) -> list[MemoryMessage]:
+        """Accept each acknowledged event role at most once per request."""
+        if len({message.role for message in messages}) != len(messages):
+            raise ValueError("Provide one saved event per role")
+        return messages
+
+
+class StepRequest(StartRequest):
     kind: OrdinaryStepKind
     content: str = Field(min_length=1)
 
 
-class SecurityStepRequest(BaseModel):
+class SecurityStepRequest(StartRequest):
     kind: Literal["security"]
-    thread_id: str = Field(min_length=1)
     content: str = Field(min_length=1)
+
+
+class LookupStepRequest(StartRequest):
+    kind: Literal["lookup"]
+    content: Lookup
+
+
+class MemorySearchStepRequest(StartRequest):
+    kind: Literal["memory_search"]
+    content: MemorySearch
+
+
+class RefusalStepRequest(StartRequest):
+    kind: Literal["refusal"]
+    content: Refusal
+
+
+NewStepRequest = (
+    StepRequest
+    | SecurityStepRequest
+    | LookupStepRequest
+    | MemorySearchStepRequest
+    | RefusalStepRequest
+)
 
 
 class DecisionRequest(BaseModel):

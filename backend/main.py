@@ -54,15 +54,19 @@ from backend.models import (
     EvaluationDetail,
     EvaluationRequest,
     FailureRequest,
+    FinishMemoryRequest,
     GatewayHoldRequest,
     Handler,
+    MemorySave,
     ModelCallRequest,
+    NewStepRequest,
     Payment,
     PaymentRequest,
     Payout,
     Plans,
     Policy,
     PreviousClaim,
+    Refusal,
     Run,
     RunAdmission,
     RunClaimRequest,
@@ -72,7 +76,7 @@ from backend.models import (
     StartRequest,
     Status,
     Step,
-    StepRequest,
+    StepContent,
     WorkSliceRequest,
 )
 from backend.payout import needs_sign_off, work_out_payout
@@ -213,7 +217,7 @@ def to_claim(row: RowMapping | dict[str, Any]) -> Claim:
 
 
 def add_step(
-    db: Connection, claim_id: str, thread_id: str, kind: str, content: str
+    db: Connection, claim_id: str, thread_id: str, kind: str, content: StepContent
 ) -> Step:
     """Add one step of the agent's work to a claim."""
     query = (
@@ -222,7 +226,9 @@ def add_step(
             claim_id=claim_id,
             thread_id=thread_id,
             kind=kind,
-            content=content,
+            content=content
+            if isinstance(content, str)
+            else content.model_dump(mode="json"),
             created_at=now(),
         )
         .returning(steps)
@@ -242,7 +248,7 @@ def health() -> dict[str, str]:
     dependencies=shared_read,
 )
 def get_agent_openapi() -> dict[str, Any]:
-    """Describe the eight claim agent operations for the Gateway."""
+    """Describe the claim agent's app operations for the Gateway."""
     return agent_contract(app)
 
 
@@ -415,31 +421,50 @@ def prepare_memory(
     operation_id="finish_memory",
     dependencies=agent_only,
 )
-def finish_memory(claim_id: str, request: StartRequest, db: Database) -> dict[str, str]:
-    """Mark the original decision's memory receipt as saved."""
+def finish_memory(
+    claim_id: str, request: FinishMemoryRequest, db: Database
+) -> dict[str, str]:
+    """Record confirmed events and close the receipt when both are saved."""
     claim = original_for_memory(db, claim_id, request.thread_id)
     if claim["decision"] is None:
         raise HTTPException(409, "The claim has no recorded decision")
-    if claim["memory_pending"]:
+    if not claim["memory_pending"]:
+        return {"status": "saved"}
+    event_steps = db.execute(
+        select(steps.c.content).where(
+            steps.c.claim_id == claim_id,
+            steps.c.thread_id == request.thread_id,
+            steps.c.kind == "memory_save",
+        )
+    ).scalars()
+    recorded = {
+        message["role"] for content in event_steps for message in content["messages"]
+    }
+    fresh = [message for message in request.messages if message.role not in recorded]
+    if fresh:
+        add_step(
+            db, claim_id, request.thread_id, "memory_save", MemorySave(messages=fresh)
+        )
+    if recorded | {message.role for message in fresh} == {"customer", "agent"}:
         db.execute(
             update(claims)
             .where(claims.c.claim_id == claim_id)
             .values(memory_pending=False)
         )
-    return {"status": "saved"}
+        return {"status": "saved"}
+    return {"status": "pending"}
 
 
 @app.post(
     "/api/claims/{claim_id}/steps", operation_id="record_step", dependencies=agent_only
 )
-def record_step(
-    claim_id: str, request: StepRequest | SecurityStepRequest, db: Database
-) -> Step:
+def record_step(claim_id: str, request: NewStepRequest, db: Database) -> Step:
     """Record one step of the agent's work on a claim."""
     if isinstance(request, SecurityStepRequest):
         return record_security_step(db, claim_id, request)
-    improvement_budget.guard_claim_write(db, claim_id)
-    thread_id = find_claim(db, claim_id)["thread_id"]
+    claim = find_claim(db, claim_id, lock=True)
+    require_attempt(claim, request.thread_id)
+    thread_id = claim["thread_id"]
     if thread_id is None:
         raise HTTPException(409, f"Claim {claim_id} has not been started")
     return add_step(db, claim_id, thread_id, request.kind, request.content)
@@ -683,7 +708,7 @@ def hold_gateway_payment(
         claim_id,
         claim["thread_id"],
         "refusal",
-        f"Gateway refused: {request.reason}",
+        Refusal(source="Gateway", reason=request.reason),
     )
     set_status(db, claim_id, "waiting_for_sign_off")
     return to_claim(find_claim(db, claim_id))

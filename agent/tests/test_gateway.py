@@ -168,6 +168,22 @@ def test_signed_route_injects_ids_and_pays(client, stand_in):
     refusal = model.prompts[-2][-1].text
     assert refusal.startswith("Refused with status 422: ")
     assert "Claims manual section 14" in refusal
+    steps = steps_of(client, claim_id)
+    calls = [
+        step["content"].split("(", 1)[0]
+        for step in steps
+        if step["kind"] == "tool_call"
+    ]
+    assert calls == [name for name, _ in stand_in.calls]
+    [rejected] = [step for step in steps if step["kind"] == "refusal"]
+    assert rejected["content"]["source"] == "App"
+    assert rejected["content"]["reason"].startswith("Claims manual section 14")
+    search, read = [step["content"] for step in steps if step["kind"] == "lookup"]
+    assert {source["file"] for source in search["sources"]} == {
+        "policy_wording.md",
+        "claims_manual.md",
+    }
+    assert [source["file"] for source in read["sources"]] == ["policy_wording.md"]
     assert [name for name, _ in stand_in.calls] == [
         f"undercover-{target}___{operation}"
         for target, operation in (
@@ -260,7 +276,9 @@ def test_gateway_refusal_and_payment_hold(client, stand_in, evaluation):
         step for step in steps_of(client, claim_id) if step["kind"] == "refusal"
     ]
     assert len(refusals) == (1 if evaluation else 2)
-    assert all(step["content"] == f"Gateway refused: {DENIAL}" for step in refusals)
+    assert all(
+        step["content"] == {"source": "Gateway", "reason": DENIAL} for step in refusals
+    )
     signed = sign_off(client, claim_id, "HND-01")
     if evaluation:
         assert signed.status_code == 409

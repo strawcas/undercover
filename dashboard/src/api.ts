@@ -7,14 +7,8 @@ export const statuses = [
 ] as const;
 export type Status = (typeof statuses)[number];
 export type DecisionKind = "approve" | "decline" | "refer";
-export type StepKind =
-  | "tool_call"
-  | "tool_result"
-  | "message"
-  | "reading"
-  | "error"
-  | "security"
-  | "refusal";
+type TextStepKind =
+  "tool_call" | "tool_result" | "message" | "reading" | "error" | "security";
 
 export interface ClaimSummary {
   claim_id: string;
@@ -45,10 +39,18 @@ export interface Decision {
   payout: number;
   section: string;
   reason: string;
+  calculation: PayoutCalculation | null;
+  decided_by: string;
   decided_at: string;
+  manual_version: string;
   signed_off_by: string | null;
   signed_off_at: string | null;
   gateway_hold: string | null;
+}
+
+export interface PayoutCalculation {
+  calculation: { step: string; amount: number }[];
+  payout: number;
 }
 
 export interface Payment {
@@ -117,13 +119,30 @@ export interface Handler {
   can_approve_over_limit: boolean;
 }
 
-export interface Step {
+export interface ContextSource {
+  file: string;
+  system: string;
+  owner: string;
+  reviewed: string;
+}
+
+interface StepRecord {
   step_id: number;
   thread_id: string;
-  kind: StepKind;
-  content: string;
   created_at: string;
 }
+
+type StepDetails =
+  | { kind: TextStepKind; content: string }
+  | { kind: "lookup"; content: { subject: string; sources: ContextSource[] } }
+  | { kind: "memory_search"; content: { query: string; results: string[] } }
+  | {
+      kind: "memory_save";
+      content: { messages: { role: "customer" | "agent"; text: string }[] };
+    }
+  | { kind: "refusal"; content: { source: string; reason: string } };
+
+export type Step = StepRecord & StepDetails;
 
 export type RunStatus = "running" | "finished" | "stopped";
 export interface RunMember {
