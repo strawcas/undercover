@@ -11,7 +11,7 @@ import { Link, MemoryRouter } from "react-router";
 import { App } from "./App";
 import { AuthContext } from "./auth";
 import type { Claim, Decision, Step } from "./api";
-import { time } from "./format";
+import { timestamp } from "./format";
 import {
   Refusal,
   type Routes,
@@ -291,35 +291,43 @@ it("says the agent will pay an approval in progress", async () => {
 });
 
 it("shows a payment with its sign-off", async () => {
-  const signOff = { signed_off_by: "Dana Whitfield", signed_off_at: decidedAt };
+  const signedOffAt = "2026-09-30T17:06:16+00:00";
+  const signOff = {
+    signed_off_by: "Dana Whitfield",
+    signed_off_at: signedOffAt,
+  };
   showClaim({
     ...held,
     status: "decided",
     decision: { ...approval, payout: 1350, ...signOff },
-    payment: { amount: 1350, paid_at: decidedAt, ...signOff },
+    payment: { amount: 1350, paid_at: signedOffAt, ...signOff },
   });
   const panel = await decisionPanel();
   expect(panel.getByText(/^Paid/).textContent).toBe(
-    `Paid $1,350.00, signed off by Dana Whitfield at ${time(decidedAt)}`,
+    `Paid $1,350.00, signed off by Dana Whitfield, ${timestamp(signedOffAt)}`,
   );
 });
 
-it("shows a decline without a payout", async () => {
-  showClaim({
-    ...approved,
-    decision: {
-      ...approval,
-      decision: "decline",
-      payout: 0,
-      calculation: null,
-    },
-    payment: null,
-  });
-  const panel = await decisionPanel();
-  expect(panel.getByText("Declined")).toBeDefined();
-  expect(panel.queryByText("$0.00")).toBeNull();
-  expect(panel.queryByText(/paid/i)).toBeNull();
-});
+it.each([
+  ["decline", "Declined"],
+  ["refer", "Referred"],
+] as const)(
+  "shows the recorded zero payout for %s",
+  async (decision, label) => {
+    showClaim({
+      ...approved,
+      decision: { ...approval, decision, payout: 0, calculation: null },
+      payment: null,
+    });
+    const panel = await decisionPanel();
+    expect(panel.getByText(label)).toBeDefined();
+    expect(panel.getByText("$0.00")).toBeDefined();
+    expect(
+      panel.queryByRole("table", { name: "Payout calculation" }),
+    ).toBeNull();
+    expect(panel.queryByText(/^Paid/)).toBeNull();
+  },
+);
 
 it("shows each kind of step, with results folded", async () => {
   showClaim(approved, steps);
@@ -399,7 +407,7 @@ it("lets a handler sign off a held payment", async () => {
 
   const paid = await panel.findByText(/signed off by Dana Whitfield/);
   expect(paid.textContent).toBe(
-    `Paid $1,350.00, signed off by Dana Whitfield at ${time(decidedAt)}`,
+    `Paid $1,350.00, signed off by Dana Whitfield, ${timestamp(decidedAt)}`,
   );
   expect(await screen.findByText("Claim refresh unavailable")).toBeDefined();
   expect(panel.queryByRole("button", { name: "Sign off" })).toBeNull();

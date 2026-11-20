@@ -149,7 +149,7 @@ test("a sign-off on the dashboard records a payment and the signer", async ({
   await page.getByRole("button", { name: "Sign off" }).click();
   await expect(heading.getByText("Decided")).toBeVisible();
   await expect(
-    page.getByText(/^Paid \$1,350\.00, signed off by Dana Whitfield at /),
+    page.getByText(/^Paid \$1,350\.00, signed off by Dana Whitfield, /),
   ).toBeVisible();
   expect(await resumed(request)).not.toContain("CLM-1020");
 });

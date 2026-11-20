@@ -1,5 +1,5 @@
 import type { Claim, Payment, PayoutCalculation } from "../api";
-import { money, time, timestamp } from "../format";
+import { money, timestamp } from "../format";
 import { DecisionChip } from "./Chips";
 import { SignOffForm } from "./SignOffForm";
 
@@ -7,7 +7,7 @@ type SignOff = Pick<Payment, "signed_off_by" | "signed_off_at">;
 
 function whoAndWhen({ signed_off_by, signed_off_at }: SignOff): string | null {
   return signed_off_by && signed_off_at
-    ? `${signed_off_by} at ${time(signed_off_at)}`
+    ? `${signed_off_by}, ${timestamp(signed_off_at)}`
     : null;
 }
 
@@ -34,9 +34,7 @@ export function DecisionPanel({
         <>
           <div className="decision-line">
             <DecisionChip decision={decision.decision} />
-            {decision.decision === "approve" && (
-              <span className="payout mono">{money(decision.payout)}</span>
-            )}
+            <span className="payout mono">{money(decision.payout)}</span>
           </div>
           <p className="section-ref">{decision.section}</p>
           <p className="reason">{decision.reason}</p>
