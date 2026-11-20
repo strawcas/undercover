@@ -1,11 +1,12 @@
 """The UnderCover backend's API: one function for each operation the agent uses."""
 
+import json
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
-from agent import backend_client
+from agent import backend_client, gateway
 
 backend = backend_client.client()
 
@@ -13,7 +14,7 @@ DecisionKind = Literal["approve", "decline", "refer"]
 APPROVE: DecisionKind = "approve"
 DocumentName = Literal["policy_wording", "claims_manual"]
 StepKind = Literal[
-    "tool_call", "tool_result", "message", "reading", "error", "security"
+    "tool_call", "tool_result", "message", "reading", "error", "security", "refusal"
 ]
 Benefit = Literal[
     "trip_cancellation",
@@ -42,6 +43,15 @@ class RunStatus(StrEnum):
     RUNNING = "running"
     FINISHED = "finished"
     STOPPED = "stopped"
+
+
+class DecisionInput(TypedDict):
+    """The decision fields sent to the app."""
+
+    decision: DecisionKind
+    payout: float
+    section: str
+    reason: str
 
 
 LineKind = Literal[
@@ -90,15 +100,29 @@ def list_claims() -> list[dict[str, Any]]:
     return _call("GET", "/claims")
 
 
-def get_claim(claim_id: str) -> dict[str, Any]:
+def get_claim(claim_id: str, *, via: gateway.Gateway | None = None) -> dict[str, Any]:
+    if via:
+        return via.call(gateway.APP, "get_claim", claim_id=claim_id)
     return _call("GET", f"/claims/{claim_id}")
 
 
-def get_policy(policy_id: str) -> dict[str, Any]:
+def claim_text(claim_id: str, *, via: gateway.Gateway | None = None) -> str:
+    """Serialize the same claim consistently on either route."""
+    claim = get_claim(claim_id, via=via) if via else get_claim(claim_id)
+    return json.dumps(claim, ensure_ascii=False, sort_keys=True)
+
+
+def get_policy(policy_id: str, *, via: gateway.Gateway | None = None) -> dict[str, Any]:
+    if via:
+        return via.call(gateway.APP, "get_policy", policy_id=policy_id)
     return _call("GET", f"/policies/{policy_id}")
 
 
-def get_claim_history(customer_id: str) -> list[dict[str, Any]]:
+def get_claim_history(
+    customer_id: str, *, via: gateway.Gateway | None = None
+) -> list[dict[str, Any]]:
+    if via:
+        return via.call(gateway.APP, "get_claim_history", customer_id=customer_id)
     return _call("GET", f"/customers/{customer_id}/claims")
 
 
@@ -110,22 +134,37 @@ def get_configuration(version: int) -> dict[str, Any]:
     return _call("GET", f"/configurations/{version}")
 
 
-def search_documents(query: str) -> list[dict[str, Any]]:
+def search_documents(
+    query: str, *, via: gateway.Gateway | None = None
+) -> list[dict[str, Any]]:
+    if via:
+        return via.call(gateway.APP, "search_documents", query=query)
     return _call("GET", "/documents/search", params={"query": query})
 
 
-def read_section(document: DocumentName, number: int) -> dict[str, Any]:
+def read_section(
+    document: DocumentName, number: int, *, via: gateway.Gateway | None = None
+) -> dict[str, Any]:
+    if via:
+        return via.call(gateway.APP, "read_section", document=document, number=number)
     return _call("GET", f"/documents/{document}/sections/{number}")
 
 
 def calculate_payout(
-    claim_id: str, benefit: Benefit, lines: list[Line], paid_by_others: float
+    claim_id: str,
+    benefit: Benefit,
+    lines: list[Line],
+    paid_by_others: float,
+    *,
+    via: gateway.Gateway | None = None,
 ) -> dict[str, Any]:
     body = {
         "benefit": benefit,
         "lines": [line.model_dump() for line in lines],
         "paid_by_others": paid_by_others,
     }
+    if via:
+        return via.call(gateway.APP, "calculate_payout", claim_id=claim_id, **body)
     return _call("POST", f"/claims/{claim_id}/payout", json=body)
 
 
@@ -151,23 +190,29 @@ def record_step(
 
 
 def record_decision(
-    claim_id: str, decision: DecisionKind, payout: float, section: str, reason: str
+    claim_id: str, body: DecisionInput, *, via: gateway.Gateway | None = None
 ) -> dict[str, Any]:
-    body = {
-        "decision": decision,
-        "payout": payout,
-        "section": section,
-        "reason": reason,
-    }
+    if via:
+        return via.call(gateway.APP, "record_decision", claim_id=claim_id, **body)
     return _call("POST", f"/claims/{claim_id}/decision", json=body)
 
 
-def pay_claim(claim_id: str, amount: float) -> dict[str, Any]:
+def pay_claim(
+    claim_id: str, amount: float, *, via: gateway.Gateway | None = None
+) -> dict[str, Any]:
+    if via:
+        return via.call(gateway.APP, "pay_claim", claim_id=claim_id, amount=amount)
     return _call("POST", f"/claims/{claim_id}/payment", json={"amount": amount})
 
 
 def hold_evaluation_payment(claim_id: str) -> dict[str, Any]:
     return _call("POST", f"/claims/{claim_id}/hold-evaluation-payment")
+
+
+def hold_gateway_payment(claim_id: str, reason: str) -> dict[str, Any]:
+    return _call(
+        "POST", f"/claims/{claim_id}/hold-gateway-payment", json={"reason": reason}
+    )
 
 
 def fail_claim(claim_id: str, reason: str) -> dict[str, Any]:

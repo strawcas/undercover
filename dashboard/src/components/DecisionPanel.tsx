@@ -88,16 +88,24 @@ function HeldPayment({
   signedOff: string | null;
   onSignedOff: (paid: Claim) => void;
 }>) {
+  const heldReason = claim.decision?.gateway_hold ? (
+    <p>
+      The Gateway refused the payment of{" "}
+      <span className="mono">{money(payout)}</span>.
+    </p>
+  ) : (
+    <p>
+      The payment of <span className="mono">{money(payout)}</span> is over the
+      approval limit
+      {claim.evaluation_id ? "." : " and waits for a handler's sign-off."}
+    </p>
+  );
   return (
     <div className="sign-off">
       {signedOff ? (
         <p>Signed off by {signedOff}. The payout is ready to be recorded.</p>
       ) : (
-        <p>
-          The payment of <span className="mono">{money(payout)}</span> is over
-          the approval limit
-          {claim.evaluation_id ? "." : " and waits for a handler's sign-off."}
-        </p>
+        heldReason
       )}
       {claim.evaluation_id ? (
         <p>

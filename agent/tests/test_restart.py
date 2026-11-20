@@ -28,10 +28,10 @@ def fail_once(monkeypatch, module, name, error, carry_out=False):
     if asked, as a crash or a lost connection at that moment would."""
     function = getattr(module, name)
 
-    def then_fail(*args):
+    def then_fail(*args, **kwargs):
         monkeypatch.setattr(module, name, function)
         if carry_out:
-            function(*args)
+            function(*args, **kwargs)
         raise error
 
     monkeypatch.setattr(module, name, then_fail)
@@ -42,9 +42,9 @@ def calls_to(monkeypatch, name):
     calls = []
     function = getattr(api, name)
 
-    def count(*args):
+    def count(*args, **kwargs):
         calls.append(args)
-        return function(*args)
+        return function(*args, **kwargs)
 
     monkeypatch.setattr(api, name, count)
     return calls
@@ -69,9 +69,7 @@ class StopBeforeCheckpoint(InMemorySaver):
 
 def test_a_claim_stopped_partway_carries_on_from_its_last_step(client):
     saver = InMemorySaver()
-    stop_while_working(
-        "CLM-1001", saver, call("get_claim"), call("get_policy", policy_id="POL-2001")
-    )
+    stop_while_working("CLM-1001", saver, call("get_claim"), call("get_policy"))
     stopped = claim_of(client, "CLM-1001")
     assert (stopped["status"], stopped["attempts"]) == ("in_progress", 1)
     before = steps_of(client, "CLM-1001")

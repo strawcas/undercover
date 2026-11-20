@@ -22,4 +22,5 @@ def test_claim_tools_are_named_after_backend_operations(client):
 
 
 def test_a_claim_agent_can_only_act_on_its_own_claim():
-    assert all("claim_id" not in t.args for t in CLAIM_TOOLS)
+    ids = {"claim_id", "policy_id", "customer_id"}
+    assert all(ids.isdisjoint(t.args) for t in CLAIM_TOOLS)

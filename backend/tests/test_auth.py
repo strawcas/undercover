@@ -54,6 +54,7 @@ def test_route_inventory_requires_the_right_credential():
         "calculate_payout",
         "pay_claim",
         "hold_evaluation_payment",
+        "hold_gateway_payment",
         "fail_claim",
         "start_run",
         "stop_runs",

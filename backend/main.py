@@ -53,6 +53,7 @@ from backend.models import (
     EvaluationDetail,
     EvaluationRequest,
     FailureRequest,
+    GatewayHoldRequest,
     Handler,
     ModelCallRequest,
     Payment,
@@ -584,6 +585,41 @@ def hold_evaluation_payment(claim_id: str, db: Database) -> Claim:
         raise HTTPException(409, "Only an unpaid evaluation approval can be held")
     if claim["status"] == "in_progress":
         set_status(db, claim_id, "waiting_for_sign_off")
+    return to_claim(find_claim(db, claim_id))
+
+
+@app.post(
+    "/api/claims/{claim_id}/hold-gateway-payment",
+    operation_id="hold_gateway_payment",
+    dependencies=agent_only,
+)
+def hold_gateway_payment(
+    claim_id: str, request: GatewayHoldRequest, db: Database
+) -> Claim:
+    """Hold an unpaid approval after the Gateway refused payment."""
+    find_claim(db, claim_id, lock=True)
+    claim = find_claim(db, claim_id)
+    if claim["decision"] != "approve" or claim["paid_at"] is not None:
+        raise HTTPException(409, "Only an unpaid approval can be held by the Gateway")
+    if claim["status"] == "waiting_for_sign_off" and claim["gateway_hold"] is not None:
+        return to_claim(claim)
+    if claim["status"] != "in_progress":
+        raise HTTPException(
+            409, "Only an in-progress approval can be held by the Gateway"
+        )
+    db.execute(
+        update(decisions)
+        .where(decisions.c.claim_id == claim_id)
+        .values(gateway_hold=request.reason)
+    )
+    add_step(
+        db,
+        claim_id,
+        claim["thread_id"],
+        "refusal",
+        f"Gateway refused: {request.reason}",
+    )
+    set_status(db, claim_id, "waiting_for_sign_off")
     return to_claim(find_claim(db, claim_id))
 
 

@@ -79,6 +79,7 @@ const approval: Decision = {
   decided_at: decidedAt,
   signed_off_by: null,
   signed_off_at: null,
+  gateway_hold: null,
 };
 
 const approved: Claim = {
@@ -274,6 +275,16 @@ it("shows new steps and the decision as the agent works", async () => {
   await act(() => vi.advanceTimersByTimeAsync(REFRESH_MS));
   expect(screen.getByText("Approved and paid.")).toBeDefined();
   expect(screen.getAllByText("Decided").length).toBeGreaterThan(0);
+});
+
+it("identifies a Gateway hold and offers senior sign-off", async () => {
+  showClaim({
+    ...held,
+    decision: { ...approval, payout: 1350, gateway_hold: "Policy refused" },
+  });
+  const panel = await decisionPanel();
+  expect(panel.getByText(/The Gateway refused the payment of/)).toBeDefined();
+  expect(panel.getByRole("button", { name: "Sign off" })).toBeDefined();
 });
 
 it("lets a handler sign off a held payment", async () => {

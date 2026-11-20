@@ -1,5 +1,9 @@
 # Status
 
+Context phase 1 routes model tools and graph payment through signed AgentCore Gateway MCP when configured. Model tool inputs are scoped to the current claim, policy and customer. Screening, its referrals and bookkeeping use the direct keyed app client. An explicit Gateway payment denial records the hold and refusal together. Dana can settle the original through the app even when the agent service is offline.
+
+The phase review led to a fresh claim read after obtaining the PostgreSQL lock for a Gateway hold, a shared app refusal type, and test isolation from inherited Gateway settings. Signed MCP and direct-route stand-ins verify the claim inputs, refusals, payment and senior settlement. `npm run check` passed with 362 Python tests, 120 dashboard unit tests and 11 Playwright tests. The new schema is exercised on disposable databases. The business reseed and live runs are scheduled after phase 5.
+
 Secure phase 4 builds the dashboard with `npm run build` and serves it alongside the API. Mangum exports `backend.main.handler` with startup disabled. The Lambda transaction-pooler path uses a fresh psycopg connection per request and selects the schema within the transaction.
 
 The shell and root `.env` builds were warning-free and embedded the two public Supabase values. A bundle check verified the agent credential and private sentinels were absent. The Linux x86-64 Python 3.12 archive at `build/undercover-secure-lambda.zip` was 20,312,670 bytes (20.31 MB), with 13 native Linux libraries. The isolated server-group import passed without a model credential and preserved the project virtual environment. The deployment phase check passed with 352 Python tests (96.67% coverage), 119 dashboard unit tests and 11 Playwright tests.

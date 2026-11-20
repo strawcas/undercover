@@ -8,7 +8,9 @@ Status = Literal[
     "waiting", "in_progress", "waiting_for_sign_off", "decided", "left_for_handler"
 ]
 DecisionKind = Literal["approve", "decline", "refer"]
-OrdinaryStepKind = Literal["tool_call", "tool_result", "message", "reading", "error"]
+OrdinaryStepKind = Literal[
+    "tool_call", "tool_result", "message", "reading", "error", "refusal"
+]
 StepKind = Literal[OrdinaryStepKind, "security"]
 DocumentName = Literal["policy_wording", "claims_manual"]
 Benefit = Literal[
@@ -45,6 +47,7 @@ class Decision(BaseModel):
     decided_at: str
     signed_off_by: str | None
     signed_off_at: str | None
+    gateway_hold: str | None
 
 
 class Payment(BaseModel):
@@ -189,6 +192,10 @@ class DecisionRequest(BaseModel):
 
 class PaymentRequest(BaseModel):
     amount: float = Field(gt=0, description="The approved payout in US dollars")
+
+
+class GatewayHoldRequest(BaseModel):
+    reason: str = Field(min_length=1, description="The Gateway's payment refusal")
 
 
 class Plan(BaseModel):

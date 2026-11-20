@@ -13,7 +13,7 @@ BACKEND_URL = os.getenv("UNDERCOVER_API", "http://127.0.0.1:8000")
 class Refused(Exception):
     """The backend refused an operation with a status code and explanation."""
 
-    def __init__(self, status_code: int, detail: str) -> None:
+    def __init__(self, status_code: int, detail: str | list[dict[str, Any]]) -> None:
         super().__init__(f"{status_code}: {detail}")
         self.status_code, self.detail = status_code, detail
 

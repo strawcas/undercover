@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import select, update
 
 from backend import main
@@ -182,6 +183,19 @@ def test_over_the_limit_waits_for_sign_off(client):
         "A payout over $1,000.00 needs a handler's sign-off"
     )
     assert client.get("/api/claims/CLM-1002").json()["payment"] is None
+
+
+def test_gateway_hold_requires_the_agent_key_and_an_unpaid_approval(client):
+    claim_id = "CLM-1001"
+    path = f"/api/claims/{claim_id}/hold-gateway-payment"
+    body = {"reason": "Policy denied the payment"}
+    assert TestClient(main.app).post(path, json=body).status_code == 401
+    assert client.post(path, json=body).status_code == 409
+    start(client, claim_id)
+    assert client.post(path, json=body).status_code == 409
+    assert decide(client, claim_id, "approve", 420).status_code == 200
+    assert pay(client, claim_id, 420).status_code == 200
+    assert client.post(path, json=body).status_code == 409
 
 
 def test_limit_is_checked_before_looking_up_the_claim(client):

@@ -154,6 +154,7 @@ decisions = Table(
     Column("reason", Text, nullable=False),
     Column("decided_at", Text, nullable=False),
     Column("approval_limit", Float, nullable=False),
+    Column("gateway_hold", Text),
     Column("signed_off_by", Text),
     Column("signed_off_at", Text),
 )
@@ -294,6 +295,7 @@ claim_view = (
         decisions.c.reason,
         decisions.c.decided_at,
         decisions.c.approval_limit,
+        decisions.c.gateway_hold,
         select(settings.c.payout_approval_limit)
         .scalar_subquery()
         .label("current_limit"),

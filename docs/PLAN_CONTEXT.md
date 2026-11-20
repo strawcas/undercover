@@ -1,0 +1,118 @@
+# Plan for the context layer, customer memory and Gateway
+
+This build has five phases. The claim agent will use the same tools on the laptop and through AgentCore Gateway. The backend will validate and keep complete decisions, and handlers will be able to see the sources the agent used on the claim page. [Context brief](CONTEXT.md)
+
+For consistency with the course, read the Week 3 Day 3 notebook without running its cells. The notebook deploys the app and context layer, creates the Gateway and Memory, and runs the agent against them. The brief takes precedence where they differ. The build verifies the deployment contract locally. The notebook remains the deployment and teardown procedure. [Week 3 Day 3 notebook](../labs/week3day3.ipynb)
+
+## Design
+
+| Owner | Responsibility and dependencies |
+| --- | --- |
+| `agent/tools.py` and `agent/harness.py` | Keep one model-facing tool set, bind claim, policy and customer identity from the app's claim record, and keep the pinned configuration and run kind in runtime context. The graph owns screening, decision completion, memory saving and payment. Supabase remains its checkpointer. |
+| `agent/api.py` and `agent/backend_client.py` | Own the app's operation paths and shared authenticated HTTP transport. Use this path for direct app tools, screening and its referral, claim and run bookkeeping, and configuration reads. The improver keeps its separate API on the shared transport. |
+| Agent MCP clients | Give the signed Gateway route and unsigned local context route one module each. Share the streamable HTTP invocation, response decoding and synchronous bridge between them. Keep AWS signing and target-name mapping at the Gateway boundary. Read route and memory settings when building a claim graph so the CLI sees the settings it loads from `.env`. |
+| `context/` | Load the seven governance files into a read-only catalog. Own section indexing, source metadata and the seven MCP tools. Both local Uvicorn and the Lambda handler serve the same catalog. This package is independent of the backend and agent. |
+| Backend decision and payout operations | Keep payout math in `backend/payout.py`. The app owns the latest calculation for the current attempt, validates and commits the decision, and settles payments and senior sign-offs. Its agent-only Gateway hold operation records why the payout is held. |
+| Agent memory integration | Attach `AgentCoreMemoryStore` to eligible graphs. Keep the event allowlist, write identity and customer namespace rules in one place. The graph drives writes and offers read-only search to the model on eligible claims. |
+| Dashboard | Use `dashboard/src/api.ts` for typed decisions and steps. Extend the claim page's existing polling and sign-off components. The browser groups recorded lookups for display and presents the backend's decision and payment facts. |
+
+The model's goals are a well-grounded decision, the correct payout, and a plain-language reason a handler can review. It can draw on the claim, its policy and official history, the context layer's definitions, plans, rules, reference data and documents, and earlier memories when available. Policy wording takes precedence over the manual, and official claim history governs repeat claims. The graph and app enforce required ordering, scopes and validation. The prompt ends with both documents' numbered contents listings from the database, as it does today.
+
+The design keeps one owner for each client and operation, uses `ToolRuntime`, `ToolNode` and `StateGraph` for execution, and uses request models and SQLAlchemy transactions for validation and persistence. The current tree uses `backend/agent_contract.py` for the Gateway contract, keeps the improver's instructions in `agent/improver.py`, and renders Sections read inside `StepList.tsx`. [Code standards](CODE_STANDARDS.md)
+
+For each phase, run the checks, get a fresh independent code review, fix merge blockers, update `STATUS.md`, tick off the verified criteria here and commit before starting the next phase. Use isolated seeded databases and service stand-ins for phase checks. The two phase-level `CLM-1001` CLI checks use a stub model on disposable data to preserve the brief's single business reseed and final paid run order. [Process](PROCESS.md)
+
+## Phase 1 — Route claim tools through the Gateway
+
+Route model tools and graph payment at graph construction. With `UNDERCOVER_GATEWAY_URL`, use streamable HTTP and sign every request for `bedrock-agentcore` with the AWS CLI credential chain and region. Map the app tools to `undercover-app___<operation>`. On the direct route, use the app's existing API-key client. The document tools use the app in this phase and move to the context target in Phase 2. Both routes give the model the same tool names, schemas and claim text. Get the bound policy and customer IDs from the claim already fetched by the app's trusted execution path. Keep `pay_claim` in the graph and keep screening and its referral on the direct app path.
+
+Normalize refusals from app tool responses and Gateway Policy errors into model tool refusals with their reasons. Identify the source before recording the step. Use a synchronous bridge that preserves the caller's Python 3.12 event loop, including on the main thread. A configured Gateway remains the tool and payment route when a call fails.
+
+For a Gateway Policy denial of graph payment, log the refusal and call a private app bookkeeping operation. Under the existing claim lock, transition an approved, unpaid, in-progress claim to waiting for sign-off and persist the Gateway hold reason. An already recorded hold is safe to replay. Reuse the existing senior settlement transaction and graph pause, and let an evaluation copy finish held under the existing evaluation rules. Show that the Gateway refused payment on the claim page. The app's limit checks still govern ordinary approvals and payments.
+
+- [x] A stand-in Gateway receives target-prefixed app calls, including graph payment. The test verifies SigV4 on streamable HTTP with fake temporary credentials, the configured region and service, and that bookkeeping, screening, version reads and the security referral use the keyed app client.
+- [x] The two routes expose matching model tool schemas. The model supplies no claim, policy or customer ID. Both routes produce identical `get_claim` text, matching the claim text used for screening.
+- [x] A Python 3.12 regression exercises repeated MCP calls and verifies that the caller's event loop is intact for a subsequent Lambda invocation.
+- [x] App refusals reach the model with their reasons on both routes. A Gateway Policy denial becomes a distinct recorded refusal and the model can continue. Transport and other MCP failures retain ordinary error handling.
+- [x] With a raised app approval limit, a Gateway-denied payout leaves an approved original waiting for sign-off with no payment and the Gateway explanation. Dana's sign-off pays exactly once, with the agent service offline. Tests cover an unauthorized hold request, invalid claim states, replay, and a held evaluation copy without sign-off.
+- [x] The CLI startup path for `uv run -m agent CLM-1001` works against a disposable app with the Gateway setting absent and a stub model. The claim reaches a decision through the direct route. A separate test sets the Gateway URL after module import and observes the signed route at graph construction.
+- [x] `npm run check` passes.
+
+## Phase 2 — Serve governance data from the context layer
+
+Use FastMCP at `/mcp` with stateless streamable HTTP and JSON responses. Load the YAML and Markdown once per process. Split Markdown at numbered headings and use front matter as metadata. Return the filename, system, owner and review date with results, including a source on each document-search match. Give each tool a one-line description and required inputs. Preserve the seven source files as supplied by data governance.
+
+| Tool | Behavior to verify against the supplied files |
+| --- | --- |
+| `lookup_term(term)` | Match terms case-insensitively. Return the definition and policy references, or the glossary's known terms for an unknown term. |
+| `describe_fields(record)` | Return field definitions for `claim`, `policy` or `previous_claim`. |
+| `get_plan(plan)` | Return the chosen plan's limits, waiting periods, deductible and applicable benefits, and the add-ons. Support `economy`, `premium` and `first`. |
+| `get_claim_rules()` | Return claims operations' rules, including filing, look-back, repeat claims and meals without receipts. |
+| `search_reference_data(query)` | Match every query word case-insensitively and return matching facts with their topics. |
+| `search_documents(query)` | Preserve the current case-insensitive phrase search over titles and text, with excerpts and each match's document source. |
+| `read_section(document, number)` | Return one numbered section and its source, with a tool refusal for a section that does not exist. |
+
+Run `uv run -m context` at `http://127.0.0.1:8006/mcp` and add it to `npm run dev`. Direct claim tools use `UNDERCOVER_CONTEXT` or the local default. On the Gateway route, use `undercover-context___<operation>`. Let the Lambda handler build a fresh MCP app per invocation over the preloaded catalog so the lifespan works across requests. Accept the Function URL host in that handler and retain local host protections on Uvicorn. Package `context/` without tests, plus its locked Linux Python 3.12 dependencies. The Lambda entry point is `context.server.handler` behind a Function URL with `AWS_IAM` and no environment variables.
+
+At seed time, load the payout plans from `context/plans.yaml` and both document bodies and versions from their Markdown files. Read YAML in the backend's seed path using PyYAML, with the dependency present in the project and server group. Keep the approval limit sourced from `data/company.json`. Keep database-backed prompt contents and remove the app's document search and read operations. The app's Lambda package continues to build and run with its current folders and environment. Its runtime reads document records from the database.
+
+- [ ] MCP tests list and call all seven tools against the governance files. They verify required schemas, source metadata, case-insensitive matches, multiple query words, no-match behavior and an unknown term. Document tests check stable numbering, titles, excerpts and an MCP tool error with a specific reason for a missing section. Front matter appears only as metadata.
+- [ ] One process invokes the exported Lambda handler twice with Function URL events and the Function URL host. `tools/list` and the following `tools/call` both succeed and use the same preloaded catalog. The packaged context can import and serve those requests without the app or agent.
+- [ ] `npm run check:context` imports the context server in its own offline, locked, isolated uv environment with only the `context` group. `npm run check` includes it alongside the existing server import, and Python lint, type, test and coverage configuration includes `context/`.
+- [ ] A disposable seed stores the plan data, both document versions and the original approval limit. The pinned response ends with the two numbered contents listings. A packaged app import and a seeded-database request work with `context/` absent from the app package.
+- [ ] `GET /api/agent/openapi.json` exposes exactly `get_claim`, `get_policy`, `get_claim_history`, `calculate_payout`, `record_decision` and `pay_claim`. The removed document routes and private bookkeeping are outside the contract, and the required-input and operation-description checks pass.
+- [ ] With `npm run dev` running on Windows, the claim agent reads context on the unsigned direct route. Tests cover the default address and an override loaded at graph construction. A Gateway stand-in serves the same context tool inputs and results, including a refused read.
+- [ ] `npm run check` passes.
+
+## Phase 3 — Enforce a complete decision
+
+Persist the latest successful `calculate_payout` result for the active claim thread. Keep the calculation write and decision's lookup under the same claim-locking convention so decisions use a committed calculation from their own attempt. Allow payout previews on claims without an active attempt without storing them as decision evidence. On approval, compare the requested payout with the stored payout in cents and copy the lines and total into the immutable decision record. A decline or referral has a null calculation. Preserve the existing decision and payment replay behavior.
+
+Make `decided_by` a required app input. Set it to the UnderCover Agent with the pinned configuration version, or to the security check for its own referrals. Validate blank or whitespace-only reason, section or maker, approvals with no payable cent, and nonzero declines/referrals before claim lookup. For a missing or mismatched calculation on an approval, return 422 with what the agent needs to correct. Every completeness refusal names claims manual section 14. Keep `calculation`, `decided_by`, `decided_at` and `manual_version` on the record under the dictionary's names. Read the manual version from the documents table when writing a new decision and retain sign-off attribution through payment.
+
+- [ ] Backend tests exercise every 422, including missing, blank and whitespace-only reason, section and maker, approvals with payouts that round to zero, and nonzero declines and referrals. Invalid request bodies get the same section 14 reply for an existing or unknown claim. A rejected decision leaves no decision or payment.
+- [ ] An approval with no current calculation, only a previous attempt's calculation, or a mismatched payout gets a 422 that identifies the problem. Recalculating and recording the latest matching payout succeeds. The resulting claim contains the original calculation lines and total, the versioned maker, the UTC decision time and manual version from the seed.
+- [ ] A decline and a direct security referral have the correct makers, zero payout and null calculations. The security referral stays outside configuration attribution. Replaying a decision or completing a senior sign-off preserves the original decision details.
+- [ ] With a stub model, section 14 refusals are readable on both tool routes and the model can correct and resubmit the decision. `decided_by` is required in the app Gateway contract and absent from the model's tool inputs.
+- [ ] Shared backend and end-to-end approval helpers provide matching calculation evidence and a maker while preserving expected payouts. End-to-end setup uses one `emergency_medical` expense for the target payout plus the plan deductible, read from the initial calculation. Backend fixtures may insert matching evidence directly. Agent stub scenarios that approve exercise the real calculation tool.
+- [ ] After seeding a disposable test database, the CLI path for `CLM-1001` records a complete decision with a stub model. `npm run check` passes.
+
+## Phase 4 — Remember earlier claims for the same customer
+
+Add `langgraph-checkpoint-aws` and use `AgentCoreMemoryStore` in the AWS CLI's region when `UNDERCOVER_MEMORY_ID` is set. Appropriate claim graphs receive the store and `search_memory(query)` at construction. Standalone and dispatch claims can use it. All evaluations, including improver evaluations, use graphs with memory disabled. Search under `/customers/<customer_id>` using the claim's app-owned identity, return memory text, and filter out the current claim's summary using its namespace. The deployment's Semantic strategy stores facts under `/customers/{actorId}/facts/`, and Summary stores each claim's summary under `/customers/{actorId}/claims/{sessionId}/`.
+
+Add a checkpointed graph step after a model-recorded decision and before a payout or sign-off wait. Save two events using the customer ID as actor and the claim ID as session. The customer event contains summary, benefit claimed, incident date and place, and claimed items. The agent event contains decision, payout, section and reason. Stories and supporting documents stay on the claim. A flagged screen referral goes directly to completion. A normal model-recorded referral is eligible to save.
+
+Use a stable write identity per recorded decision and event role so resuming a partially completed step does not duplicate a remote event. Verify the installed store's write behavior during implementation. If the store ignores the key as described in the brief, supply the same stable `clientToken` on each replay through the memory adapter's event write. Use a stand-in to exercise the provider request and a replay after a partial save. [AgentCore CreateEvent API](https://docs.aws.amazon.com/bedrock-agentcore/latest/APIReference/API_CreateEvent.html)
+
+Update `backend/instructions/claim.md` with the available sources and their roles, including official claim history for repeat claims. Update the tool-list sentence in the current improver instructions in `agent/improver.py` to describe the new context tools and memory's availability outside evaluations.
+
+- [ ] A stand-in store sees two correctly attributed, allowlisted events for a model-recorded original decision, including a held approval that has yet to be paid. Resuming the same decision, including across a partial save and later sign-off, leaves one event per role.
+- [ ] Tests with story and document sentinels verify those values stay out of events. Flagged security referrals and evaluation copies cause zero store calls.
+- [ ] Search stays under the app-owned customer's namespace, returns only text, excludes this claim's summary and can return other summaries or facts for this customer. A second customer's results are unavailable to the model.
+- [ ] A provider save failure logs a warning and preserves the decision and ordinary payment flow. A provider search failure returns a refusal the model can act on.
+- [ ] A graph built with memory unset offers no memory tool and needs no AWS credentials. The evaluation graph omits the tool even when memory is configured, including when the evaluator is the improver. Direct dev operation with memory off is also verified in the final live sequence.
+- [ ] `npm run check` passes.
+
+## Phase 5 — Show the work on the claim page
+
+Use typed `lookup`, `memory_search`, `memory_save` and `refusal` steps across backend validation, `agent/api.py` and `dashboard/src/api.ts`. Extend the existing tool-result artifact path to record structured lookup subjects and their sources. Record memory search results and the event content actually saved. Label refusals by source so a section 14 refusal and the later tool call are easy to follow. Log graph payment and model tool calls under their Gateway names on the Gateway route, with the direct names for local calls and the local name for memory search. Give repeated lookups individual timeline entries.
+
+Replace Sections read with Context used. Group lookups by filename, display source system, owner and review date once per group, and list each lookup once per file. Show the decision's maker, time, manual version, section, reason, payout and each calculation line alongside the existing payment and sign-off state. Reuse the existing claim-page layout, date and currency formatting, and accessible styles. Keep older reading steps legible in the timeline. [Brand standards](BRAND.md)
+
+- [ ] Agent and API tests cover each new step kind, including provenance for a search spanning both documents, direct and Gateway call names, memory search and successful saves, Gateway payment and tool refusals, and a section 14 refusal followed by a new attempt to record the decision.
+- [ ] Dashboard unit and Playwright tests cover all step kinds, source grouping, deduplication, decision details and an itemized approval calculation. Polling adds new steps and updates the decision without a reload. Held originals retain the appropriate sign-off controls, Gateway holds name their cause, and held copies offer no sign-off.
+- [ ] Playwright MCP checks a stand-in claim in light and dark mode, with readable refusals, sources and calculation lines and local scrolling at a narrow width.
+- [ ] `SPEC.md`, `TECH_STACK.md`, `PROCESS.md`, `CODE_STANDARDS.md`, `STATUS.md` and `data/README.md` describe the new product. Deployment documents both Lambda packages, the context IAM endpoint, the two Gateway targets, `UNDERCOVER_GATEWAY_URL`, `UNDERCOVER_CONTEXT`, `UNDERCOVER_MEMORY_ID` and the AWS CLI credentials and region when Gateway or Memory is enabled. Build and import checks cover the Windows dev workflow. Historical plans and the original `data/` copies retain their contents.
+- [ ] `npm run build` and `npm run check` pass.
+
+### Final live verification
+
+Run these checks after all five phases are built and the whole branch has been reviewed against `main`. Preserve `.env` and clear `MODEL_NAME`, `UNDERCOVER_GATEWAY_URL` and `UNDERCOVER_MEMORY_ID` in the live file and launching shell. Confirm the default local context address or its local override. Use the configured database, OpenRouter and Dana's existing Auth account. Keep evidence of the single reseed and run IDs so an interrupted check can continue from its last completed run.
+
+- [ ] Run `npm run seed` once and `npm run dev`. Verify 26 waiting originals, an empty Scoreboard, the direct context route and no memory tool. Standalone and dispatch records use `openai/gpt-6-luna` at low effort for adjudication.
+- [ ] Run `uv run -m agent CLM-1005` and then `uv run -m agent CLM-1006`. Dana opens both claim pages through Playwright MCP and sees plain tool names, lookups with sources, Context used and complete decision records, including the line-by-line calculation on each approval. Check the results against the app records.
+- [ ] Start one dispatch at N=25 for the remaining originals. Verify membership, end states, held payouts, recorded refusals and run totals. Verify the flagged original is referred by the security check. Record any unresolved original as reported by the app.
+- [ ] Start one tiny run of the evaluation set. Verify five copied claims with preserved outcomes and steps, a complete Scoreboard entry, and unchanged originals. Record claim-agent and judge spend for the evaluation separately.
+- [ ] Report the two CLI costs, the dispatch cost, the evaluation's claim and judge costs and the combined recorded cost. State whether any provider costs were unavailable. Record outcomes and any unverified criteria in this plan and `STATUS.md`.
+- [ ] Run the final `npm run check` with `.env` temporarily absent and restore the original file byte for byte even if a check fails. Record the final suite and review results.

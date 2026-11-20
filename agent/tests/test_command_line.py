@@ -9,6 +9,8 @@ from agent import __main__ as cli
 from agent import checkpoints, models
 from agent.backend_client import Refused
 from agent.models import build_model
+from agent.tests.records import claim_of
+from agent.tests.stubs import decide, stub
 
 
 class FakePool:
@@ -105,6 +107,14 @@ def test_model_name(monkeypatch):
     free = build_model({"model": "openrouter/free", "reasoning_effort": "default"})
     assert free.model_name == "openrouter/free"
     assert free.reasoning_effort is None
+
+
+def test_command_line_decides_a_claim_on_the_direct_route(client, monkeypatch):
+    monkeypatch.delenv("UNDERCOVER_GATEWAY_URL", raising=False)
+    monkeypatch.setattr(cli, "checkpointer", lambda: nullcontext(InMemorySaver()))
+    monkeypatch.setattr(models, "build_model", lambda _: stub(*decide("approve", 420)))
+    cli.main(["CLM-1001"])
+    assert claim_of(client, "CLM-1001")["payment"]["amount"] == 420
 
 
 def test_command_line_requires_a_claim_id(graph):

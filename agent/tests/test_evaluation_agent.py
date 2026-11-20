@@ -26,8 +26,8 @@ def test_service_works_copies_with_no_labels_and_clears_held_threads(
     def build(version=None):
         llm = stub(
             call("get_claim"),
-            call("get_policy", policy_id="POL-2001"),
-            call("get_claim_history", customer_id="CUS-3001"),
+            call("get_policy"),
+            call("get_claim_history"),
             call("search_documents", query="delay"),
             call("read_section", document="policy_wording", number=1),
             call("calculate_payout", benefit="trip_delay", lines=[], paid_by_others=0),

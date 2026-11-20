@@ -50,7 +50,8 @@ def test_the_graph():
         ("tools", "pay", True),
         ("tools", "__end__", True),
         ("wait_for_sign_off", "pay", False),
-        ("pay", "__end__", False),
+        ("pay", "__end__", True),
+        ("pay", "wait_for_sign_off", True),
     }
 
 
@@ -58,8 +59,8 @@ def test_approves_and_the_graph_pays_within_the_limit(client, caplog):
     caplog.set_level(logging.INFO, logger="agent")
     model = stub(
         call("get_claim"),
-        call("get_policy", policy_id="POL-2001"),
-        call("get_claim_history", customer_id="CUS-3001"),
+        call("get_policy"),
+        call("get_claim_history"),
         record("approve", 420.0),
     )
     assert work("CLM-1001", model) == "CLM-1001  approve  $420.00"
@@ -77,7 +78,7 @@ def test_approves_and_the_graph_pays_within_the_limit(client, caplog):
     assert security["kind"] == "security"
     assert [s["kind"] for s in steps] == ["tool_call", "tool_result"] * 4
     assert steps[0]["content"] == "get_claim()"
-    assert steps[1]["content"].startswith('get_claim: {"claim_id": "CLM-1001"')
+    assert '"claim_id": "CLM-1001"' in steps[1]["content"]
     assert steps[6]["content"].startswith("record_decision(")
     assert steps[7]["content"].startswith('record_decision: {"claim_id": "CLM-1001"')
     assert "pay_claim" not in "".join(s["content"] for s in steps)
@@ -270,11 +271,11 @@ def test_a_provider_error_puts_the_claim_back_in_the_queue(client):
 def test_a_tool_that_breaks_stops_the_agent_rather_than_telling_the_model(
     client, monkeypatch
 ):
-    def broken(policy_id):
+    def broken(policy_id, *, via=None):
         raise RuntimeError("The backend is unreachable")
 
     monkeypatch.setattr(api, "get_policy", broken)
-    model = stub(call("get_policy", policy_id="POL-2001"), *decide("refer", 0))
+    model = stub(call("get_policy"), *decide("refer", 0))
     report = work("CLM-1001", model)
     assert report == (
         "CLM-1001  failed: RuntimeError: The backend is unreachable, back in the queue"

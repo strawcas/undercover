@@ -11,6 +11,7 @@ from langgraph.graph.message import add_messages
 from langgraph.types import Command
 
 from agent import api
+from agent.gateway import Gateway
 from agent.screening import ScreenAttempt
 
 
@@ -23,6 +24,9 @@ class ClaimContext:
     run_id: str | None = None
     signed_off_status: str | None = None
     evaluation_id: str | None = None
+    policy_id: str = ""
+    customer_id: str = ""
+    gateway: Gateway | None = None
 
 
 def keep_last(_: Any, new: Any) -> Any:
@@ -46,33 +50,35 @@ class ClaimState(TypedDict):
 @tool
 def get_claim(runtime: ToolRuntime[ClaimContext]) -> str:
     """Get your claim in full: the story, the items claimed and the documents."""
-    return json.dumps(api.get_claim(runtime.context.claim_id))
+    return api.claim_text(runtime.context.claim_id, via=runtime.context.gateway)
 
 
 @tool
-def get_policy(policy_id: str) -> str:
-    """Get a policy: the plan, add-ons, purchase date, trip and travelers."""
-    return json.dumps(api.get_policy(policy_id))
+def get_policy(runtime: ToolRuntime[ClaimContext]) -> str:
+    """Get your claim's policy: its plan, add-ons, purchase date, trip and travelers."""
+    context = runtime.context
+    return json.dumps(api.get_policy(context.policy_id, via=context.gateway))
 
 
 @tool
-def get_claim_history(customer_id: str) -> str:
-    """Get a customer's earlier claims, with the outcome and the amount paid."""
-    return json.dumps(api.get_claim_history(customer_id))
+def get_claim_history(runtime: ToolRuntime[ClaimContext]) -> str:
+    """Get this customer's earlier claims, with the outcomes and amounts paid."""
+    context = runtime.context
+    return json.dumps(api.get_claim_history(context.customer_id, via=context.gateway))
 
 
 @tool
-def search_documents(query: str) -> str:
+def search_documents(query: str, runtime: ToolRuntime[ClaimContext]) -> str:
     """Find the sections of the wording and the manual containing one word or phrase."""
-    return json.dumps(api.search_documents(query))
+    return json.dumps(api.search_documents(query, via=runtime.context.gateway))
 
 
 @tool(response_format="content_and_artifact")
 def read_section(
-    document: api.DocumentName, number: int
+    document: api.DocumentName, number: int, runtime: ToolRuntime[ClaimContext]
 ) -> tuple[str, tuple[api.StepKind, str]]:
     """Read one section of the policy wording or the claims manual in full."""
-    section = api.read_section(document, number)
+    section = api.read_section(document, number, via=runtime.context.gateway)
     read = f"{section['document_title']}, section {number}: {section['title']}"
     return json.dumps(section), ("reading", read)
 
@@ -92,7 +98,11 @@ def calculate_payout(
 ) -> str:
     """Work out the payout on your claim with UnderCover's payout rules."""
     claim_id = runtime.context.claim_id
-    return json.dumps(api.calculate_payout(claim_id, benefit, lines, paid_by_others))
+    return json.dumps(
+        api.calculate_payout(
+            claim_id, benefit, lines, paid_by_others, via=runtime.context.gateway
+        )
+    )
 
 
 @tool
@@ -105,7 +115,11 @@ def record_decision(
 ) -> Command:
     """Record the decision on your claim, once, which ends your work on it."""
     claim_id = runtime.context.claim_id
-    claim = api.record_decision(claim_id, decision, payout, section, reason)
+    claim = api.record_decision(
+        claim_id,
+        {"decision": decision, "payout": payout, "section": section, "reason": reason},
+        via=runtime.context.gateway,
+    )
     message = ToolMessage(json.dumps(claim), tool_call_id=runtime.tool_call_id)
     update = {
         "messages": [message],

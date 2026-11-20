@@ -9,6 +9,17 @@ from backend.main import app
 
 
 @pytest.fixture(autouse=True)
+def local_tool_settings(monkeypatch):
+    """Require tests to opt into stand-in Gateway, context and memory settings."""
+    for name in (
+        "UNDERCOVER_GATEWAY_URL",
+        "UNDERCOVER_CONTEXT",
+        "UNDERCOVER_MEMORY_ID",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def screen(monkeypatch):
     """Clear ordinary test claims without a provider call; return the real checker."""
     original = screening.check

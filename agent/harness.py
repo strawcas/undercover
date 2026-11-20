@@ -5,6 +5,7 @@ import json
 import logging
 import uuid
 from collections.abc import Callable
+from dataclasses import replace
 from functools import cache, partial
 from http import HTTPStatus
 from threading import Condition
@@ -31,7 +32,7 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
 from langgraph.types import Command, interrupt
 
-from agent import api, checkpoints, measurements, models, screening
+from agent import api, checkpoints, gateway, measurements, models, screening
 from agent.backend_client import Refused
 from agent.tools import CLAIM_TOOLS, ClaimContext, ClaimState
 
@@ -51,6 +52,7 @@ AGENT = "agent"
 TOOLS = "tools"
 PAUSE = "wait_for_sign_off"
 PAY = "pay"
+GATEWAY_REFUSAL = "Gateway refused: "
 
 
 claim_lock = Condition()
@@ -144,6 +146,8 @@ def refusal(error: Exception) -> str:
     """Show the model why a tool was refused, and let any other error stop the agent."""
     if isinstance(error, Refused):
         return f"Refused with status {error}"
+    if isinstance(error, gateway.GatewayDenied):
+        return f"{GATEWAY_REFUSAL}{error}"
     if isinstance(error, ToolException):
         return f"Refused: {error}"
     raise error
@@ -162,16 +166,23 @@ def record_reply(claim_id: str, reply: BaseMessage) -> None:
 def record_result(
     request: ToolCallRequest,
     execute: Callable[[ToolCallRequest], ToolMessage | Command],
+    *,
+    via: gateway.Gateway | None,
 ) -> ToolMessage | Command:
     """Run a tool and record its result on the claim, then any step it gives as its
     artifact, such as a section it read."""
-    result = execute(request)
+    context = cast(ClaimContext, request.runtime.context)
+    runtime = replace(request.runtime, context=replace(context, gateway=via))
+    result = execute(replace(request, runtime=runtime))
     if isinstance(result, ToolMessage):
         message = result
     else:
         message = cast(dict[str, Any], result.update)["messages"][0]
-    claim_id = cast(ClaimContext, request.runtime.context).claim_id
-    api.record_step(claim_id, "tool_result", f"{message.name}: {message.text}")
+    claim_id = context.claim_id
+    if message.status == "error" and message.text.startswith(GATEWAY_REFUSAL):
+        api.record_step(claim_id, "refusal", message.text)
+    else:
+        api.record_step(claim_id, "tool_result", f"{message.name}: {message.text}")
     if message.artifact:
         api.record_step(claim_id, *message.artifact)
     return result
@@ -248,7 +259,13 @@ def record_screen(state: ClaimState, runtime: Runtime[ClaimContext]) -> dict[str
     )
     if flagged:
         claim = api.record_decision(
-            context.claim_id, "refer", 0, screening.SECTION, reason
+            context.claim_id,
+            {
+                "decision": "refer",
+                "payout": 0,
+                "section": screening.SECTION,
+                "reason": reason,
+            },
         )
         return {"decision": claim["decision"], "status": claim["status"]}
     return {}
@@ -262,18 +279,37 @@ def after_screen(state: ClaimState) -> str:
     return END if result["instructions_found"] else AGENT
 
 
-def pay(state: ClaimState, runtime: Runtime[ClaimContext]) -> dict[str, Any]:
+def pay(
+    state: ClaimState, runtime: Runtime[ClaimContext], *, via: gateway.Gateway | None
+) -> dict[str, Any]:
     """Preserve a recorded sign-off outcome or request an ordinary payout."""
     if runtime.context.signed_off_status is not None:
         return {"status": runtime.context.signed_off_status}
     context = runtime.context
     try:
-        claim = api.pay_claim(context.claim_id, state["decision"]["payout"])
-    except Refused as refusal:
-        if refusal.status_code != HTTPStatus.FORBIDDEN or context.evaluation_id is None:
+        amount = state["decision"]["payout"]
+        claim = (
+            api.pay_claim(context.claim_id, amount, via=via)
+            if via
+            else api.pay_claim(context.claim_id, amount)
+        )
+    except gateway.GatewayDenied as denied:
+        claim = api.hold_gateway_payment(context.claim_id, str(denied))
+    except Refused as denied:
+        if denied.status_code != HTTPStatus.FORBIDDEN or context.evaluation_id is None:
             raise
         claim = api.hold_evaluation_payment(context.claim_id)
     return {"status": claim["status"]}
+
+
+def after_payment(state: ClaimState, runtime: Runtime[ClaimContext]) -> str:
+    """Pause an original when the Gateway held its payout."""
+    if (
+        state["status"] == api.Status.WAITING_FOR_SIGN_OFF
+        and runtime.context.evaluation_id is None
+    ):
+        return PAUSE
+    return END
 
 
 def after_tools(state: ClaimState) -> str:
@@ -301,6 +337,7 @@ def claim_graph(
         value = configuration or api.get_current_configuration()
         return SystemMessage(value["prompt"])
 
+    via = gateway.configured()
     builder = StateGraph(ClaimState, context_schema=ClaimContext)
     builder.add_node(SCREEN, screen_claim)
     builder.add_node(RECORD_SCREEN, record_screen)
@@ -311,16 +348,20 @@ def claim_graph(
     )
     builder.add_node(
         TOOLS,
-        ToolNode(CLAIM_TOOLS, handle_tool_errors=refusal, wrap_tool_call=record_result),
+        ToolNode(
+            CLAIM_TOOLS,
+            handle_tool_errors=refusal,
+            wrap_tool_call=partial(record_result, via=via),
+        ),
     )
     builder.add_node(PAUSE, wait_for_sign_off)
-    builder.add_node(PAY, pay)
+    builder.add_node(PAY, partial(pay, via=via))
     builder.add_edge(START, SCREEN)
     builder.add_edge(SCREEN, RECORD_SCREEN)
     builder.add_conditional_edges(RECORD_SCREEN, after_screen, [SCREEN, AGENT, END])
     builder.add_conditional_edges(TOOLS, after_tools, [AGENT, PAUSE, PAY, END])
     builder.add_edge(PAUSE, PAY)
-    builder.add_edge(PAY, END)
+    builder.add_conditional_edges(PAY, after_payment, [PAUSE, END])
     return builder.compile(checkpointer=saver)
 
 
@@ -416,11 +457,13 @@ def run_claim_graph(
                 start,
                 claim_config(claim, name, run_id),
                 context=ClaimContext(
-                    claim["claim_id"],
-                    claim["thread_id"],
-                    run_id,
-                    signed_off,
-                    claim["evaluation_id"],
+                    claim_id=claim["claim_id"],
+                    thread_id=claim["thread_id"],
+                    run_id=run_id,
+                    signed_off_status=signed_off,
+                    evaluation_id=claim["evaluation_id"],
+                    policy_id=claim["policy_id"],
+                    customer_id=claim["customer_id"],
                 ),
                 durability="sync",
                 stream_mode="updates",
