@@ -32,9 +32,17 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
 from langgraph.types import Command, interrupt
 
-from agent import api, checkpoints, gateway, measurements, models, screening
+from agent import (
+    api,
+    checkpoints,
+    context_client,
+    gateway,
+    measurements,
+    models,
+    screening,
+)
 from agent.backend_client import Refused
-from agent.tools import CLAIM_TOOLS, ClaimContext, ClaimState
+from agent.tools import CLAIM_TOOLS, CONTEXT_TOOLS, ClaimContext, ClaimState
 
 log = logging.getLogger(__name__)
 
@@ -168,11 +176,14 @@ def record_result(
     execute: Callable[[ToolCallRequest], ToolMessage | Command],
     *,
     via: gateway.Gateway | None,
+    knowledge: context_client.ContextClient,
 ) -> ToolMessage | Command:
     """Run a tool and record its result on the claim, then any step it gives as its
     artifact, such as a section it read."""
     context = cast(ClaimContext, request.runtime.context)
-    runtime = replace(request.runtime, context=replace(context, gateway=via))
+    runtime = replace(
+        request.runtime, context=replace(context, gateway=via, knowledge=knowledge)
+    )
     result = execute(replace(request, runtime=runtime))
     if isinstance(result, ToolMessage):
         message = result
@@ -338,20 +349,22 @@ def claim_graph(
         return SystemMessage(value["prompt"])
 
     via = gateway.configured()
+    knowledge = context_client.configured(via)
+    tools = CLAIM_TOOLS + CONTEXT_TOOLS
     builder = StateGraph(ClaimState, context_schema=ClaimContext)
     builder.add_node(SCREEN, screen_claim)
     builder.add_node(RECORD_SCREEN, record_screen)
     builder.add_node(
         AGENT,
-        partial(call_model, llm=llm.bind_tools(CLAIM_TOOLS), instructions=instructions),
+        partial(call_model, llm=llm.bind_tools(tools), instructions=instructions),
         destinations=(SCREEN, RECORD_SCREEN, TOOLS, END),
     )
     builder.add_node(
         TOOLS,
         ToolNode(
-            CLAIM_TOOLS,
+            tools,
             handle_tool_errors=refusal,
-            wrap_tool_call=partial(record_result, via=via),
+            wrap_tool_call=partial(record_result, via=via, knowledge=knowledge),
         ),
     )
     builder.add_node(PAUSE, wait_for_sign_off)

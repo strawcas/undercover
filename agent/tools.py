@@ -11,8 +11,10 @@ from langgraph.graph.message import add_messages
 from langgraph.types import Command
 
 from agent import api
+from agent.context_client import ContextClient
 from agent.gateway import Gateway
 from agent.screening import ScreenAttempt
+from context.catalog import DocumentName, PlanName, RecordName
 
 
 @dataclass
@@ -27,6 +29,7 @@ class ClaimContext:
     policy_id: str = ""
     customer_id: str = ""
     gateway: Gateway | None = None
+    knowledge: ContextClient | None = None
 
 
 def keep_last(_: Any, new: Any) -> Any:
@@ -67,18 +70,58 @@ def get_claim_history(runtime: ToolRuntime[ClaimContext]) -> str:
     return json.dumps(api.get_claim_history(context.customer_id, via=context.gateway))
 
 
+def lookup(
+    runtime: ToolRuntime[ClaimContext], operation: str, **arguments: Any
+) -> dict:
+    """Call the route selected for this graph's context tools."""
+    knowledge = runtime.context.knowledge
+    if knowledge is None:
+        raise RuntimeError("The claim graph has no context client")
+    return knowledge.call(operation, **arguments)
+
+
+@tool
+def lookup_term(term: str, runtime: ToolRuntime[ClaimContext]) -> str:
+    """Find a policy term's definition and the sections it comes from."""
+    return json.dumps(lookup(runtime, "lookup_term", term=term))
+
+
+@tool
+def describe_fields(record: RecordName, runtime: ToolRuntime[ClaimContext]) -> str:
+    """Describe the fields of a claim, policy or previous claim."""
+    return json.dumps(lookup(runtime, "describe_fields", record=record))
+
+
+@tool
+def get_plan(plan: PlanName, runtime: ToolRuntime[ClaimContext]) -> str:
+    """Read one plan's limits, waiting periods, deductible and add-ons."""
+    return json.dumps(lookup(runtime, "get_plan", plan=plan))
+
+
+@tool
+def get_claim_rules(runtime: ToolRuntime[ClaimContext]) -> str:
+    """Read the rules claims operations applies when handling a claim."""
+    return json.dumps(lookup(runtime, "get_claim_rules"))
+
+
+@tool
+def search_reference_data(query: str, runtime: ToolRuntime[ClaimContext]) -> str:
+    """Find outside facts containing every word of a query."""
+    return json.dumps(lookup(runtime, "search_reference_data", query=query))
+
+
 @tool
 def search_documents(query: str, runtime: ToolRuntime[ClaimContext]) -> str:
     """Find the sections of the wording and the manual containing one word or phrase."""
-    return json.dumps(api.search_documents(query, via=runtime.context.gateway))
+    return json.dumps(lookup(runtime, "search_documents", query=query))
 
 
 @tool(response_format="content_and_artifact")
 def read_section(
-    document: api.DocumentName, number: int, runtime: ToolRuntime[ClaimContext]
+    document: DocumentName, number: int, runtime: ToolRuntime[ClaimContext]
 ) -> tuple[str, tuple[api.StepKind, str]]:
     """Read one section of the policy wording or the claims manual in full."""
-    section = api.read_section(document, number, via=runtime.context.gateway)
+    section = lookup(runtime, "read_section", document=document, number=number)
     read = f"{section['document_title']}, section {number}: {section['title']}"
     return json.dumps(section), ("reading", read)
 
@@ -133,8 +176,16 @@ CLAIM_TOOLS = [
     get_claim,
     get_policy,
     get_claim_history,
-    search_documents,
-    read_section,
     calculate_payout,
     record_decision,
+]
+
+CONTEXT_TOOLS = [
+    lookup_term,
+    describe_fields,
+    get_plan,
+    get_claim_rules,
+    search_reference_data,
+    search_documents,
+    read_section,
 ]

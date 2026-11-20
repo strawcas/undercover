@@ -1,5 +1,9 @@
 # Status
 
+Context phase 2 adds the read-only MCP server on port 8006. It preloads the seven governance files, attaches their provenance to lookups and serves the same catalog locally and through the Lambda handler. Seeding now takes plans, wording and the manual from those files. The app's Gateway contract has six operations, and the two document tools use the context layer on both routes.
+
+The isolated context and server imports passed. Two Function URL requests in one process verified the Lambda lifecycle, and an app-only package served seeded document contents without the governance files. Direct and signed stand-ins verified lookups and refusals. The review follow-ups preserved phrase-search behavior and shared the local address. `npm run check` passed with 357 Python tests, 120 dashboard unit tests and 11 Playwright tests. The Windows dev-run check remains part of the final live sequence.
+
 Context phase 1 routes model tools and graph payment through signed AgentCore Gateway MCP when configured. Model tool inputs are scoped to the current claim, policy and customer. Screening, its referrals and bookkeeping use the direct keyed app client. An explicit Gateway payment denial records the hold and refusal together. Dana can settle the original through the app even when the agent service is offline.
 
 The phase review led to a fresh claim read after obtaining the PostgreSQL lock for a Gateway hold, a shared app refusal type, and test isolation from inherited Gateway settings. Signed MCP and direct-route stand-ins verify the claim inputs, refusals, payment and senior settlement. `npm run check` passed with 362 Python tests, 120 dashboard unit tests and 11 Playwright tests. The new schema is exercised on disposable databases. The business reseed and live runs are scheduled after phase 5.

@@ -5,6 +5,8 @@ from fastapi.testclient import TestClient
 from langchain_core.callbacks import BaseCallbackHandler
 
 from agent import api, harness, improver, improver_api, screening
+from agent.mcp_client import McpClient
+from agent.tests.context_support import ContextStandIn
 from backend.main import app
 
 
@@ -17,6 +19,15 @@ def local_tool_settings(monkeypatch):
         "UNDERCOVER_MEMORY_ID",
     ):
         monkeypatch.delenv(name, raising=False)
+    original = McpClient.call
+
+    def local_or_gateway(client, name, arguments):
+        if client.auth is None:
+            return ContextStandIn(client.url).call(name, arguments)
+        return original(client, name, arguments)
+
+    monkeypatch.setattr(McpClient, "call", local_or_gateway)
+    return original
 
 
 @pytest.fixture(autouse=True)

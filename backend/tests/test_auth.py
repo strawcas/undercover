@@ -46,8 +46,6 @@ def test_route_inventory_requires_the_right_credential():
     }
     service = {
         "get_configuration",
-        "search_documents",
-        "read_section",
         "start_claim",
         "record_step",
         "record_decision",

@@ -7,6 +7,7 @@ SQLite otherwise, as in the tests.
 import json
 import os
 from functools import cache
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +43,6 @@ from backend.configuration_defaults import initial_model
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
-DOCUMENTS = {"policy_wording": "Policy wording", "claims_manual": "Claims manual"}
 SCHEMA = "undercover"
 CONNECTIONS = 4
 LAMBDA_MARKER = "AWS_LAMBDA_FUNCTION_NAME"
@@ -109,6 +109,8 @@ documents = Table(
     Column("position", Integer, nullable=False),
     Column("title", Text, nullable=False),
     Column("text", Text, nullable=False),
+    Column("version", Text, nullable=False),
+    Column("contents", Text, nullable=False),
 )
 handlers = Table(
     "handlers",
@@ -381,7 +383,10 @@ def load(name: str) -> Any:
 
 
 def seed(db: Engine) -> dict[str, int]:
-    """Build the tables afresh from data/ and count what they hold."""
+    """Build the tables afresh from the seed and governance files."""
+    catalog = import_module("context.catalog")
+    _, plans = catalog.read_yaml(catalog.PLANS_FILE)
+    source_documents = [catalog.read_document(name) for name in catalog.TITLES]
     company = load("company.json")
     handler_rows = load("handlers.json")
     customer_rows = load("customers.json") + load("security/customers.json")
@@ -441,7 +446,7 @@ def seed(db: Engine) -> dict[str, int]:
             {
                 "id": 1,
                 "payout_approval_limit": company["payout_approval_limit"],
-                "plans": load("plans.json"),
+                "plans": plans,
                 "improvement": load("improvement_settings.json"),
                 "models_allowed": allowed,
                 "current_configuration": 1,
@@ -452,12 +457,14 @@ def seed(db: Engine) -> dict[str, int]:
             insert(documents),
             [
                 {
-                    "name": name,
+                    "name": document.name,
                     "position": position,
-                    "title": title,
-                    "text": (DATA / f"{name}.md").read_text(encoding="utf-8"),
+                    "title": document.title,
+                    "text": document.text,
+                    "version": document.version,
+                    "contents": document.contents(),
                 }
-                for position, (name, title) in enumerate(DOCUMENTS.items())
+                for position, document in enumerate(source_documents)
             ],
         )
         connection.execute(

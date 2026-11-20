@@ -1,4 +1,4 @@
-"""The Gateway imports only the eight claim operations and their schemas."""
+"""The Gateway imports only the six claim operations and their schemas."""
 
 from fastapi.testclient import TestClient
 
@@ -28,8 +28,6 @@ def test_agent_contract_is_scoped_and_authenticates_both_callers():
         "get_claim",
         "get_policy",
         "get_claim_history",
-        "search_documents",
-        "read_section",
         "calculate_payout",
         "record_decision",
         "pay_claim",

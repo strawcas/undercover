@@ -7,11 +7,13 @@ from typing import cast
 import httpx
 import pytest
 from botocore.credentials import Credentials
+from langchain.tools import ToolException
 from langchain_core.runnables import RunnableLambda
 from mangum.types import LambdaContext
 from sqlalchemy import update
 
 from agent import api, gateway, harness, mcp_client, screening
+from agent.tests.context_support import ContextStandIn
 from agent.tests.records import claim_of, steps_of
 from agent.tests.stubs import call, graph_on, record, stub
 from backend.database import engine, settings
@@ -42,6 +44,19 @@ class GatewayStandIn:
 
     def tool(self, name, arguments):
         self.calls.append((name, arguments.copy()))
+        if name.startswith("undercover-context___"):
+            operation = name.removeprefix("undercover-context___")
+            try:
+                return {
+                    "result": response(ContextStandIn(URL).call(operation, arguments))
+                }
+            except ToolException as error:
+                return {
+                    "result": {
+                        "isError": True,
+                        "content": [{"type": "text", "text": str(error)}],
+                    }
+                }
         operation = name.removeprefix("undercover-app___")
         if operation == "get_policy" and arguments["policy_id"] == "POL-2002":
             return {"error": {"code": -32000, "message": DENIAL}}
@@ -54,11 +69,6 @@ class GatewayStandIn:
             "get_claim_history": (
                 "GET",
                 f"/api/customers/{arguments.get('customer_id')}/claims",
-            ),
-            "search_documents": ("GET", "/api/documents/search"),
-            "read_section": (
-                "GET",
-                f"/api/documents/{arguments.get('document')}/sections/{arguments.get('number')}",
             ),
             "calculate_payout": ("POST", f"/api/claims/{claim_id}/payout"),
             "record_decision": ("POST", f"/api/claims/{claim_id}/decision"),
@@ -148,17 +158,17 @@ def test_signed_route_injects_ids_and_pays(client, stand_in):
     assert claim_of(client, claim_id)["payment"]["amount"] == 420
     assert model.prompts[-1][-1].text.startswith("Refused with status 422: ")
     assert [name for name, _ in stand_in.calls] == [
-        f"undercover-app___{operation}"
-        for operation in (
-            "get_claim",
-            "get_policy",
-            "get_claim_history",
-            "search_documents",
-            "read_section",
-            "calculate_payout",
-            "record_decision",
-            "record_decision",
-            "pay_claim",
+        f"undercover-{target}___{operation}"
+        for target, operation in (
+            ("app", "get_claim"),
+            ("app", "get_policy"),
+            ("app", "get_claim_history"),
+            ("context", "search_documents"),
+            ("context", "read_section"),
+            ("app", "calculate_payout"),
+            ("app", "record_decision"),
+            ("app", "record_decision"),
+            ("app", "pay_claim"),
         )
     ]
     assert [arguments for _, arguments in stand_in.calls[:3]] == [
@@ -166,6 +176,18 @@ def test_signed_route_injects_ids_and_pays(client, stand_in):
         {"policy_id": "POL-2001"},
         {"customer_id": "CUS-3001"},
     ]
+
+
+def test_gateway_delivers_a_context_refusal_to_the_model(stand_in):
+    model = stub(
+        call("read_section", document="claims_manual", number=15),
+        record("refer", 0),
+    )
+    assert "refer" in harness.work_claim("CLM-1001", graph_on(model))
+    assert "Refused: Section 15 of the claims manual not found" in (
+        model.prompts[-1][-1].text
+    )
+    assert stand_in.calls[0][0] == "undercover-context___read_section"
 
 
 def test_screening_reads_the_same_fields_and_refers_on_the_direct_route(

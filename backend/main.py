@@ -2,9 +2,9 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Annotated, Any
+from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException
 from mangum import Mangum
 from sqlalchemy import Connection, RowMapping, insert, select, update
 
@@ -39,7 +39,6 @@ from backend.database import (
     steps,
 )
 from backend.dependencies import Database
-from backend.documents import search, sections, titles
 from backend.improvement_models import EvaluationQuote
 from backend.improvement_routes import router as improvement_router
 from backend.models import (
@@ -48,7 +47,6 @@ from backend.models import (
     Decision,
     DecisionRequest,
     DispatchRequest,
-    DocumentName,
     Evaluation,
     EvaluationDetail,
     EvaluationRequest,
@@ -68,8 +66,6 @@ from backend.models import (
     RunClaimRequest,
     RunRequest,
     RunSelectionRequest,
-    Section,
-    SectionMatch,
     SecurityStepRequest,
     StartRequest,
     Status,
@@ -334,30 +330,6 @@ def change_settings(
 ) -> SettingsView:
     """Change platform settings with the signed-in senior handler's audit trail."""
     return platform_settings.change_settings(db, request, handler)
-
-
-@app.get(
-    "/api/documents/search", operation_id="search_documents", dependencies=agent_only
-)
-def search_documents(
-    query: Annotated[str, Query(min_length=1)], db: Database
-) -> list[SectionMatch]:
-    """Find the sections of the wording and the manual that mention a word or phrase."""
-    return search(db, query)
-
-
-@app.get(
-    "/api/documents/{document}/sections/{number}",
-    operation_id="read_section",
-    dependencies=agent_only,
-)
-def read_section(document: DocumentName, number: int, db: Database) -> Section:
-    """Read one section of the policy wording or the claims manual in full."""
-    for section in sections(db, document):
-        if section.number == number:
-            return section
-    title = titles(db)[document].lower()
-    raise HTTPException(404, f"Section {number} of the {title} not found")
 
 
 @app.get("/api/handlers", operation_id="list_handlers")

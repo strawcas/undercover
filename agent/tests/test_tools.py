@@ -1,4 +1,4 @@
-from agent.tools import CLAIM_TOOLS
+from agent.tools import CLAIM_TOOLS, CONTEXT_TOOLS
 
 
 def operations(client):
@@ -13,12 +13,20 @@ def test_claim_tools_are_named_after_backend_operations(client):
         "get_claim",
         "get_policy",
         "get_claim_history",
-        "search_documents",
-        "read_section",
         "calculate_payout",
         "record_decision",
     ]
     assert set(names) <= operations(client)
+    assert [tool.name for tool in CONTEXT_TOOLS] == [
+        "lookup_term",
+        "describe_fields",
+        "get_plan",
+        "get_claim_rules",
+        "search_reference_data",
+        "search_documents",
+        "read_section",
+    ]
+    assert operations(client).isdisjoint(tool.name for tool in CONTEXT_TOOLS)
 
 
 def test_a_claim_agent_can_only_act_on_its_own_claim():

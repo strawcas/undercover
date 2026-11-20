@@ -164,11 +164,12 @@ def test_reading_a_section_is_recorded(client):
     assert steps[2] == ("reading", "Claims manual, section 9: Repeat claims")
     assert steps[4] == (
         "tool_result",
-        "read_section: Refused with status 404: "
-        "Section 15 of the claims manual not found",
+        "read_section: Refused: Section 15 of the claims manual not found",
     )
     assert steps[5] == ("tool_call", 'search_documents(query="wild animal")')
-    assert steps[6][1].startswith('search_documents: [{"document": "claims_manual"')
+    assert steps[6][1].startswith(
+        'search_documents: {"matches": [{"document": "claims_manual"'
+    )
     assert [s for s in steps if s[0] == "reading"] == [steps[2]]
 
 

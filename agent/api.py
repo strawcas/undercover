@@ -12,7 +12,6 @@ backend = backend_client.client()
 
 DecisionKind = Literal["approve", "decline", "refer"]
 APPROVE: DecisionKind = "approve"
-DocumentName = Literal["policy_wording", "claims_manual"]
 StepKind = Literal[
     "tool_call", "tool_result", "message", "reading", "error", "security", "refusal"
 ]
@@ -132,22 +131,6 @@ def get_current_configuration() -> dict[str, Any]:
 
 def get_configuration(version: int) -> dict[str, Any]:
     return _call("GET", f"/configurations/{version}")
-
-
-def search_documents(
-    query: str, *, via: gateway.Gateway | None = None
-) -> list[dict[str, Any]]:
-    if via:
-        return via.call(gateway.APP, "search_documents", query=query)
-    return _call("GET", "/documents/search", params={"query": query})
-
-
-def read_section(
-    document: DocumentName, number: int, *, via: gateway.Gateway | None = None
-) -> dict[str, Any]:
-    if via:
-        return via.call(gateway.APP, "read_section", document=document, number=number)
-    return _call("GET", f"/documents/{document}/sections/{number}")
 
 
 def calculate_payout(

@@ -12,7 +12,6 @@ OrdinaryStepKind = Literal[
     "tool_call", "tool_result", "message", "reading", "error", "refusal"
 ]
 StepKind = Literal[OrdinaryStepKind, "security"]
-DocumentName = Literal["policy_wording", "claims_manual"]
 Benefit = Literal[
     "trip_cancellation",
     "trip_interruption",
@@ -136,21 +135,6 @@ class Step(BaseModel):
     kind: StepKind
     content: str
     created_at: str
-
-
-class Section(BaseModel):
-    document: DocumentName
-    document_title: str
-    number: int
-    title: str
-    text: str
-
-
-class SectionMatch(BaseModel):
-    document: DocumentName
-    number: int
-    title: str
-    excerpts: list[str]
 
 
 class StartRequest(BaseModel):
