@@ -10,7 +10,7 @@ from sqlalchemy import update
 from agent import api, harness
 from agent.backend_client import Refused
 from agent.tests.records import claim_of, steps_of
-from agent.tests.stubs import StubModel, call, decide, graph_on, record, stub
+from agent.tests.stubs import StubModel, calculate, call, decide, graph_on, record, stub
 from backend.database import engine, settings
 
 
@@ -61,11 +61,12 @@ def test_approves_and_the_graph_pays_within_the_limit(client, caplog):
         call("get_claim"),
         call("get_policy"),
         call("get_claim_history"),
+        calculate(420.0),
         record("approve", 420.0),
     )
     assert work("CLM-1001", model) == "CLM-1001  approve  $420.00"
     assert caplog.messages == ["CLM-1001  approve  $420.00"]
-    assert len(model.prompts) == 4
+    assert len(model.prompts) == 5
 
     claim = claim_of(client, "CLM-1001")
     assert claim["status"] == "decided"
@@ -76,11 +77,11 @@ def test_approves_and_the_graph_pays_within_the_limit(client, caplog):
 
     security, *steps = steps_of(client, "CLM-1001")
     assert security["kind"] == "security"
-    assert [s["kind"] for s in steps] == ["tool_call", "tool_result"] * 4
+    assert [s["kind"] for s in steps] == ["tool_call", "tool_result"] * 5
     assert steps[0]["content"] == "get_claim()"
     assert '"claim_id": "CLM-1001"' in steps[1]["content"]
-    assert steps[6]["content"].startswith("record_decision(")
-    assert steps[7]["content"].startswith('record_decision: {"claim_id": "CLM-1001"')
+    assert steps[8]["content"].startswith("record_decision(")
+    assert steps[9]["content"].startswith('record_decision: {"claim_id": "CLM-1001"')
     assert "pay_claim" not in "".join(s["content"] for s in steps)
     assert {s["thread_id"] for s in steps} == {claim["thread_id"]}
 
@@ -99,7 +100,7 @@ def test_pauses_before_a_payout_over_the_limit(client):
     graph = graph_on(model)
     report = harness.work_claim("CLM-1002", graph)
     assert report == "CLM-1002  approve  $1,350.00, waiting for sign-off"
-    assert len(model.prompts) == 2
+    assert len(model.prompts) == 3
 
     state = state_of(graph, client, "CLM-1002")
     assert state.next == (harness.PAUSE,)
@@ -129,20 +130,21 @@ def test_declines_and_refers(client, decision):
 
 def test_two_decisions_in_one_reply_are_recorded_and_paid_once(client):
     twice = [record("approve", 420.0).tool_calls[0] for _ in range(2)]
-    model = stub(AIMessage(content="", tool_calls=twice))
+    model = stub(calculate(420.0), AIMessage(content="", tool_calls=twice))
     assert work("CLM-1001", model) == "CLM-1001  approve  $420.00"
     claim = claim_of(client, "CLM-1001")
     assert (claim["status"], claim["payment"]["amount"]) == ("decided", 420.0)
     results = [s for s in steps_of(client, "CLM-1001") if s["kind"] == "tool_result"]
-    assert len(results) == 2
+    assert len(results) == 3
 
 
 def test_a_refused_decision_goes_back_to_the_model(client):
-    model = stub(record("approve", 0), record("approve", 420.0))
+    model = stub(record("approve", 0), calculate(420.0), record("approve", 420.0))
     assert work("CLM-1001", model) == "CLM-1001  approve  $420.00"
     refusal = model.prompts[1][-1]
     assert isinstance(refusal, ToolMessage)
     assert refusal.text.startswith("Refused with status 422: ")
+    assert "Claims manual section 14" in refusal.text
     assert claim_of(client, "CLM-1001")["payment"]["amount"] == 420.0
 
 
@@ -210,7 +212,7 @@ def test_working_out_the_payout(client):
     ]
     model = stub(
         call("calculate_payout", benefit="trip_delay", lines=lines, paid_by_others=0),
-        *decide("approve", 420.0),
+        record("approve", 420.0),
     )
     assert work("CLM-1001", model) == "CLM-1001  approve  $420.00"
     result = steps_of(client, "CLM-1001")[2]

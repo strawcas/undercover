@@ -15,7 +15,14 @@ from sqlalchemy import update
 from agent import api, gateway, harness, mcp_client, screening
 from agent.tests.context_support import ContextStandIn
 from agent.tests.records import claim_of, steps_of
-from agent.tests.stubs import call, graph_on, record, stub
+from agent.tests.stubs import (
+    calculate,
+    calculate_for_claim,
+    call,
+    graph_on,
+    record,
+    stub,
+)
 from backend.database import engine, settings
 from backend.main import handler
 from backend.tests.claim_requests import sign_off
@@ -150,13 +157,17 @@ def test_signed_route_injects_ids_and_pays(client, stand_in):
         call("get_claim_history"),
         call("search_documents", query="trip delay"),
         call("read_section", document="policy_wording", number=3),
-        call("calculate_payout", benefit="trip_delay", paid_by_others=0, lines=[]),
         record("approve", 0),
+        calculate(420),
         record("approve", 420),
     )
     harness.work_claim(claim_id, graph_on(model))
     assert claim_of(client, claim_id)["payment"]["amount"] == 420
-    assert model.prompts[-1][-1].text.startswith("Refused with status 422: ")
+    assert stand_in.calls[-2][1]["decided_by"] == "UnderCover Agent (configuration 1)"
+    assert stand_in.calls[-2][1]["thread_id"] == claim_of(client, claim_id)["thread_id"]
+    refusal = model.prompts[-2][-1].text
+    assert refusal.startswith("Refused with status 422: ")
+    assert "Claims manual section 14" in refusal
     assert [name for name, _ in stand_in.calls] == [
         f"undercover-{target}___{operation}"
         for target, operation in (
@@ -165,8 +176,8 @@ def test_signed_route_injects_ids_and_pays(client, stand_in):
             ("app", "get_claim_history"),
             ("context", "search_documents"),
             ("context", "read_section"),
-            ("app", "calculate_payout"),
             ("app", "record_decision"),
+            ("app", "calculate_payout"),
             ("app", "record_decision"),
             ("app", "pay_claim"),
         )
@@ -209,7 +220,11 @@ def test_screening_reads_the_same_fields_and_refers_on_the_direct_route(
     monkeypatch.setattr(screening, "checker", lambda: RunnableLambda(flagged))
     harness.work_claim(claim_id, graph_on(stub()))
     assert stand_in.calls == []
-    assert claim_of(client, claim_id)["decision"]["section"] == screening.SECTION
+    decision = claim_of(client, claim_id)["decision"]
+    assert decision["section"] == decision["decided_by"] == screening.SECTION
+    assert decision["payout"] == 0
+    assert decision["calculation"] is None
+    assert decision["manual_version"] == "2026.2"
 
 
 @pytest.mark.parametrize("evaluation", [False, True])
@@ -231,7 +246,9 @@ def test_gateway_refusal_and_payment_hold(client, stand_in, evaluation):
         else None
     )
     claim_id = run["members"][0]["claim_id"] if run else "CLM-1002"
-    model = stub(call("get_policy"), record("approve", 1350))
+    model = stub(
+        call("get_policy"), calculate_for_claim(claim_id, 1350), record("approve", 1350)
+    )
     graph = graph_on(model)
     harness.work_claim(claim_id, graph, run_id=run["run_id"] if run else None)
     held = claim_of(client, claim_id)
@@ -248,9 +265,13 @@ def test_gateway_refusal_and_payment_hold(client, stand_in, evaluation):
     if evaluation:
         assert signed.status_code == 409
     else:
-        assert model.prompts[-1][-1].text == f"Gateway refused: {DENIAL}"
+        assert model.prompts[-2][-1].text == f"Gateway refused: {DENIAL}"
         assert graph.get_state(harness.thread_of(held)).next == (harness.PAUSE,)
         assert signed.json()["payment"]["signed_off_by"] == "Dana Whitfield"
+        decision = signed.json()["decision"]
+        assert decision["calculation"] == held["decision"]["calculation"]
+        assert decision["decided_by"] == held["decision"]["decided_by"]
+        assert decision["manual_version"] == held["decision"]["manual_version"]
         assert sign_off(client, claim_id, "HND-01").status_code == 409
 
 

@@ -130,29 +130,13 @@ def test_original_work_is_not_copied_and_copies_cannot_be_signed_off(
     client, agent_calls
 ):
     client.post("/api/claims/CLM-1001/start", json={"thread_id": "original"})
-    client.post(
-        "/api/claims/CLM-1001/decision",
-        json={
-            "decision": "approve",
-            "payout": 1350,
-            "section": "3",
-            "reason": "Covered",
-        },
-    )
+    decide(client, "CLM-1001", "approve", 1350, section="3", reason="Covered")
     run = evaluation(client, tiny=False)
     copies = [client.get(f"/api/claims/{m['claim_id']}").json() for m in run["members"]]
     copy = next(c for c in copies if c["source_id"] == "CLM-1001")
     assert copy["decision"] is None
     client.post(f"/api/claims/{copy['claim_id']}/start", json={"thread_id": "copy"})
-    client.post(
-        f"/api/claims/{copy['claim_id']}/decision",
-        json={
-            "decision": "approve",
-            "payout": 1350,
-            "section": "3",
-            "reason": "Covered",
-        },
-    )
+    decide(client, copy["claim_id"], "approve", 1350, section="3", reason="Covered")
     response = client.post(
         f"/api/claims/{copy['claim_id']}/sign-off", json={"handler_id": "HND-01"}
     )
@@ -241,15 +225,7 @@ def test_all_selected_copies_are_scored_with_attributed_cost_time(client, monkey
     for index, decision, payout in actual:
         claim_id = ids[index]
         client.post(f"/api/claims/{claim_id}/start", json={"thread_id": f"t{index}"})
-        client.post(
-            f"/api/claims/{claim_id}/decision",
-            json={
-                "decision": decision,
-                "payout": payout,
-                "section": "3",
-                "reason": "Stub rationale",
-            },
-        )
+        decide(client, claim_id, decision, payout, section="3", reason="Stub rationale")
     for reply_id, cost in (("second", 0.0003),):
         client.post(
             f"/api/claims/{ids[0]}/model-calls",

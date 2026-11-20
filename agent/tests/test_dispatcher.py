@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from agent import api, checkpoints, dispatcher, harness, models
 from agent.tests.queue_setup import leave_waiting
-from agent.tests.stubs import call, graph_on, record, stub
+from agent.tests.stubs import calculate, call, graph_on, record, stub
 from backend.database import engine, run_claims, work_slices
 from backend.tests.run_requests import configuration
 
@@ -52,7 +52,10 @@ def test_transient_retry_resumes_same_attempt_and_thread(
     leave_waiting("CLM-1001")
     saver = InMemorySaver()
     models = iter(
-        [stub(call("get_claim"), error_type("retry")), stub(record("approve", 420))]
+        [
+            stub(call("get_claim"), error_type("retry")),
+            stub(calculate(420), record("approve", 420)),
+        ]
     )
     monkeypatch.setattr(
         harness, "execution_graph", lambda version=None: graph_on(next(models), saver)

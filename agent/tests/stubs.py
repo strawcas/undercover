@@ -2,13 +2,16 @@
 the claim graph on it."""
 
 import itertools
+import json
 
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.checkpoint.memory import InMemorySaver
 
-from agent import harness
+from agent import api, harness
+
+DEDUCTIBLES = {"economy": 100, "premium": 50, "first": 0}
 
 
 class StubModel(GenericFakeChatModel):
@@ -25,6 +28,8 @@ class StubModel(GenericFakeChatModel):
         reply = next(self.messages)
         if isinstance(reply, BaseException):
             raise reply
+        if callable(reply):
+            reply = reply(messages)
         message = AIMessage(content=reply) if isinstance(reply, str) else reply
         return ChatResult(generations=[ChatGeneration(message=message)])
 
@@ -52,10 +57,50 @@ def record(decision, payout):
     )
 
 
+def calculate(payout, deductible=50):
+    """Ask the real calculator for a matching emergency medical payout."""
+    return call(
+        "calculate_payout",
+        benefit="emergency_medical",
+        paid_by_others=0,
+        lines=[
+            {
+                "description": "Medical expense",
+                "amount": payout + deductible,
+                "quantity": 1,
+                "kind": "expense",
+                "nights": 0,
+                "hours": 0,
+            }
+        ],
+    )
+
+
+def calculate_for_claim(claim_id, payout):
+    claim = api.get_claim(claim_id)
+    policy = api.get_policy(claim["policy_id"])
+    return calculate(payout, DEDUCTIBLES[policy["plan"]])
+
+
+def calculate_from_policy_reply(payout):
+    def calculate_after_reading_policy(messages):
+        policy = next(
+            json.loads(message.text)
+            for message in reversed(messages)
+            if isinstance(message, ToolMessage) and message.name == "get_policy"
+        )
+        return calculate(payout, DEDUCTIBLES[policy["plan"]])
+
+    return calculate_after_reading_policy
+
+
 def decide(decision, payout):
     """The replies of a claim agent that reads its claim and decides it, which ends
     its work on the claim."""
-    return [call("get_claim"), record(decision, payout)]
+    replies = [call("get_claim")]
+    if decision == "approve":
+        replies.append(calculate(payout))
+    return [*replies, record(decision, payout)]
 
 
 def graph_on(model, saver=None):

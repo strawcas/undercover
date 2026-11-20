@@ -177,12 +177,19 @@ def record_result(
     *,
     via: gateway.Gateway | None,
     knowledge: context_client.ContextClient,
+    configuration_version: Callable[[], int],
 ) -> ToolMessage | Command:
     """Run a tool and record its result on the claim, then any step it gives as its
     artifact, such as a section it read."""
     context = cast(ClaimContext, request.runtime.context)
     runtime = replace(
-        request.runtime, context=replace(context, gateway=via, knowledge=knowledge)
+        request.runtime,
+        context=replace(
+            context,
+            gateway=via,
+            knowledge=knowledge,
+            configuration_version=configuration_version(),
+        ),
     )
     result = execute(replace(request, runtime=runtime))
     if isinstance(result, ToolMessage):
@@ -276,6 +283,8 @@ def record_screen(state: ClaimState, runtime: Runtime[ClaimContext]) -> dict[str
                 "payout": 0,
                 "section": screening.SECTION,
                 "reason": reason,
+                "decided_by": screening.SECTION,
+                "thread_id": context.thread_id,
             },
         )
         return {"decision": claim["decision"], "status": claim["status"]}
@@ -344,9 +353,11 @@ def claim_graph(
     """Build the claim agent's graph, which saves its progress after every step."""
 
     @cache
+    def pinned_configuration() -> dict[str, Any]:
+        return configuration or api.get_current_configuration()
+
     def instructions() -> SystemMessage:
-        value = configuration or api.get_current_configuration()
-        return SystemMessage(value["prompt"])
+        return SystemMessage(pinned_configuration()["prompt"])
 
     via = gateway.configured()
     knowledge = context_client.configured(via)
@@ -364,7 +375,12 @@ def claim_graph(
         ToolNode(
             tools,
             handle_tool_errors=refusal,
-            wrap_tool_call=partial(record_result, via=via, knowledge=knowledge),
+            wrap_tool_call=partial(
+                record_result,
+                via=via,
+                knowledge=knowledge,
+                configuration_version=lambda: pinned_configuration()["version"],
+            ),
         ),
     )
     builder.add_node(PAUSE, wait_for_sign_off)

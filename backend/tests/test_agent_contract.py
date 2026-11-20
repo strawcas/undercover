@@ -39,3 +39,9 @@ def test_agent_contract_is_scoped_and_authenticates_both_callers():
     )
     [payment_body] = references(operations["pay_claim"]["requestBody"])
     assert schema["components"]["schemas"][payment_body]["required"] == ["amount"]
+    [decision_body] = references(operations["record_decision"]["requestBody"])
+    assert {"decided_by", "thread_id"} <= set(
+        schema["components"]["schemas"][decision_body]["required"]
+    )
+    [payout_body] = references(operations["calculate_payout"]["requestBody"])
+    assert "thread_id" in schema["components"]["schemas"][payout_body]["required"]

@@ -30,6 +30,7 @@ class ClaimContext:
     customer_id: str = ""
     gateway: Gateway | None = None
     knowledge: ContextClient | None = None
+    configuration_version: int | None = None
 
 
 def keep_last(_: Any, new: Any) -> Any:
@@ -140,10 +141,17 @@ def calculate_payout(
     runtime: ToolRuntime[ClaimContext],
 ) -> str:
     """Work out the payout on your claim with UnderCover's payout rules."""
-    claim_id = runtime.context.claim_id
+    context = runtime.context
     return json.dumps(
         api.calculate_payout(
-            claim_id, benefit, lines, paid_by_others, via=runtime.context.gateway
+            context.claim_id,
+            {
+                "benefit": benefit,
+                "lines": [line.model_dump() for line in lines],
+                "paid_by_others": paid_by_others,
+                "thread_id": context.thread_id,
+            },
+            via=context.gateway,
         )
     )
 
@@ -157,11 +165,20 @@ def record_decision(
     runtime: ToolRuntime[ClaimContext],
 ) -> Command:
     """Record the decision on your claim, once, which ends your work on it."""
-    claim_id = runtime.context.claim_id
+    context = runtime.context
     claim = api.record_decision(
-        claim_id,
-        {"decision": decision, "payout": payout, "section": section, "reason": reason},
-        via=runtime.context.gateway,
+        context.claim_id,
+        {
+            "decision": decision,
+            "payout": payout,
+            "section": section,
+            "reason": reason,
+            "decided_by": (
+                f"UnderCover Agent (configuration {context.configuration_version})"
+            ),
+            "thread_id": context.thread_id,
+        },
+        via=context.gateway,
     )
     message = ToolMessage(json.dumps(claim), tool_call_id=runtime.tool_call_id)
     update = {

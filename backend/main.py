@@ -38,11 +38,14 @@ from backend.database import (
     settings,
     steps,
 )
+from backend.decision_records import calculation_for, require_attempt
 from backend.dependencies import Database
+from backend.documents import manual_version
 from backend.improvement_models import EvaluationQuote
 from backend.improvement_routes import router as improvement_router
 from backend.models import (
     Claim,
+    ClaimPayoutRequest,
     ClaimSummary,
     Decision,
     DecisionRequest,
@@ -57,7 +60,6 @@ from backend.models import (
     Payment,
     PaymentRequest,
     Payout,
-    PayoutRequest,
     Plans,
     Policy,
     PreviousClaim,
@@ -353,6 +355,7 @@ def start_claim(claim_id: str, request: StartRequest, db: Database) -> Claim:
         .values(
             status="in_progress",
             thread_id=request.thread_id,
+            latest_calculation=None,
             attempts=claims.c.attempts + 1,
         )
     )
@@ -413,7 +416,9 @@ def list_steps(claim_id: str, handler: CurrentHandler, db: Database) -> list[Ste
 )
 def record_decision(claim_id: str, request: DecisionRequest, db: Database) -> Claim:
     """Record a claim's decision once; an approval waits to be paid or signed off."""
-    claim = find_claim(db, claim_id, lock=True)
+    find_claim(db, claim_id, lock=True)
+    claim = find_claim(db, claim_id)
+    require_attempt(claim, request.thread_id)
     payout = round(request.payout, 2)
     if claim["decision"] is not None:
         if (claim["decision"], claim["payout"]) == (request.decision, payout):
@@ -421,6 +426,7 @@ def record_decision(claim_id: str, request: DecisionRequest, db: Database) -> Cl
         raise HTTPException(409, f"Claim {claim_id} has already been decided")
     if claim["status"] != "in_progress":
         raise HTTPException(409, f"Claim {claim_id} is not in progress")
+    calculation = calculation_for(claim, request)
     limit = db.execute(
         insert(decisions)
         .values(
@@ -429,7 +435,10 @@ def record_decision(claim_id: str, request: DecisionRequest, db: Database) -> Cl
             payout=payout,
             section=request.section,
             reason=request.reason,
+            calculation=calculation,
+            decided_by=request.decided_by,
             decided_at=now(),
+            manual_version=manual_version(db),
             approval_limit=platform_settings.decision_limit(),
         )
         .returning(decisions.c.approval_limit)
@@ -446,12 +455,30 @@ def record_decision(claim_id: str, request: DecisionRequest, db: Database) -> Cl
     operation_id="calculate_payout",
     dependencies=agent_only,
 )
-def calculate_payout(claim_id: str, request: PayoutRequest, db: Database) -> Payout:
-    """Work out an approval's payout with UnderCover's payout rules; records nothing."""
-    policy = find_policy(db, to_claim(find_claim(db, claim_id)).policy_id)
-    return work_out_payout(
+def calculate_payout(
+    claim_id: str, request: ClaimPayoutRequest, db: Database
+) -> Payout:
+    """Work out the payout and retain the current attempt's calculation."""
+    if request.thread_id is not None:
+        find_claim(db, claim_id, lock=True)
+    claim = find_claim(db, claim_id)
+    if request.thread_id is not None:
+        require_attempt(claim, request.thread_id)
+    policy = find_policy(db, claim["record"]["policy_id"])
+    result = work_out_payout(
         policy, plans(db), request, platform_settings.approval_limit(db)
     )
+    if (
+        claim["status"] == "in_progress"
+        and request.thread_id is not None
+        and claim["decision"] is None
+    ):
+        db.execute(
+            update(claims)
+            .where(claims.c.claim_id == claim_id)
+            .values(latest_calculation=result.model_dump(exclude={"needs_sign_off"}))
+        )
+    return result
 
 
 @app.post(

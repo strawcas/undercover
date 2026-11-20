@@ -7,6 +7,7 @@ from sqlalchemy import event, select, update
 
 from backend import runs
 from backend.database import claims, engine, run_claims
+from backend.tests.claim_requests import decide
 from backend.tests.run_requests import member, start
 
 
@@ -19,15 +20,7 @@ def test_run_lifecycle_and_frozen_results(client):
     member(client, run_id, "CLM-1001")
     member(client, run_id, "CLM-1001")
     client.post("/api/claims/CLM-1001/start", json={"thread_id": "thread"})
-    client.post(
-        "/api/claims/CLM-1001/decision",
-        json={
-            "decision": "approve",
-            "payout": 1350,
-            "section": "3",
-            "reason": "Covered",
-        },
-    )
+    decide(client, "CLM-1001", "approve", 1350, section="3", reason="Covered")
     member(client, run_id, "CLM-1001", "finished")
     finished = client.post(f"/api/runs/{run_id}/finish").json()
     assert len(finished["members"]) == 1
@@ -101,15 +94,7 @@ def test_running_members_are_live_and_closed_measurements_are_refused(client):
     member(client, run_id, "CLM-1001")
     client.post("/api/claims/CLM-1001/start", json={"thread_id": "thread"})
     member(client, run_id, "CLM-1001", "finished")
-    client.post(
-        "/api/claims/CLM-1001/decision",
-        json={
-            "decision": "refer",
-            "payout": 0,
-            "section": "3",
-            "reason": "Needs review",
-        },
-    )
+    decide(client, "CLM-1001", "refer", 0, section="3", reason="Needs review")
     assert client.get(f"/api/runs/{run_id}").json()["members"][0]["decision"] == "refer"
     client.post(f"/api/runs/{run_id}/finish")
     body = {"run_id": run_id, "seconds": 99}
@@ -171,15 +156,7 @@ def test_summary_and_members_use_the_same_frozen_outcomes(client, monkeypatch):
     run_id = start(client).json()["run_id"]
     member(client, run_id, "CLM-1001")
     client.post("/api/claims/CLM-1001/start", json={"thread_id": "thread"})
-    client.post(
-        "/api/claims/CLM-1001/decision",
-        json={
-            "decision": "approve",
-            "payout": 1350,
-            "section": "3",
-            "reason": "Covered",
-        },
-    )
+    decide(client, "CLM-1001", "approve", 1350, section="3", reason="Covered")
     read = runs.get_run
 
     def sign_off_after_snapshot(db, selected_run):

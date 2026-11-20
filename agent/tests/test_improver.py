@@ -305,6 +305,8 @@ def test_stop_or_limit_refuses_new_claims_and_holds_slot_until_drain(
                             "payout": 0,
                             "section": "Evidence",
                             "reason": "Late",
+                            "decided_by": "Test handler",
+                            "thread_id": api.get_claim(first)["thread_id"],
                         },
                     ).status_code
                     == 409

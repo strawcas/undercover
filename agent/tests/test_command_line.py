@@ -114,7 +114,11 @@ def test_command_line_decides_a_claim_on_the_direct_route(client, monkeypatch):
     monkeypatch.setattr(cli, "checkpointer", lambda: nullcontext(InMemorySaver()))
     monkeypatch.setattr(models, "build_model", lambda _: stub(*decide("approve", 420)))
     cli.main(["CLM-1001"])
-    assert claim_of(client, "CLM-1001")["payment"]["amount"] == 420
+    claim = claim_of(client, "CLM-1001")
+    assert claim["payment"]["amount"] == 420
+    assert claim["decision"]["decided_by"] == "UnderCover Agent (configuration 1)"
+    assert claim["decision"]["calculation"]["payout"] == 420
+    assert claim["decision"]["manual_version"] == "2026.2"
 
 
 def test_command_line_requires_a_claim_id(graph):

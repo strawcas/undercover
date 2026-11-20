@@ -17,7 +17,12 @@ def line(description, amount, kind="item", **extra):
 
 
 def payout(client, claim_id, benefit, lines, paid_by_others=0):
-    body = {"benefit": benefit, "lines": lines, "paid_by_others": paid_by_others}
+    body = {
+        "benefit": benefit,
+        "lines": lines,
+        "paid_by_others": paid_by_others,
+        "thread_id": None,
+    }
     return client.post(f"/api/claims/{claim_id}/payout", json=body)
 
 

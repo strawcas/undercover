@@ -12,7 +12,14 @@ from sqlalchemy import update
 
 from agent import api, checkpoints, dispatcher, harness, service
 from agent.tests.records import latest
-from agent.tests.stubs import call, graph_on, record, stub
+from agent.tests.stubs import (
+    calculate_for_claim,
+    calculate_from_policy_reply,
+    call,
+    graph_on,
+    record,
+    stub,
+)
 from backend.database import engine, evaluation_labels
 
 
@@ -30,7 +37,7 @@ def test_service_works_copies_with_no_labels_and_clears_held_threads(
             call("get_claim_history"),
             call("search_documents", query="delay"),
             call("read_section", document="policy_wording", number=1),
-            call("calculate_payout", benefit="trip_delay", lines=[], paid_by_others=0),
+            calculate_from_policy_reply(1350),
             record("approve", 1350),
         )
         models.append(llm)
@@ -181,7 +188,11 @@ def test_startup_cleans_stopped_evaluation_threads_but_preserves_records(monkeyp
     claim_id = run["members"][0]["claim_id"]
     saver = InMemorySaver()
     harness.work_claim(
-        claim_id, graph_on(stub(record("approve", 1350)), saver), run["run_id"]
+        claim_id,
+        graph_on(
+            stub(calculate_for_claim(claim_id, 1350), record("approve", 1350)), saver
+        ),
+        run["run_id"],
     )
     before = api.get_claim(claim_id)
     assert saver.get_tuple(harness.thread_of(before)) is not None
@@ -243,7 +254,8 @@ def test_evaluation_payment_hold_survives_a_restored_limit(client, monkeypatch):
             client.put("/api/settings", json=settings).raise_for_status()
 
     monkeypatch.setattr(api, "pay_claim", pay_during_lower_limit)
-    harness.work_claim(claim_id, graph_on(stub(record("approve", 900))), run["run_id"])
+    model = stub(calculate_for_claim(claim_id, 900), record("approve", 900))
+    harness.work_claim(claim_id, graph_on(model), run["run_id"])
     copy = api.get_claim(claim_id)
     assert copy["status"] == "waiting_for_sign_off"
     assert copy["payment"] is None

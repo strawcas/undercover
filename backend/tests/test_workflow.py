@@ -6,7 +6,7 @@ from sqlalchemy import select, update
 
 from backend import main
 from backend.database import claims, decisions, engine, handlers, payments
-from backend.tests.claim_requests import decide, pay, sign_off, start
+from backend.tests.claim_requests import decide, decision_input, pay, sign_off, start
 
 
 def test_start_claim(client):
@@ -75,12 +75,7 @@ def test_invalid_decisions(client, decision, payout, section):
     start(client, "CLM-1001")
     response = client.post(
         "/api/claims/CLM-1001/decision",
-        json={
-            "decision": decision,
-            "payout": payout,
-            "section": section,
-            "reason": "Because.",
-        },
+        json=decision_input(decision, payout, section=section, reason="Because."),
     )
     assert response.status_code == 422
     assert client.get("/api/claims/CLM-1001").json()["decision"] is None

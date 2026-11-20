@@ -1,5 +1,5 @@
 import { expect, test } from "./fixtures";
-import { get, post, put, AGENT_STAND_IN } from "./api";
+import { decide, get, post, put, AGENT_STAND_IN } from "./api";
 import {
   internalRound,
   playEvaluations,
@@ -78,7 +78,7 @@ test("the queue shows dispatch members and a records-built summary", async ({
     run_id,
     seconds: 5,
   });
-  await post(request, "/api/claims/CLM-1014/decision", {
+  await decide(request, "CLM-1014", {
     decision: "approve",
     payout: 1350,
     section: "3",
@@ -86,7 +86,7 @@ test("the queue shows dispatch members and a records-built summary", async ({
   });
   const held = table.getByRole("row").filter({ hasText: "CLM-1014" });
   await expect(held.getByRole("cell").nth(6)).toHaveText("Awaiting sign-off");
-  await post(request, "/api/claims/CLM-1013/decision", {
+  await decide(request, "CLM-1013", {
     decision: "refer",
     payout: 0,
     section: "3",
@@ -202,7 +202,7 @@ test("evaluations show scores, copied decisions and stopped runs without changin
   await post(request, `/api/claims/${claimId}/start`, {
     thread_id: "eval-e2e",
   });
-  await post(request, `/api/claims/${claimId}/decision`, {
+  await decide(request, claimId, {
     decision: "approve",
     payout: 1350,
     section: "3",

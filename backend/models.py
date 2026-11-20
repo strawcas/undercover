@@ -1,6 +1,6 @@
 """The shapes of the backend's requests and responses."""
 
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -8,6 +8,7 @@ Status = Literal[
     "waiting", "in_progress", "waiting_for_sign_off", "decided", "left_for_handler"
 ]
 DecisionKind = Literal["approve", "decline", "refer"]
+SECTION_14 = "Claims manual section 14"
 OrdinaryStepKind = Literal[
     "tool_call", "tool_result", "message", "reading", "error", "refusal"
 ]
@@ -38,12 +39,25 @@ class Document(BaseModel):
     content: str
 
 
+class CalculationStep(BaseModel):
+    step: str
+    amount: float
+
+
+class PayoutCalculation(BaseModel):
+    calculation: list[CalculationStep]
+    payout: float
+
+
 class Decision(BaseModel):
     decision: DecisionKind
     payout: float
     section: str
     reason: str
+    calculation: PayoutCalculation | None
+    decided_by: str
     decided_at: str
+    manual_version: str
     signed_off_by: str | None
     signed_off_at: str | None
     gateway_hold: str | None
@@ -154,8 +168,11 @@ class SecurityStepRequest(BaseModel):
 
 class DecisionRequest(BaseModel):
     decision: DecisionKind
+    thread_id: str = Field(
+        min_length=1, description="The attempt recording the decision"
+    )
     payout: float = Field(
-        ge=0, description="In US dollars, 0 for a decline or referral"
+        allow_inf_nan=False, description="In US dollars, 0 for a decline or referral"
     )
     section: str = Field(
         min_length=1, description="The sections of the wording and the manual relied on"
@@ -163,14 +180,35 @@ class DecisionRequest(BaseModel):
     reason: str = Field(
         min_length=1, description="Two or three sentences explaining the decision"
     )
+    decided_by: str = Field(min_length=1, description="Who or what made the decision")
+
+    @model_validator(mode="before")
+    @classmethod
+    def require_record_fields(cls, data: Any) -> Any:
+        """Check the required text before looking up the claim."""
+        if isinstance(data, dict):
+            for field in ("decision", "payout"):
+                if data.get(field) is None:
+                    raise ValueError(f"{SECTION_14}: {field} is required")
+            for field in ("section", "reason", "decided_by", "thread_id"):
+                value = data.get(field)
+                if not isinstance(value, str) or not value.strip():
+                    raise ValueError(
+                        f"{SECTION_14}: {field} is required and cannot be blank"
+                    )
+        return data
 
     @model_validator(mode="after")
     def check_payout(self) -> Self:
         """An approval pays something, and a decline or referral pays nothing."""
-        if self.decision == "approve" and round(self.payout, 2) == 0:
-            raise ValueError("An approval needs a payout of at least one cent")
+        if self.decision == "approve" and round(self.payout, 2) <= 0:
+            raise ValueError(
+                f"{SECTION_14}: An approval needs a payout of at least one cent"
+            )
         if self.decision != "approve" and self.payout != 0:
-            raise ValueError("A decline or a referral has a payout of zero")
+            raise ValueError(
+                f"{SECTION_14}: A decline or a referral has a payout of zero"
+            )
         return self
 
 
@@ -229,14 +267,11 @@ class PayoutRequest(BaseModel):
     paid_by_others: float = Field(ge=0, description="Paid or refunded by others")
 
 
-class CalculationStep(BaseModel):
-    step: str
-    amount: float
+class ClaimPayoutRequest(PayoutRequest):
+    thread_id: str | None = Field(description="The attempt, or null for a preview")
 
 
-class Payout(BaseModel):
-    calculation: list[CalculationStep]
-    payout: float
+class Payout(PayoutCalculation):
     needs_sign_off: bool
 
 

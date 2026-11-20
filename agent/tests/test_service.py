@@ -81,7 +81,7 @@ def test_a_paid_sign_off_can_finish_the_saved_checkpoint(
     assert claim["payment"]["signed_off_by"] == "Dana Whitfield"
     signed_off_at = signed.json()["decision"]["signed_off_at"]
     assert claim["payment"]["signed_off_at"] == signed_off_at
-    assert len(model.prompts) == 2
+    assert len(model.prompts) == 3
     session = f"CLM-1002:{claim['thread_id']}"
     assert [(t["langfuse_session_id"], t["langfuse_trace_name"]) for t in traces] == [
         (session, "Work claim"),

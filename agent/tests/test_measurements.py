@@ -11,7 +11,7 @@ from sqlalchemy import event, select
 from agent import api, dispatcher, harness
 from agent.backend_client import Refused
 from agent.tests.queue_setup import leave_waiting
-from agent.tests.stubs import graph_on, record, stub
+from agent.tests.stubs import calculate, graph_on, record, stub
 from backend.database import engine, model_calls, work_slices
 from backend.tests.run_requests import configuration
 
@@ -82,7 +82,9 @@ def test_active_slices_exclude_wait_and_split_run_attribution(client, monkeypatc
     second = api.start_run(configuration())["run_id"]
     saver = InMemorySaver()
     harness.work_claim(
-        "CLM-1001", graph_on(stub(record("approve", 1350)), saver), first
+        "CLM-1001",
+        graph_on(stub(calculate(1350), record("approve", 1350)), saver),
+        first,
     )
     before = rows(work_slices)[0]["seconds"]
     for _ in range(100):
@@ -94,7 +96,7 @@ def test_active_slices_exclude_wait_and_split_run_attribution(client, monkeypatc
     assert [row["run_id"] for row in slices] == [first, second, None]
     assert slices[0]["seconds"] == before
     assert all(row["seconds"] < 20 for row in slices)
-    assert [row["run_id"] for row in rows(model_calls)] == [first, None]
+    assert [row["run_id"] for row in rows(model_calls)] == [first, first, None]
 
 
 def test_failure_and_restart_keep_separate_active_slices(monkeypatch):
@@ -130,7 +132,8 @@ def test_payment_resume_does_not_wait_for_instructions_or_telemetry(
     client, monkeypatch
 ):
     saver = InMemorySaver()
-    harness.work_claim("CLM-1001", graph_on(stub(record("approve", 1350)), saver))
+    model = stub(calculate(1350), record("approve", 1350))
+    harness.work_claim("CLM-1001", graph_on(model, saver))
     client.post("/api/claims/CLM-1001/sign-off", json={"handler_id": "HND-01"})
     elapsed = [0.0]
     monkeypatch.setattr(harness, "monotonic", lambda: elapsed[0])

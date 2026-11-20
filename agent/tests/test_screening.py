@@ -16,7 +16,7 @@ from sqlalchemy import select
 
 from agent import api, harness, models, screening
 from agent.tests.records import steps_of
-from agent.tests.stubs import graph_on, record, stub
+from agent.tests.stubs import calculate, graph_on, record, stub
 from agent.tools import ClaimState
 from backend.database import engine, model_calls
 from backend.tests.run_requests import configuration
@@ -375,7 +375,7 @@ def test_passed_screen_is_preserved_while_a_claim_waits_for_sign_off(
     prompts = use_checker(monkeypatch, screen, reply("screen", flagged=False))
     claim_id = "CLM-1002"
     saver = InMemorySaver()
-    graph = graph_on(stub(record("approve", 1350)), saver)
+    graph = graph_on(stub(calculate(1350), record("approve", 1350)), saver)
     assert "waiting for sign-off" in harness.work_claim(claim_id, graph)
     assert client.post(f"/api/claims/{claim_id}/sign-off").status_code == 200
     assert "approve" in harness.carry_on(

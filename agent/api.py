@@ -51,6 +51,8 @@ class DecisionInput(TypedDict):
     payout: float
     section: str
     reason: str
+    decided_by: str
+    thread_id: str
 
 
 LineKind = Literal[
@@ -133,19 +135,18 @@ def get_configuration(version: int) -> dict[str, Any]:
     return _call("GET", f"/configurations/{version}")
 
 
+class PayoutInput(TypedDict):
+    """The payout request with its bound attempt."""
+
+    benefit: Benefit
+    lines: list[dict[str, Any]]
+    paid_by_others: float
+    thread_id: str
+
+
 def calculate_payout(
-    claim_id: str,
-    benefit: Benefit,
-    lines: list[Line],
-    paid_by_others: float,
-    *,
-    via: gateway.Gateway | None = None,
+    claim_id: str, body: PayoutInput, *, via: gateway.Gateway | None = None
 ) -> dict[str, Any]:
-    body = {
-        "benefit": benefit,
-        "lines": [line.model_dump() for line in lines],
-        "paid_by_others": paid_by_others,
-    }
     if via:
         return via.call(gateway.APP, "calculate_payout", claim_id=claim_id, **body)
     return _call("POST", f"/claims/{claim_id}/payout", json=body)

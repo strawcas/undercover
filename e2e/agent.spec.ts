@@ -1,5 +1,5 @@
 import { expect, test } from "./fixtures";
-import { post, resumed } from "./api";
+import { decide, post, resumed } from "./api";
 import { agentHeaders } from "./agent_credentials";
 
 // These tests stand in for the agent by calling the API through the
@@ -37,7 +37,7 @@ test("the claim page shows the agent at work", async ({ page, request }) => {
     page.getByText('get_claim: {"claim_id":"CLM-1003"}').first(),
   ).toBeVisible();
 
-  await post(request, "/api/claims/CLM-1003/decision", {
+  await decide(request, "CLM-1003", {
     decision: "approve",
     payout: 500,
     section: "Section 7, Emergency Medical",
@@ -63,7 +63,7 @@ test("a sign-off on the dashboard records a payment and the signer", async ({
   request,
 }) => {
   await post(request, "/api/claims/CLM-1020/start", { thread_id: "e2e-2" });
-  await post(request, "/api/claims/CLM-1020/decision", {
+  await decide(request, "CLM-1020", {
     decision: "approve",
     payout: 1350,
     section: "Section 5, Baggage and Personal Effects",

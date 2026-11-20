@@ -11,7 +11,7 @@ from sqlalchemy import update
 
 from agent import api, harness
 from agent.tests.records import claim_of, steps_of
-from agent.tests.stubs import StubModel, call, decide, graph_on, record, stub
+from agent.tests.stubs import StubModel, calculate, call, decide, graph_on, record, stub
 from backend.database import claims, decisions, engine
 
 
@@ -74,7 +74,7 @@ def test_a_claim_stopped_partway_carries_on_from_its_last_step(client):
     assert (stopped["status"], stopped["attempts"]) == ("in_progress", 1)
     before = steps_of(client, "CLM-1001")
 
-    model = stub(record("approve", 420.0))
+    model = stub(calculate(420.0), record("approve", 420.0))
     report = harness.carry_on(api.get_claim("CLM-1001"), graph_on(model, saver))
     assert report == "CLM-1001  approve  $420.00"
     claim = claim_of(client, "CLM-1001")
@@ -86,7 +86,7 @@ def test_a_claim_stopped_partway_carries_on_from_its_last_step(client):
     assert earlier == ["get_claim", "get_policy"]
     steps = steps_of(client, "CLM-1001")
     assert steps[: len(before)] == before
-    assert len(steps) == len(before) + 2
+    assert len(steps) == len(before) + 4
     assert {s["thread_id"] for s in steps} == {claim["thread_id"]}
     assert "error" not in {s["kind"] for s in steps}
 
@@ -165,7 +165,9 @@ def test_signed_off_decision_resumes_before_tool_checkpoint(
             monkeypatch, api, "record_decision", KeyboardInterrupt(), carry_out=True
         )
     with pytest.raises(KeyboardInterrupt):
-        harness.work_claim("CLM-1002", graph_on(stub(record("approve", 1350)), saver))
+        harness.work_claim(
+            "CLM-1002", graph_on(stub(calculate(1350), record("approve", 1350)), saver)
+        )
     before = claim_of(client, "CLM-1002")
     client.post("/api/claims/CLM-1002/sign-off", json={"handler_id": "HND-01"})
     graph = graph_on(stub(), saver)
@@ -199,7 +201,7 @@ def test_stale_payment_node_uses_the_backend_paid_outcome(client, monkeypatch):
     saver = InMemorySaver()
     claim_id = "CLM-1001"
     fail_once(monkeypatch, api, "pay_claim", KeyboardInterrupt())
-    graph = graph_on(stub(record("approve", 900)), saver)
+    graph = graph_on(stub(calculate(900), record("approve", 900)), saver)
     with pytest.raises(KeyboardInterrupt):
         harness.work_claim(claim_id, graph)
     claim = api.get_claim(claim_id)
@@ -220,7 +222,7 @@ def test_stale_payment_node_uses_the_backend_paid_outcome(client, monkeypatch):
 def test_legacy_signature_keeps_the_pause_until_the_backend_pays(client, monkeypatch):
     claim_id = "CLM-1002"
     saver = InMemorySaver()
-    graph = graph_on(stub(record("approve", 1350)), saver)
+    graph = graph_on(stub(calculate(1350), record("approve", 1350)), saver)
     assert "waiting for sign-off" in harness.work_claim(claim_id, graph)
     with engine().begin() as db:
         db.execute(
