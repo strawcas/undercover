@@ -7,6 +7,8 @@ from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 from fastapi.routing import APIRoute
 
+from backend.models import ClaimPayoutRequest
+
 OPERATIONS = frozenset(
     {
         "get_claim",
@@ -34,5 +36,12 @@ def agent_contract(app: FastAPI) -> dict[str, Any]:
     for methods in schema["paths"].values():
         for operation in methods.values():
             operation.pop("security", None)
-    schema["components"].pop("securitySchemes", None)
+    components = schema["components"]
+    components.pop("securitySchemes", None)
+    # The Gateway cannot import the nullable union used by direct payout previews.
+    payout = components["schemas"][ClaimPayoutRequest.__name__]
+    payout["properties"]["thread_id"] = {
+        "type": "string",
+        "description": "The current claim attempt",
+    }
     return schema

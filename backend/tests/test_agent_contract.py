@@ -44,4 +44,8 @@ def test_agent_contract_is_scoped_and_authenticates_both_callers():
         schema["components"]["schemas"][decision_body]["required"]
     )
     [payout_body] = references(operations["calculate_payout"]["requestBody"])
-    assert "thread_id" in schema["components"]["schemas"][payout_body]["required"]
+    payout_request = schema["components"]["schemas"][payout_body]
+    assert "thread_id" in payout_request["required"]
+    thread_id = payout_request["properties"]["thread_id"]
+    assert thread_id["type"] == "string"
+    assert "anyOf" not in thread_id

@@ -1,5 +1,7 @@
 # Status
 
+The AgentCore Gateway contract now requires a string `thread_id` for `calculate_payout`. Direct payout previews accept `null`, and approvals still require a calculation for the current attempt. To apply the fix on AWS, deploy the updated app, fetch its new `/api/agent/openapi.json`, and update the existing `undercover-app` target with that schema.
+
 Context phase 5 gives tool calls, sourced lookups, memory searches and confirmed memory saves structured timeline entries. Refusals identify their source and show readable section 14 errors. Every timeline write carries the attempt ID checked under the claim lock; only the private memory receipt route can report provider-confirmed events. Partial saves are visible and replay-safe. The claim page groups sources under Context used and shows the maker, timestamp, manual version and calculation lines. At 390px the page has no horizontal document overflow; the stand-in passed light/dark Playwright MCP inspection with no console errors after a clean load. A narrow-screen regression accompanies that navigation adjustment.
 
 The phase 5 production build and full offline `npm run check` passed on Windows: 389 Python tests (96.38% coverage), 121 dashboard unit tests (96.42% statements) and 11 Playwright tests. The isolated backend and context package imports also passed. Pytest reported the existing Mangum event-loop deprecation warning.
