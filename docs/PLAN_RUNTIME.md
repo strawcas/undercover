@@ -43,11 +43,11 @@ Have the graph clear its prior decision and reset its model-call allowance when 
 
 Extend the current decision panel with **Sign off** and **Send back** for eligible seniors. Use the existing form and polling patterns to preserve the note while editing and show the committed outcome promptly. Add **Sent back** to the queue, show returned decisions with their notes, senders and timestamps beside the current decision, and display the notes in the timeline. Tell the handler when a sent-back claim is waiting for the next dispatch.
 
-- [ ] Backend tests cover blank and oversized notes, senior authorization, 409s for copies or wrong states, full historical decision and review retention, and a simultaneous sign-off and send back producing one winner.
-- [ ] Race tests show that resume and dispatch can take the sent-back claim only once, that dispatch skips a live resume, and that dispatch recovers a missed invocation or an expired resume before or after the note has reached the checkpoint. A delayed write from the prior decision cannot change the replacement, and repeated reviews keep previous run results frozen.
-- [ ] Stub-model tests cover paid replacement, replacement held again, repeated send backs, referral with a reason, a fresh calculation and full call allowance, and code-owned review guidance surviving a changed configuration prompt. The earlier approval produces no payment or memory event.
-- [ ] Dashboard tests and Playwright MCP on stand-ins verify both senior actions, the 1,000-character input, queue status, recovery wording, and decision history and timeline attribution. Ordinary handlers and copies have no review controls.
-- [ ] `npm run check` passes.
+- [x] Backend tests cover blank and oversized notes, senior authorization, 409s for copies or wrong states, full historical decision and review retention, and a simultaneous sign-off and send back producing one winner.
+- [x] Race tests show that resume and dispatch can take the sent-back claim only once, that dispatch skips a live resume, and that dispatch recovers a missed invocation or an expired resume before or after the note has reached the checkpoint. A delayed write from the prior decision cannot change the replacement, and repeated reviews keep previous run results frozen.
+- [x] Stub-model tests cover paid replacement, replacement held again, repeated send backs, referral with a reason, a fresh calculation and full call allowance, and code-owned review guidance surviving a changed configuration prompt. The earlier approval produces no payment or memory event.
+- [x] Dashboard tests and Playwright MCP on stand-ins verify both senior actions, the 1,000-character input, queue status, recovery wording, and decision history and timeline attribution. Ordinary handlers and copies have no review controls.
+- [x] The isolated imports, 409 Python tests and 123 dashboard tests in `npm run check` passed. All 12 Playwright tests passed on rerun with the timestamp check scoped to the review entry.
 
 ## Phase 3 — Serve the agent through AgentCore
 

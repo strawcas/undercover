@@ -111,6 +111,42 @@ const held: Claim = {
   payment: null,
 };
 
+it("preserves a senior's review draft and shows the returned approval", async () => {
+  const { routes } = showClaim(held);
+  const note = "Check the receipt.";
+  const returned: Claim = {
+    ...held,
+    status: "sent_back",
+    decision: null,
+    returned_decisions: [
+      {
+        decision: held.decision ?? approval,
+        note,
+        handler: "Dana Whitfield",
+        reviewed_at: decidedAt,
+        approval_limit: 1000,
+      },
+    ],
+  };
+  routes["POST /api/claims/CLM-1002/send-back"] = returned;
+  fireEvent.click(await screen.findByRole("button", { name: "Send back" }));
+  const input = screen.getByRole("textbox", {
+    name: "What should the agent look at again?",
+  });
+  fireEvent.change(input, { target: { value: note } });
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  fireEvent.click(screen.getByRole("button", { name: "Send back" }));
+  expect(
+    screen.getByRole("textbox", {
+      name: "What should the agent look at again?",
+    }),
+  ).toHaveProperty("value", note);
+  routes["GET /api/claims/CLM-1002"] = returned;
+  fireEvent.click(screen.getByRole("button", { name: "Send back" }));
+  await screen.findByText("This claim is waiting for the next dispatch.");
+  expect(screen.getByText("Previous approval for $1,350.00")).toBeTruthy();
+});
+
 it("removes the previous payout and sign-off action when navigating to a missing claim", async () => {
   stubApi({ "GET /api/claims/CLM-1002": held });
   render(

@@ -4,12 +4,13 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from mangum import Mangum
 from sqlalchemy import Connection, RowMapping, insert, or_, select, update
 
 from backend import (
     agent_service,
+    claim_reviews,
     configurations,
     evaluation_completion,
     evaluations,
@@ -21,12 +22,10 @@ from backend import settings as platform_settings
 from backend.agent_contract import agent_contract
 from backend.auth import (
     CurrentHandler,
+    ReviewHandler,
     SeniorHandler,
-    VerifiedEmail,
     agent_or_handler,
-    handler_for_email,
     require_agent,
-    require_senior,
 )
 from backend.clock import now
 from backend.configuration_models import ClaimConfiguration, ConfigurationHistory
@@ -45,18 +44,23 @@ from backend.database import (
     seed,
     settings,
     steps,
+    upgrade,
 )
-from backend.decision_records import calculation_for, require_attempt
+from backend.decision_records import calculation_for, require_attempt, require_revision
 from backend.dependencies import Database
 from backend.documents import manual_version
 from backend.improvement_models import EvaluationQuote
 from backend.improvement_routes import router as improvement_router
 from backend.models import (
     Claim,
+    ClaimHeartbeat,
     ClaimPayoutRequest,
+    ClaimReview,
     ClaimSummary,
     Decision,
+    DecisionAttemptRequest,
     DecisionRequest,
+    DecisionRevision,
     DispatchRequest,
     Evaluation,
     EvaluationDetail,
@@ -81,10 +85,11 @@ from backend.models import (
     RunRequest,
     RunSelectionRequest,
     SecurityStepRequest,
-    StartRequest,
+    SendBackRequest,
     Status,
     Step,
     StepContent,
+    TakeClaimRequest,
     WorkSliceRequest,
 )
 from backend.payout import needs_sign_off, work_out_payout
@@ -96,8 +101,11 @@ ATTEMPTS = 2
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Seed the database on startup if it has no tables yet."""
-    if not running_on_lambda() and not is_seeded(engine()):
-        seed(engine())
+    if not running_on_lambda():
+        if is_seeded(engine()):
+            upgrade(engine())
+        else:
+            seed(engine())
     yield
 
 
@@ -164,7 +172,12 @@ def find_claim(db: Connection, claim_id: str, lock: bool = False) -> RowMapping:
                 .where(claims.c.claim_id == claim_id)
                 .values(thread_id=claims.c.thread_id)
             )
-        query = query.with_for_update(of=claims)
+        else:
+            db.execute(
+                select(claims.c.claim_id)
+                .where(claims.c.claim_id == claim_id)
+                .with_for_update()
+            ).first()
     row = db.execute(query).mappings().first()
     if row is None:
         raise HTTPException(404, f"Claim {claim_id} not found")
@@ -187,7 +200,7 @@ def set_status(db: Connection, claim_id: str, status: Status) -> None:
     )
 
 
-def to_summary(row: RowMapping) -> ClaimSummary:
+def to_summary(row: RowMapping, at: str) -> ClaimSummary:
     """Build a claim's line in the queue from its row."""
     return ClaimSummary(
         **row["record"]
@@ -196,11 +209,12 @@ def to_summary(row: RowMapping) -> ClaimSummary:
             "customer_name": row["customer_name"],
             "decision": row["decision"],
             "payout": row["payout"],
+            "review_active": claim_reviews.review_active(row, at),
         }
     )
 
 
-def to_claim(row: RowMapping | dict[str, Any]) -> Claim:
+def to_claim(row: RowMapping) -> Claim:
     """Build a claim in full, with its decision and payment, from its row."""
     decision = None
     if row["decision"] is not None:
@@ -220,6 +234,9 @@ def to_claim(row: RowMapping | dict[str, Any]) -> Claim:
             "sign_off_available": can_settle_sign_off(row, row["current_limit"]),
             "evaluation_id": row["evaluation_id"],
             "source_id": row["source_id"],
+            "returned_decisions": row["returned_decisions"] or [],
+            "revision": row["revision"] or 0,
+            "review_active": claim_reviews.review_active(row, now()),
         }
     )
 
@@ -266,7 +283,8 @@ def list_claims(db: Database) -> list[ClaimSummary]:
     rows = db.execute(
         claim_view.where(claims.c.evaluation_id.is_(None)).order_by(claims.c.claim_id)
     ).mappings()
-    return [to_summary(row) for row in rows]
+    at = now()
+    return [to_summary(row, at) for row in rows]
 
 
 @app.get("/api/claims/{claim_id}", operation_id="get_claim", dependencies=shared_read)
@@ -358,10 +376,12 @@ def list_handlers(handler: CurrentHandler, db: Database) -> list[Handler]:
 @app.post(
     "/api/claims/{claim_id}/start", operation_id="start_claim", dependencies=agent_only
 )
-def start_claim(claim_id: str, request: StartRequest, db: Database) -> Claim:
+def start_claim(claim_id: str, request: DecisionAttemptRequest, db: Database) -> Claim:
     """Start work on a waiting claim, which moves it to in progress."""
     improvement_budget.admit_run(db, find_claim(db, claim_id)["evaluation_id"])
-    if find_claim(db, claim_id, lock=True)["status"] != "waiting":
+    claim = find_claim(db, claim_id, lock=True)
+    require_revision(claim, request.revision)
+    if claim["status"] != "waiting":
         raise HTTPException(409, f"Claim {claim_id} is not waiting")
     db.execute(
         update(claims)
@@ -377,11 +397,13 @@ def start_claim(claim_id: str, request: StartRequest, db: Database) -> Claim:
     return to_claim(find_claim(db, claim_id))
 
 
-def original_for_memory(db: Connection, claim_id: str, thread_id: str) -> RowMapping:
+def original_for_memory(
+    db: Connection, claim_id: str, request: DecisionAttemptRequest
+) -> RowMapping:
     """Lock the original claim and verify the memory receipt's attempt."""
-    find_claim(db, claim_id, lock=True)
-    claim = find_claim(db, claim_id)
-    require_attempt(claim, thread_id)
+    claim = find_claim(db, claim_id, lock=True)
+    require_attempt(claim, request.thread_id)
+    require_revision(claim, request.revision)
     if claim["evaluation_id"] is not None:
         raise HTTPException(409, "Customer memory is available for original claims")
     return claim
@@ -415,10 +437,10 @@ def list_pending_memory(db: Database) -> list[str]:
     dependencies=agent_only,
 )
 def prepare_memory(
-    claim_id: str, request: StartRequest, db: Database
+    claim_id: str, request: DecisionAttemptRequest, db: Database
 ) -> dict[str, str]:
     """Mark an original attempt to save memory after recording its decision."""
-    claim = original_for_memory(db, claim_id, request.thread_id)
+    claim = original_for_memory(db, claim_id, request)
     if claim["status"] != "decided" or (
         claim["decision"] == "approve" and claim["paid_at"] is None
     ):
@@ -438,7 +460,7 @@ def finish_memory(
     claim_id: str, request: FinishMemoryRequest, db: Database
 ) -> dict[str, str]:
     """Record confirmed events and close the receipt when both are saved."""
-    claim = original_for_memory(db, claim_id, request.thread_id)
+    claim = original_for_memory(db, claim_id, request)
     if claim["decision"] is None:
         raise HTTPException(409, "The claim has no recorded decision")
     if not claim["memory_pending"]:
@@ -448,6 +470,7 @@ def finish_memory(
             steps.c.claim_id == claim_id,
             steps.c.thread_id == request.thread_id,
             steps.c.kind == "memory_save",
+            steps.c.created_at >= claim["decided_at"],
         )
     ).scalars()
     recorded = {
@@ -521,9 +544,9 @@ def list_steps(claim_id: str, handler: CurrentHandler, db: Database) -> list[Ste
 )
 def record_decision(claim_id: str, request: DecisionRequest, db: Database) -> Claim:
     """Record a claim's decision once; an approval waits to be paid or signed off."""
-    find_claim(db, claim_id, lock=True)
-    claim = find_claim(db, claim_id)
+    claim = find_claim(db, claim_id, lock=True)
     require_attempt(claim, request.thread_id)
+    require_revision(claim, request.revision)
     payout = round(request.payout, 2)
     if claim["decision"] is not None:
         if (claim["decision"], claim["payout"]) == (request.decision, payout):
@@ -564,11 +587,10 @@ def calculate_payout(
     claim_id: str, request: ClaimPayoutRequest, db: Database
 ) -> Payout:
     """Work out the payout and retain the current attempt's calculation."""
-    if request.thread_id is not None:
-        find_claim(db, claim_id, lock=True)
-    claim = find_claim(db, claim_id)
+    claim = find_claim(db, claim_id, lock=request.thread_id is not None)
     if request.thread_id is not None:
         require_attempt(claim, request.thread_id)
+        require_revision(claim, request.revision)
     policy = find_policy(db, claim["record"]["policy_id"])
     result = work_out_payout(
         policy, plans(db), request, platform_settings.approval_limit(db)
@@ -593,11 +615,9 @@ def pay_claim(claim_id: str, request: PaymentRequest, db: Database) -> Claim:
     """Pay an approved claim its payout once, unless it needs a handler's sign-off."""
     check_payment_limit(request.amount, platform_settings.approval_limit(db))
     claim = find_claim(db, claim_id, lock=True)
+    require_revision(claim, request.revision)
     if claim["decision"] != "approve":
         raise HTTPException(409, f"Claim {claim_id} has not been approved")
-    if claim["status"] == "decided" and claim["paid_at"] is None:
-        # A joined payment can be newer than the snapshot taken before the row lock.
-        claim = find_claim(db, claim_id)
     amount = round(request.amount, 2)
     if claim["paid_at"] is not None:
         if amount == claim["amount"]:
@@ -652,22 +672,19 @@ def settle_payment(db: Connection, claim_id: str, amount: float, paid_at: str) -
 
 
 @app.post("/api/claims/{claim_id}/sign-off", operation_id="sign_off_claim")
-def sign_off_claim(claim_id: str, email: VerifiedEmail) -> Claim:
+def sign_off_claim(claim_id: str, handler: ReviewHandler, http: Request) -> Claim:
     """Record the senior handler's sign-off and pay the approved payout."""
     with engine().begin() as db:
-        handler = require_senior(handler_for_email(email, db))
-        signed = sign_off_payment(db, claim_id, handler)
+        claim = lock_review(db, claim_id, http.headers.get("If-Match"))
+        signed = sign_off_payment(db, claim, handler)
     agent_service.resume_claim(claim_id)
     return signed
 
 
-def sign_off_payment(db: Connection, claim_id: str, handler: Handler) -> Claim:
+def sign_off_payment(db: Connection, claim: RowMapping, handler: Handler) -> Claim:
     """Settle the locked approval in the handler's transaction."""
-    claim = find_claim(db, claim_id, lock=True)
-    if claim["evaluation_id"] is not None:
-        raise HTTPException(409, "Evaluation claims cannot be signed off")
-    if not can_settle_sign_off(claim, platform_settings.approval_limit(db, lock=True)):
-        raise HTTPException(409, f"Claim {claim_id} is not waiting for sign-off")
+    claim_id = claim["claim_id"]
+    run_records.preserve_hold(db, claim)
     db.execute(
         update(claims).where(claims.c.claim_id == claim_id).values(memory_pending=False)
     )
@@ -681,17 +698,77 @@ def sign_off_payment(db: Connection, claim_id: str, handler: Handler) -> Claim:
     return settle_payment(db, claim_id, claim["payout"], paid_at)
 
 
+def lock_review(db: Connection, claim_id: str, revision: str | None) -> RowMapping:
+    """Lock a reviewable claim and re-read its decision after taking the lock."""
+    claim = find_claim(db, claim_id, lock=True)
+    if claim["evaluation_id"] is not None:
+        raise HTTPException(409, "Evaluation claims cannot be reviewed")
+    if not can_settle_sign_off(claim, platform_settings.approval_limit(db, lock=True)):
+        raise HTTPException(409, f"Claim {claim_id} is not waiting for sign-off")
+    if revision is not None and revision != f'"{claim["revision"] or 0}"':
+        raise HTTPException(
+            409, "The decision changed. Reload the claim before reviewing it"
+        )
+    return claim
+
+
+@app.post("/api/claims/{claim_id}/send-back", operation_id="send_back_claim")
+def send_back_claim(
+    claim_id: str, request: SendBackRequest, handler: ReviewHandler, http: Request
+) -> Claim:
+    """Return a held approval for a fresh decision with a senior handler's note."""
+    with engine().begin() as db:
+        claim = lock_review(db, claim_id, http.headers.get("If-Match"))
+        if claim["status"] != "waiting_for_sign_off" or claim["signed_off_by"]:
+            raise HTTPException(409, f"Claim {claim_id} is not waiting for review")
+        review = ClaimReview(note=request.note, handler=handler.name, reviewed_at=now())
+        run_records.preserve_hold(db, claim)
+        claim_reviews.record_return(db, claim, review)
+        add_step(db, claim_id, claim["thread_id"], "claim_review", review)
+        returned = to_claim(find_claim(db, claim_id))
+    agent_service.resume_claim(claim_id)
+    return returned
+
+
+@app.post(
+    "/api/claims/{claim_id}/take-review",
+    operation_id="take_review_claim",
+    dependencies=agent_only,
+)
+def take_review_claim(claim_id: str, request: TakeClaimRequest, db: Database) -> Claim:
+    """Give one worker the lease for a returned claim."""
+    improvement_budget.admit_run(db, request.run_id)
+    claim = find_claim(db, claim_id, lock=True)
+    claim_reviews.take(db, claim, request.owner, request.run_id)
+    return to_claim(find_claim(db, claim_id))
+
+
+@app.put(
+    "/api/claims/{claim_id}/review-heartbeat",
+    operation_id="review_heartbeat",
+    dependencies=agent_only,
+)
+def review_heartbeat(
+    claim_id: str, request: ClaimHeartbeat, db: Database
+) -> dict[str, str]:
+    """Renew or release the review lease for the current owner."""
+    claim = find_claim(db, claim_id, lock=True)
+    claim_reviews.update_heartbeat(db, claim, request.owner, request.working)
+    return {"status": "recorded"}
+
+
 @app.post(
     "/api/claims/{claim_id}/hold-limit-payment",
     operation_id="hold_limit_payment",
     dependencies=agent_only,
 )
-def hold_limit_payment(claim_id: str, db: Database) -> Claim:
+def hold_limit_payment(claim_id: str, request: DecisionRevision, db: Database) -> Claim:
     """Hold an unpaid approval refused under the current approval limit."""
     run_id = find_claim(db, claim_id)["evaluation_id"]
     if run_id is not None:
         run_records.validate_run(db, run_id)
     claim = find_claim(db, claim_id, lock=True)
+    require_revision(claim, request.revision)
     if claim["paid_at"] is not None and claim["signed_off_by"] is not None:
         return to_claim(claim)
     if (
@@ -719,8 +796,8 @@ def hold_gateway_payment(
     claim_id: str, request: GatewayHoldRequest, db: Database
 ) -> Claim:
     """Hold an unpaid approval after the Gateway refused payment."""
-    find_claim(db, claim_id, lock=True)
-    claim = find_claim(db, claim_id)
+    claim = find_claim(db, claim_id, lock=True)
+    require_revision(claim, request.revision)
     if claim["decision"] != "approve" or claim["paid_at"] is not None:
         raise HTTPException(409, "Only an unpaid approval can be held by the Gateway")
     if claim["status"] == "waiting_for_sign_off" and claim["gateway_hold"] is not None:
@@ -751,6 +828,7 @@ def hold_gateway_payment(
 def fail_claim(claim_id: str, request: FailureRequest, db: Database) -> Claim:
     """Put a failed claim back in the queue, or leave it for a handler after two."""
     claim = find_claim(db, claim_id, lock=True)
+    require_revision(claim, request.revision)
     if claim["status"] != "in_progress":
         raise HTTPException(409, f"Claim {claim_id} is not in progress")
     if claim["decision"] is not None:
@@ -876,6 +954,7 @@ def record_model_call(
 def admit_claim(claim_id: str, request: RunAdmission, db: Database) -> dict[str, str]:
     """Check stop and spending immediately before new claim model work."""
     claim = find_claim(db, claim_id)
+    require_revision(claim, request.revision)
     if claim["evaluation_id"] is not None and request.run_id != claim["evaluation_id"]:
         raise HTTPException(409, "Evaluation work must use its own run")
     improvement_budget.admit_run(db, request.run_id)

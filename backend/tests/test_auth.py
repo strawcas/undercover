@@ -39,6 +39,7 @@ def test_route_inventory_requires_the_right_credential():
     }
     senior = {
         "sign_off_claim",
+        "send_back_claim",
         "change_settings",
         "start_round",
         "stop_round",
@@ -55,6 +56,8 @@ def test_route_inventory_requires_the_right_credential():
         "calculate_payout",
         "pay_claim",
         "hold_limit_payment",
+        "take_review_claim",
+        "review_heartbeat",
         "hold_gateway_payment",
         "fail_claim",
         "start_run",

@@ -1,7 +1,8 @@
-import type { Claim, Payment, PayoutCalculation } from "../api";
+import { useId } from "react";
+import type { Claim, Decision, Payment, PayoutCalculation } from "../api";
 import { money, timestamp } from "../format";
 import { DecisionChip } from "./Chips";
-import { SignOffForm } from "./SignOffForm";
+import { ClaimReviewForm } from "./ClaimReviewForm";
 
 type SignOff = Pick<Payment, "signed_off_by" | "signed_off_at">;
 
@@ -11,7 +12,18 @@ function whoAndWhen({ signed_off_by, signed_off_at }: SignOff): string | null {
     : null;
 }
 
+function waitingForDispatch(claim: Claim): boolean {
+  return (
+    claim.status === "sent_back" ||
+    (claim.status === "in_progress" &&
+      Boolean(claim.returned_decisions?.length) &&
+      !claim.review_active)
+  );
+}
+
 function progress(claim: Claim): string {
+  if (waitingForDispatch(claim))
+    return "This claim is waiting for the next dispatch.";
   if (claim.status === "in_progress")
     return "The agent is working on this claim.";
   if (claim.status === "left_for_handler")
@@ -30,46 +42,73 @@ export function DecisionPanel({
     <section className="panel" aria-labelledby="decision-title">
       <h2 id="decision-title">Decision</h2>
       {!decision && <p className="muted">{progress(claim)}</p>}
-      {decision && (
-        <>
-          <div className="decision-line">
-            <DecisionChip decision={decision.decision} />
-            <span className="payout mono">{money(decision.payout)}</span>
-          </div>
-          <p className="section-ref">{decision.section}</p>
-          <p className="reason">{decision.reason}</p>
-          <dl className="facts">
-            <div>
-              <dt>Decided by</dt>
-              <dd>{decision.decided_by}</dd>
-            </div>
-            <div>
-              <dt>Decided at</dt>
-              <dd>
-                <time dateTime={decision.decided_at}>
-                  {timestamp(decision.decided_at)}
-                </time>
-              </dd>
-            </div>
-            <div>
-              <dt>Manual version</dt>
-              <dd className="mono">{decision.manual_version}</dd>
-            </div>
-          </dl>
-          {decision.calculation && <Calculation value={decision.calculation} />}
-        </>
-      )}
+      {decision && <DecisionDetails decision={decision} />}
       <PaymentStatus claim={claim} onSignedOff={onSignedOff} />
+      {claim.returned_decisions && claim.returned_decisions.length > 0 && (
+        <section aria-labelledby="returned-decisions-title">
+          <h3 id="returned-decisions-title">Returned decisions</h3>
+          {claim.returned_decisions.map((review) => (
+            <article className="document" key={review.reviewed_at}>
+              <p>
+                Sent back by {review.handler},{" "}
+                <time dateTime={review.reviewed_at}>
+                  {timestamp(review.reviewed_at)}
+                </time>
+              </p>
+              <p className="story">{review.note}</p>
+              <details>
+                <summary>
+                  Previous approval for {money(review.decision.payout)}
+                </summary>
+                <DecisionDetails decision={review.decision} />
+              </details>
+            </article>
+          ))}
+        </section>
+      )}
     </section>
   );
 }
 
-function Calculation({ value }: Readonly<{ value: PayoutCalculation }>) {
+function DecisionDetails({ decision }: Readonly<{ decision: Decision }>) {
   return (
     <>
-      <h3 id="payout-calculation">Payout calculation</h3>
+      <div className="decision-line">
+        <DecisionChip decision={decision.decision} />
+        <span className="payout mono">{money(decision.payout)}</span>
+      </div>
+      <p className="section-ref">{decision.section}</p>
+      <p className="reason">{decision.reason}</p>
+      <dl className="facts">
+        <div>
+          <dt>Decided by</dt>
+          <dd>{decision.decided_by}</dd>
+        </div>
+        <div>
+          <dt>Decided at</dt>
+          <dd>
+            <time dateTime={decision.decided_at}>
+              {timestamp(decision.decided_at)}
+            </time>
+          </dd>
+        </div>
+        <div>
+          <dt>Manual version</dt>
+          <dd className="mono">{decision.manual_version}</dd>
+        </div>
+      </dl>
+      {decision.calculation && <Calculation value={decision.calculation} />}
+    </>
+  );
+}
+
+function Calculation({ value }: Readonly<{ value: PayoutCalculation }>) {
+  const heading = useId();
+  return (
+    <>
+      <h3 id={heading}>Payout calculation</h3>
       <div className="table-scroll">
-        <table className="table" aria-labelledby="payout-calculation">
+        <table className="table" aria-labelledby={heading}>
           <thead>
             <tr>
               <th scope="col">Line</th>
@@ -117,7 +156,11 @@ function PaymentStatus({
       />
     );
   return status === "in_progress" ? (
-    <p className="payment">Waiting for the agent to pay it.</p>
+    <p className="payment">
+      {waitingForDispatch(claim)
+        ? progress(claim)
+        : "Waiting for the agent to pay it."}
+    </p>
   ) : null;
 }
 
@@ -157,10 +200,13 @@ function HeldPayment({
           this held copy.
         </p>
       ) : (
-        <SignOffForm
+        <ClaimReviewForm
+          key={claim.revision ?? claim.decision?.decided_at}
           claimId={claim.claim_id}
+          revision={claim.revision ?? 0}
           onSignedOff={onSignedOff}
           previouslySignedOff={Boolean(signedOff)}
+          canSendBack={claim.status === "waiting_for_sign_off" && !signedOff}
         />
       )}
     </div>

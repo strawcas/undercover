@@ -1,5 +1,11 @@
 # Status
 
+Senior handlers can send a held approval back for a new decision. The claim page shows the original decision, note, reviewer and time, and keeps the note in the timeline. The agent reuses the claim thread and has a fresh model-call allowance. A dispatch picks up a missed handoff or a review worker that has gone five minutes without a heartbeat.
+
+The Runtime phase 2 review added fresh claim reads after locking, scoped the saved run outcome to its own claim work, and fenced stale writes and tool calls. The Gateway still has six operations. Existing deployments must create the additive Runtime tables and refresh the app target schema when they take the Runtime build.
+
+The offline checks passed with 409 Python tests, 123 dashboard tests and 12 Playwright tests. Playwright MCP verified both senior actions on a separate SQLite preview, including the note length, author and timestamp, timeline and replacement decision. Ordinary handlers and evaluation copies showed no review controls.
+
 Held originals pause on their claim thread. A senior sign-off commits the payment before asking the agent to resume that thread. The resumed graph saves the settled claim to customer memory when memory is enabled. Evaluation copies finish without pausing.
 
 If the agent never resumes a paid sign-off, the payment and handler attribution stand and the claim may still be missing from memory. Recovery retries memory writes that have already started.

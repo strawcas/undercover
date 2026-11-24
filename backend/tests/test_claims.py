@@ -18,6 +18,7 @@ def test_list_claims(client):
         "status": "waiting",
         "decision": None,
         "payout": None,
+        "review_active": False,
     }
 
 

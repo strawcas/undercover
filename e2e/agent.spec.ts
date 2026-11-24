@@ -153,3 +153,66 @@ test("a sign-off on the dashboard records a payment and the signer", async ({
   ).toBeVisible();
   expect(await resumed(request)).toContain("CLM-1020");
 });
+
+test("a senior returns an approval and can see the note and both decisions", async ({
+  page,
+  request,
+}) => {
+  const claimId = "CLM-1018";
+  const path = `/api/claims/${claimId}`;
+  const note = "Check the clinic receipt against section 7.";
+  await post(request, `${path}/start`, { thread_id: "review-thread" });
+  await decide(request, claimId, {
+    decision: "approve",
+    payout: 1350,
+    section: "Section 7",
+    reason: "The clinic charge is covered.",
+  });
+  await page.goto(`/claims/${claimId}`);
+  await expect(page.getByRole("button", { name: "Sign off" })).toBeVisible();
+  await page.getByRole("button", { name: "Send back" }).click();
+  const input = page.getByRole("textbox", {
+    name: "What should the agent look at again?",
+  });
+  await expect(input).toHaveAttribute("maxlength", "1000");
+  await expect(page.getByRole("button", { name: "Send back" })).toBeDisabled();
+  await input.fill(note);
+  await page.getByRole("button", { name: "Send back" }).click();
+  await expect(
+    page.locator(".page-header").getByText("Sent back"),
+  ).toBeVisible();
+  await expect(
+    page.getByText("This claim is waiting for the next dispatch."),
+  ).toBeVisible();
+  const history = page.getByRole("region", { name: "Returned decisions" });
+  await expect(history.getByText(/Sent back by Dana Whitfield/)).toBeVisible();
+  const reviewTime = history
+    .getByText(/Sent back by Dana Whitfield/)
+    .locator("time");
+  await expect(reviewTime).toHaveAttribute("datetime", /T/);
+  await expect(history.getByText(note)).toBeVisible();
+  const timeline = page.getByRole("region", { name: "Agent at work" });
+  await expect(timeline.getByText(note)).toBeVisible();
+  expect(await resumed(request)).toContain(claimId);
+  await page.getByRole("link", { name: "Back to queue" }).click();
+  const row = page.getByRole("row").filter({ hasText: claimId });
+  await expect(row.getByText("Sent back")).toBeVisible();
+  await row.getByRole("link", { name: claimId }).click();
+
+  await post(request, `${path}/take-review`, {
+    owner: "stand-in",
+    run_id: null,
+  });
+  await decide(request, claimId, {
+    decision: "refer",
+    payout: 0,
+    section: "Section 7",
+    reason: "A handler needs to check the original receipt.",
+  });
+  await expect(
+    page.getByText("A handler needs to check the original receipt."),
+  ).toBeVisible();
+  await expect(
+    history.getByText("Previous approval for $1,350.00"),
+  ).toBeVisible();
+});

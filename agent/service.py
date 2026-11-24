@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
@@ -19,10 +20,12 @@ from agent.backend_client import Refused
 from agent.checkpoints import checkpointer
 from agent.console import show_reports
 from agent.harness import (
+    cancel_resume,
     carry_on,
     queue_resume,
     release_claim,
     take_resume,
+    work_returned,
 )
 from backend import agent_key
 from backend.auth import require_agent
@@ -216,12 +219,15 @@ def decide_proposal(
     return {"status": "accepted"}
 
 
-def resume_owned(claim: dict[str, Any]) -> None:
+def resume_owned(claim: dict[str, Any], owner: str | None = None) -> None:
     """Resume an already reserved claim and always release ownership."""
     claim_id = claim["claim_id"]
     try:
         take_resume(claim_id)
-        carry_on(claim, None)
+        if owner is None:
+            carry_on(claim, None)
+        else:
+            work_returned(claim, owner, None, None)
     finally:
         release_claim(claim_id)
 
@@ -236,10 +242,11 @@ def health() -> dict[str, str]:
     "/api/claims/{claim_id}/resume", operation_id="resume_claim", status_code=202
 )
 def resume_claim(claim_id: str, background: BackgroundTasks) -> dict[str, str]:
-    """Accept a checkpoint resume for a claim already paid on sign-off."""
+    """Accept a checkpoint resume after a recorded senior handler review."""
     claim = api.get_claim(claim_id)
     payment = claim["payment"]
-    if (
+    sent_back = claim["status"] == api.Status.SENT_BACK
+    if not sent_back and (
         claim["status"] != api.Status.DECIDED
         or not payment
         or not payment["signed_off_by"]
@@ -247,7 +254,14 @@ def resume_claim(claim_id: str, background: BackgroundTasks) -> dict[str, str]:
         raise HTTPException(409, f"Claim {claim_id} has no paid sign-off to resume")
     if not queue_resume(claim):
         raise HTTPException(409, f"Claim {claim_id} is already being worked")
-    background.add_task(resume_owned, claim)
+    owner = str(uuid.uuid4()) if sent_back else None
+    try:
+        if owner is not None:
+            claim = api.take_review(claim_id, owner)
+    except Exception:
+        cancel_resume(claim_id)
+        raise
+    background.add_task(resume_owned, claim, owner)
     return {"status": "accepted"}
 
 

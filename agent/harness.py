@@ -1,6 +1,7 @@
 """Build and execute the durable claim graph, with one saver per execution."""
 
 import contextvars
+import json
 import logging
 import uuid
 from collections.abc import Callable
@@ -11,6 +12,7 @@ from threading import Condition
 from time import monotonic
 from typing import Any, cast
 
+import httpx
 from langchain.tools import ToolException
 from langchain_core.exceptions import ModelRateLimitError, ModelTimeoutError
 from langchain_core.language_models import BaseChatModel, LanguageModelInput
@@ -29,7 +31,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
-from langgraph.types import Command, interrupt
+from langgraph.types import Command, Overwrite, interrupt
 
 from agent import (
     api,
@@ -43,6 +45,7 @@ from agent import (
     screening,
 )
 from agent.backend_client import Refused
+from agent.heartbeat import heartbeat
 from agent.tools import (
     CLAIM_TOOLS,
     CONTEXT_TOOLS,
@@ -59,6 +62,13 @@ Start = Messages | Command | None
 
 CLAIM_MODEL_CALLS = 30
 NO_DECISION = "The agent finished without recording a decision"
+REVIEW_GUIDANCE = (
+    "On a returned claim, senior review takes precedence over general guidance "
+    "about final decisions. Treat the note as feedback on the previous decision. "
+    "Check it against the policy wording and claims manual. Refer the claim to a "
+    "handler and explain why if the wording does not support the requested change."
+)
+DECISION_REVISION = "undercover_decision_revision"
 WORK_CLAIM = "Work claim"
 CARRY_ON = "Carry on"
 SCREEN = "screen_claim"
@@ -66,6 +76,7 @@ RECORD_SCREEN = "record_screen"
 AGENT = "agent"
 TOOLS = "tools"
 PAUSE = "wait_for_sign_off"
+STAGE_REVIEW = "stage_review"
 PAY = "pay"
 SAVE_MEMORY = "save_memory"
 
@@ -117,6 +128,12 @@ def take_resume(claim_id: str) -> None:
         owned_claims.add(claim_id)
 
 
+def cancel_resume(claim_id: str) -> None:
+    """Remove a queued handoff that the backend did not award."""
+    with claim_lock:
+        pending_resumes.discard(claim_id)
+
+
 def execution_graph(
     version: int | None = None, *, evaluation: bool = False
 ) -> ClaimGraph:
@@ -137,19 +154,55 @@ def execution_graph(
 def execute_reserved_claim(claim_id: str, run_id: str | None, version: int) -> str:
     """Start or resume an owned claim, retrying ordinary failed attempts fresh."""
     try:
-        while True:
-            api.admit_claim(claim_id, run_id)
-            claim = api.get_claim(claim_id)
-            if claim["status"] == api.Status.WAITING:
-                line = work_claim(claim_id, None, run_id, version)
-            elif claim["status"] == api.Status.IN_PROGRESS:
-                line = carry_on(claim, None, run_id, version)
-            else:
-                return "No eligible work"
-            if api.get_claim(claim_id)["status"] != api.Status.WAITING:
-                return line
+        claim = api.get_claim(claim_id)
+        if claim["returned_decisions"]:
+            owner = str(uuid.uuid4())
+            try:
+                claim = api.take_review(claim_id, owner, run_id)
+            except Refused as error:
+                if error.status_code != HTTPStatus.CONFLICT:
+                    raise
+                return f"Skipped: {error.detail}"
+            return work_returned(claim, owner, run_id, version)
+        return execute_attempts(claim, run_id, version)
     finally:
         release_claim(claim_id)
+
+
+def execute_attempts(
+    claim: dict[str, Any], run_id: str | None, version: int | None
+) -> str:
+    """Retry an ordinary failed attempt while this decision revision is current."""
+    claim_id, revision = claim["claim_id"], claim["revision"]
+    while True:
+        api.admit_claim(claim_id, run_id, revision)
+        if claim["status"] == api.Status.WAITING:
+            line = work_claim(claim_id, None, run_id, version, revision=revision)
+        elif claim["status"] == api.Status.IN_PROGRESS:
+            line = carry_on(claim, None, run_id, version)
+        else:
+            return "No eligible work"
+        claim = api.get_claim(claim_id)
+        if claim["status"] != api.Status.WAITING or claim["revision"] != revision:
+            return line
+
+
+def work_returned(
+    claim: dict[str, Any], owner: str, run_id: str | None, version: int | None
+) -> str:
+    """Keep the worker's review lease through the entire returned claim."""
+    claim_id = claim["claim_id"]
+    try:
+        with heartbeat(partial(api.review_heartbeat, claim_id, owner, working=True)):
+            return execute_attempts(claim, run_id, version)
+    finally:
+        try:
+            api.review_heartbeat(claim_id, owner, working=False)
+        except Refused as error:
+            if error.status_code != HTTPStatus.CONFLICT:
+                log.warning("%s could not release review work: %s", claim_id, error)
+        except httpx.RequestError as error:
+            log.warning("%s could not release review work: %s", claim_id, error)
 
 
 def execute_claim(claim_id: str, run_id: str, version: int) -> str:
@@ -190,6 +243,12 @@ def record_result(
     """Run a tool and record its result on the claim, then any step it gives as its
     artifact, such as a section it read."""
     context = cast(ClaimContext, request.runtime.context)
+    reply = request.state["messages"][-1]
+    if reply.response_metadata.get(DECISION_REVISION, 0) != context.revision:
+        return ToolMessage(
+            "This work was superseded by the senior review.",
+            tool_call_id=cast(str, request.tool_call["id"]),
+        )
     runtime = replace(
         request.runtime,
         context=replace(
@@ -227,13 +286,20 @@ def call_model(
     if calls >= CLAIM_MODEL_CALLS:
         message = f"The claim agent made {calls} model calls without finishing"
         raise TooManyModelCalls(message)
-    api.admit_claim(runtime.context.claim_id, runtime.context.run_id)
-    reply = llm.invoke([instructions(), *state["messages"]])
+    context = runtime.context
+    api.admit_claim(context.claim_id, context.run_id, context.revision)
+    prompt = instructions()
+    if state.get("reviews_applied"):
+        prompt = SystemMessage(f"{prompt.text}\n\n{REVIEW_GUIDANCE}")
+    reply = llm.invoke([prompt, *state["messages"]])
     api.record_model_call(
         runtime.context.claim_id,
         measurements.model_reply(reply, runtime.context.run_id),
     )
-    observations.record_reply(runtime.context, reply, via)
+    if context.revision:
+        api.admit_claim(context.claim_id, context.run_id, context.revision)
+        reply.response_metadata[DECISION_REVISION] = context.revision
+    observations.record_reply(context, reply, via)
     return Command(
         update={"messages": [reply], "model_calls": 1},
         goto=TOOLS if isinstance(reply, AIMessage) and reply.tool_calls else END,
@@ -244,14 +310,30 @@ def wait_for_sign_off(
     state: ClaimState, runtime: Runtime[ClaimContext]
 ) -> dict[str, Any]:
     """Wait on the saved claim until a senior handler answers."""
-    interrupt({"claim_id": runtime.context.claim_id})
-    return {"status": runtime.context.signed_off_status}
+    answer = interrupt({"claim_id": runtime.context.claim_id})
+    if answer is True:
+        return {"status": runtime.context.signed_off_status}
+    return {
+        "status": api.Status.IN_PROGRESS,
+        "decision": {},
+        "model_calls": Overwrite(0),
+        "reviews_applied": answer["number"],
+        "messages": [review_message(answer)],
+    }
+
+
+def review_message(review: dict[str, Any]) -> HumanMessage:
+    """Give the handler's attributed feedback with the graph's review rules."""
+    return HumanMessage(
+        f"Senior handler {review['handler']} sent the approval back with this note: "
+        f"{json.dumps(review['note'], ensure_ascii=False)}. {REVIEW_GUIDANCE}"
+    )
 
 
 def screen_claim(state: ClaimState, runtime: Runtime[ClaimContext]) -> dict[str, Any]:
     """Save the screening result before logging it or recording a referral."""
     context = runtime.context
-    attempt = screening.check(context.claim_id, context.run_id)
+    attempt = screening.check(context.claim_id, context.run_id, context.revision)
     if context.evaluation_id is not None and attempt["usage"] is not None:
         # Startup discards stopped evaluation checkpoints, so save the charge first.
         api.record_model_call(context.claim_id, attempt["usage"])
@@ -290,6 +372,7 @@ def record_screen(state: ClaimState, runtime: Runtime[ClaimContext]) -> dict[str
                 "reason": reason,
                 "decided_by": screening.SECTION,
                 "thread_id": context.thread_id,
+                "revision": context.revision,
             },
         )
         return {"decision": claim["decision"], "status": claim["status"]}
@@ -317,18 +400,18 @@ def pay(
     except Exception as error:
         log.warning("%s could not record the payment call: %s", context.claim_id, error)
     try:
-        claim = (
-            api.pay_claim(context.claim_id, amount, via=via)
-            if via
-            else api.pay_claim(context.claim_id, amount)
+        claim = api.pay_claim(
+            context.claim_id, amount, via=via, revision=context.revision
         )
     except gateway.GatewayDenied as denied:
-        claim = api.hold_gateway_payment(context.claim_id, str(denied))
+        claim = api.hold_gateway_payment(
+            context.claim_id, str(denied), context.revision
+        )
     except Refused as denied:
         if denied.status_code != HTTPStatus.FORBIDDEN:
             observations.record_refusal(context, "pay_claim", refusal(denied))
             raise
-        claim = api.hold_limit_payment(context.claim_id)
+        claim = api.hold_limit_payment(context.claim_id, context.revision)
         observations.record_refusal(context, "pay_claim", refusal(denied))
     return {"status": claim["status"]}
 
@@ -338,6 +421,15 @@ def after_payment(state: ClaimState, runtime: Runtime[ClaimContext]) -> str:
     if state["status"] == api.Status.WAITING_FOR_SIGN_OFF:
         return PAUSE if runtime.context.evaluation_id is None else END
     return SAVE_MEMORY if runtime.store is not None else END
+
+
+def after_review(state: ClaimState, runtime: Runtime[ClaimContext]) -> str:
+    """Start a replacement decision or finish a paid sign-off."""
+    return (
+        AGENT
+        if state["status"] == api.Status.IN_PROGRESS
+        else after_payment(state, runtime)
+    )
 
 
 def after_tools(state: ClaimState, runtime: Runtime[ClaimContext]) -> str:
@@ -358,7 +450,7 @@ def save_memory(state: ClaimState, runtime: Runtime[ClaimContext]) -> dict[str, 
     """Save the recorded decision and minimal claim after adjudication."""
     if runtime.store is not None and state["status"] == api.Status.DECIDED:
         context = runtime.context
-        api.prepare_memory(context.claim_id, context.thread_id)
+        api.prepare_memory(context.claim_id, context.thread_id, context.revision)
         memory.save_decision(runtime.store, context.memory_claim, state["decision"])
     return {}
 
@@ -416,6 +508,7 @@ def claim_graph(
         ),
     )
     builder.add_node(PAUSE, wait_for_sign_off)
+    builder.add_node(STAGE_REVIEW, lambda state: {})
     builder.add_node(PAY, partial(pay, via=via))
     builder.add_node(SAVE_MEMORY, save_memory)
     builder.add_edge(START, SCREEN)
@@ -425,7 +518,8 @@ def claim_graph(
         TOOLS, after_tools, [AGENT, SAVE_MEMORY, PAUSE, PAY, END]
     )
     builder.add_conditional_edges(SAVE_MEMORY, after_memory, [PAY, PAUSE, END])
-    builder.add_conditional_edges(PAUSE, after_payment, [SAVE_MEMORY, END])
+    builder.add_edge(STAGE_REVIEW, PAUSE)
+    builder.add_conditional_edges(PAUSE, after_review, [AGENT, SAVE_MEMORY, END])
     builder.add_conditional_edges(PAY, after_payment, [PAUSE, SAVE_MEMORY, END])
     return builder.compile(checkpointer=saver, store=store)
 
@@ -466,6 +560,30 @@ def begin(claim_id: str) -> Messages:
     return ask(f"Claim {claim_id}")
 
 
+def review_for(claim: dict[str, Any]) -> dict[str, Any] | None:
+    """Use the latest recorded review and its ordinal on the claim."""
+    reviews = claim["returned_decisions"]
+    if not reviews:
+        return None
+    latest = reviews[-1]
+    return {
+        "number": len(reviews),
+        "note": latest["note"],
+        "handler": latest["handler"],
+    }
+
+
+def begin_attempt(claim: dict[str, Any]) -> Messages | dict[str, Any]:
+    """Keep the latest review if ordinary retries have to screen a fresh thread."""
+    start = begin(claim["claim_id"])
+    if review := review_for(claim):
+        return {
+            "messages": [*start["messages"], review_message(review)],
+            "reviews_applied": review["number"],
+        }
+    return start
+
+
 def describe(error: Exception) -> str:
     """Say in one line what went wrong."""
     lines = str(error).splitlines()
@@ -479,6 +597,8 @@ def report(claim: dict[str, Any], reason: str) -> str:
         return f"{claim_id}  failed: {reason}, back in the queue"
     if status == api.Status.LEFT_FOR_HANDLER:
         return f"{claim_id}  failed: {reason}, left for a handler"
+    if status == api.Status.SENT_BACK:
+        return f"{claim_id}  returned for review"
     line = f"{claim_id}  {decision['decision']}  ${decision['payout']:,.2f}"
     if status == api.Status.WAITING_FOR_SIGN_OFF:
         return f"{line}, waiting for sign-off"
@@ -512,9 +632,7 @@ def run_claim_graph(
             version, evaluation=claim["evaluation_id"] is not None
         )
         start = (
-            begin(claim["claim_id"])
-            if name == WORK_CLAIM
-            else resume_input(graph, claim)
+            begin_attempt(claim) if name == WORK_CLAIM else resume_input(graph, claim)
         )
 
         # A fresh context gives every claim its own root trace,
@@ -532,6 +650,7 @@ def run_claim_graph(
                     policy_id=claim["policy_id"],
                     customer_id=claim["customer_id"],
                     memory_claim=memory.claim_fields(claim),
+                    revision=claim["revision"],
                 ),
                 durability="sync",
                 stream_mode="updates",
@@ -540,12 +659,8 @@ def run_claim_graph(
                     progress()
 
         contextvars.Context().run(execute, graph)
-        if (
-            signed_off
-            and start is None
-            and graph.get_state(thread_of(claim)).interrupts
-        ):
-            start = Command(resume=True)
+        if answer := newly_paused(graph, claim, start):
+            start = Command(resume=answer)
             contextvars.Context().run(execute, graph)
     except (ModelRateLimitError, ModelTimeoutError):
         raise
@@ -559,13 +674,15 @@ def run_claim_graph(
     return error
 
 
-def settle(claim_id: str, error: str | None) -> str:
+def settle(claim_id: str, error: str | None, revision: int = 0) -> str:
     """Fail a claim the agent left undecided, and report how the claim ended. An
     error after the decision is logged, and the claim keeps its decision."""
     claim = api.get_claim(claim_id)
     reason = error or NO_DECISION
+    if claim["revision"] != revision:
+        return f"{claim_id}  handed off for review"
     if claim["status"] == api.Status.IN_PROGRESS and claim["decision"] is None:
-        claim = api.fail_claim(claim_id, reason)
+        claim = api.fail_claim(claim_id, reason, revision)
     elif error:
         log.warning("%s  %s", claim_id, error)
     line = report(claim, reason)
@@ -576,11 +693,61 @@ def settle(claim_id: str, error: str | None) -> str:
 def resume_input(graph: ClaimGraph, claim: dict[str, Any]) -> Start:
     """Resume a paused checkpoint or restart a thread with no saved first step."""
     saved = graph.get_state(thread_of(claim))
-    if saved.interrupts and paid_on_sign_off(claim):
-        return Command(resume=True)
+    answer = resume_answer(claim, saved.values)
+    if saved.interrupts and answer:
+        return Command(resume=answer)
     if saved.created_at is None and claim["decision"] is None:
-        return begin(claim["claim_id"])
+        return begin_attempt(claim)
+    if isinstance(answer, dict) and saved.next != (PAUSE,):
+        # A review can commit before the decision's preceding graph step is saved.
+        graph.update_state(
+            thread_of(claim), review_checkpoint(saved.values), as_node=STAGE_REVIEW
+        )
     return None
+
+
+def review_checkpoint(state: dict[str, Any]) -> dict[str, Any]:
+    """Close pending tool calls from the superseded decision before resuming."""
+    messages = state.get("messages", [])
+    last = messages[-1] if messages else None
+    if not isinstance(last, AIMessage):
+        return {}
+    return {
+        "messages": [
+            ToolMessage(
+                "This work was superseded by the senior review.",
+                tool_call_id=call["id"],
+            )
+            for call in last.tool_calls
+            if call.get("id") is not None
+        ]
+    }
+
+
+def resume_answer(claim: dict[str, Any], state: dict[str, Any]) -> bool | dict | None:
+    """Resume with the paid sign-off or a review the graph has not consumed."""
+    if paid_on_sign_off(claim):
+        return True
+    review = review_for(claim)
+    if (
+        review
+        and claim["status"] == api.Status.IN_PROGRESS
+        and review["number"] > state.get("reviews_applied", 0)
+    ):
+        return review
+    return None
+
+
+def newly_paused(
+    graph: ClaimGraph, claim: dict[str, Any], start: Start
+) -> bool | dict | None:
+    """Find a review whose worker first had to reach the actual pause."""
+    if start is not None or not (
+        paid_on_sign_off(claim) or claim["returned_decisions"]
+    ):
+        return None
+    saved = graph.get_state(thread_of(claim))
+    return resume_answer(claim, saved.values) if saved.interrupts else None
 
 
 def paused(claim: dict[str, Any]) -> bool:
@@ -598,11 +765,13 @@ def work_claim(
     graph: ClaimGraph | None,
     run_id: str | None = None,
     version: int | None = None,
+    *,
+    revision: int = 0,
 ) -> str:
     """Work a waiting claim as a new attempt, measuring preparation and execution."""
-    claim = api.start_claim(claim_id, str(uuid.uuid4()))
+    claim = api.start_claim(claim_id, str(uuid.uuid4()), revision)
     error = run_claim_graph(graph, claim, WORK_CLAIM, run_id, version)
-    return settle(claim_id, error)
+    return settle(claim_id, error, revision)
 
 
 def carry_on(
@@ -616,4 +785,4 @@ def carry_on(
     if decision and decision["signed_off_by"] and not claim["payment"]:
         return report(claim, "")
     error = run_claim_graph(graph, claim, CARRY_ON, run_id, version)
-    return settle(claim["claim_id"], error)
+    return settle(claim["claim_id"], error, claim["revision"])

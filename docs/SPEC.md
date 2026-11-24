@@ -48,6 +48,7 @@ Every dashboard page has a clear header and consistent controls in light and dar
 ## Rules
 
 - A payout over the configured approval limit ($1,000 initially) needs a senior handler's sign-off. The agent can approve a claim above the limit. Agent payment checks the current limit before looking up the claim, and a decision retains the limit recorded with it. An existing hold carries forward after a limit increase. A senior handler can settle an older unpaid approval blocked by a limit reduction. Held evaluation copies stay complete with payment held.
+- A senior handler can send an unpaid held approval back with a note of up to 1,000 characters. The claim retains the earlier decision, note, handler and review time. The agent works from that review and the policy wording to record a replacement decision. The next dispatch picks up a returned claim if the agent missed the request or stopped answering. A replacement approval follows the normal payout and sign-off rules.
 - Decisions follow the policy wording and the claims manual. The wording comes first, and the manual says how to read it.
 - An approval uses the app's latest calculation for that attempt. The decision records the configuration version used by the UnderCover Agent, or the security check as maker of its own referrals.
 - Configured Gateway Policy covers the model's forwarded tools and graph payment. If the Gateway holds an original payout, a senior handler can settle it through the app.

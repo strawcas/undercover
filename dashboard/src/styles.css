@@ -185,6 +185,7 @@ p {
 }
 
 .status-in_progress,
+.status-sent_back,
 .decision-refer,
 .member-in_progress,
 .run-running {

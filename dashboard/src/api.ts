@@ -2,6 +2,7 @@ export const statuses = [
   "waiting",
   "in_progress",
   "waiting_for_sign_off",
+  "sent_back",
   "decided",
   "left_for_handler",
 ] as const;
@@ -48,6 +49,17 @@ export interface Decision {
   gateway_hold: string | null;
 }
 
+interface ClaimReview {
+  note: string;
+  handler: string;
+  reviewed_at: string;
+}
+
+export interface ReturnedDecision extends ClaimReview {
+  decision: Decision;
+  approval_limit: number;
+}
+
 export interface PayoutCalculation {
   calculation: { step: string; amount: number }[];
   payout: number;
@@ -82,6 +94,9 @@ export interface Claim {
   sign_off_available: boolean;
   evaluation_id: string | null;
   source_id: string | null;
+  returned_decisions?: ReturnedDecision[];
+  review_active?: boolean;
+  revision?: number;
 }
 
 export interface Policy {
@@ -140,7 +155,8 @@ type StepDetails =
       kind: "memory_save";
       content: { messages: { role: "customer" | "agent"; text: string }[] };
     }
-  | { kind: "refusal"; content: { source: string; reason: string } };
+  | { kind: "refusal"; content: { source: string; reason: string } }
+  | { kind: "claim_review"; content: ClaimReview };
 
 export type Step = StepRecord & StepDetails;
 
@@ -373,16 +389,24 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-function post<T>(path: string, body: object): Promise<T> {
+function post<T>(
+  path: string,
+  body: object,
+  headers: Record<string, string> = {},
+): Promise<T> {
   return request<T>(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify(body),
   });
 }
 
 const claimPath = (claimId: string) =>
   `/api/claims/${encodeURIComponent(claimId)}`;
+
+const reviewCondition = (revision: number) => ({
+  "If-Match": `"${String(revision)}"`,
+});
 
 const evaluationsPath = "/api/evaluations";
 const configurationsPath = "/api/configurations";
@@ -412,6 +436,12 @@ export const api = {
   getClaim: (claimId: string) => request<Claim>(claimPath(claimId)),
   listSteps: (claimId: string) =>
     request<Step[]>(`${claimPath(claimId)}/steps`),
+  sendBack: (claimId: string, note: string, revision: number) =>
+    post<Claim>(
+      `${claimPath(claimId)}/send-back`,
+      { note },
+      reviewCondition(revision),
+    ),
   getPolicy: (policyId: string) =>
     request<Policy>(`/api/policies/${encodeURIComponent(policyId)}`),
   getClaimHistory: (customerId: string) =>
@@ -450,6 +480,10 @@ export const api = {
     request<EvaluationDetail>(
       `${evaluationsPath}/${encodeURIComponent(runId)}`,
     ),
-  signOff: (claimId: string) =>
-    post<Claim>(`${claimPath(claimId)}/sign-off`, {}),
+  signOff: (claimId: string, revision = 0) =>
+    post<Claim>(
+      `${claimPath(claimId)}/sign-off`,
+      {},
+      reviewCondition(revision),
+    ),
 };

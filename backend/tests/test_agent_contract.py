@@ -38,14 +38,17 @@ def test_agent_contract_is_scoped_and_authenticates_both_callers():
         for p in operation.get("parameters", [])
     )
     [payment_body] = references(operations["pay_claim"]["requestBody"])
-    assert schema["components"]["schemas"][payment_body]["required"] == ["amount"]
+    assert set(schema["components"]["schemas"][payment_body]["required"]) == {
+        "amount",
+        "revision",
+    }
     [decision_body] = references(operations["record_decision"]["requestBody"])
-    assert {"decided_by", "thread_id"} <= set(
+    assert {"decided_by", "thread_id", "revision"} <= set(
         schema["components"]["schemas"][decision_body]["required"]
     )
     [payout_body] = references(operations["calculate_payout"]["requestBody"])
     payout_request = schema["components"]["schemas"][payout_body]
-    assert "thread_id" in payout_request["required"]
+    assert {"thread_id", "revision"} <= set(payout_request["required"])
     thread_id = payout_request["properties"]["thread_id"]
     assert thread_id["type"] == "string"
     assert "anyOf" not in thread_id

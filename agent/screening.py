@@ -78,8 +78,9 @@ def _checked_reply(
     messages: list[BaseMessage],
     claim_id: str,
     run_id: str | None,
+    revision: int,
 ) -> ScreenReply:
-    api.admit_claim(claim_id, run_id)
+    api.admit_claim(claim_id, run_id, revision)
     try:
         return screen.invoke(messages)
     except Exception as error:
@@ -91,7 +92,7 @@ def _checked_reply(
         raise RuntimeError(reason) from error
 
 
-def check(claim_id: str, run_id: str | None) -> ScreenAttempt:
+def check(claim_id: str, run_id: str | None, revision: int = 0) -> ScreenAttempt:
     """Return one screening result and its raw reply's usage for checkpointing."""
     claim = api.get_claim(claim_id)
     submission = {name: claim[name] for name in CUSTOMER_FIELDS}
@@ -99,7 +100,7 @@ def check(claim_id: str, run_id: str | None) -> ScreenAttempt:
         SystemMessage(INSTRUCTIONS),
         HumanMessage(json.dumps(submission, ensure_ascii=False)),
     ]
-    response = _checked_reply(checker(), messages, claim_id, run_id)
+    response = _checked_reply(checker(), messages, claim_id, run_id, revision)
     result: ScreeningResult | None = None
     parsed = response["parsed"]
     if isinstance(parsed, Screening) and parsed.reason.strip():

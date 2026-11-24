@@ -121,7 +121,9 @@ def test_an_agent_cannot_hold_an_original_within_the_approval_limit(client):
     claim_id = "CLM-1001"
     start(client, claim_id)
     decide(client, claim_id, "approve", 420)
-    response = client.post(f"/api/claims/{claim_id}/hold-limit-payment")
+    response = client.post(
+        f"/api/claims/{claim_id}/hold-limit-payment", json={"revision": 0}
+    )
     assert response.status_code == 409
     assert pay(client, claim_id, 420).status_code == 200
 

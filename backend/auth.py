@@ -10,7 +10,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import Connection, select
 
 from backend import agent_key
-from backend.database import handlers
+from backend.database import engine, handlers
 from backend.dependencies import Database
 from backend.models import Handler
 
@@ -105,3 +105,12 @@ def senior_handler(handler: CurrentHandler) -> Handler:
 
 
 SeniorHandler = Annotated[Handler, Depends(senior_handler)]
+
+
+def review_handler(email: VerifiedEmail) -> Handler:
+    """Verify senior authority before validating and committing a review."""
+    with engine().connect() as db:
+        return require_senior(handler_for_email(email, db))
+
+
+ReviewHandler = Annotated[Handler, Depends(review_handler)]

@@ -5,7 +5,18 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import Connection, bindparam, func, insert, select, update
+from sqlalchemy import (
+    JSON,
+    Connection,
+    RowMapping,
+    bindparam,
+    case,
+    func,
+    insert,
+    literal,
+    select,
+    update,
+)
 
 from backend.clock import now
 from backend.configurations import get_configuration
@@ -106,6 +117,41 @@ def member_result(db: Connection, claim_id: str) -> dict[str, Any]:
     return result
 
 
+def preserve_hold(db: Connection, claim: RowMapping) -> None:
+    """Save a dispatch's held outcome before a handler changes the live claim."""
+    claim_id = claim["claim_id"]
+    worked_claim = (
+        select(work_slices.c.slice_id)
+        .where(
+            work_slices.c.run_id == runs.c.run_id,
+            work_slices.c.claim_id == claim_id,
+            work_slices.c.thread_id == claim["thread_id"],
+        )
+        .exists()
+    )
+    assigned_run = (
+        (runs.c.run_id == claim["review_run_id"])
+        if claim["returned_decisions"]
+        else worked_claim
+    )
+    dispatches = (
+        select(runs.c.run_id)
+        .where(runs.c.status == "running", runs.c.kind == "dispatch", assigned_run)
+        .with_for_update()
+    )
+    saved = member_result(db, claim_id) | {"held_for_review": True}
+    saved["claim_status"] = "waiting_for_sign_off"
+    db.execute(
+        update(run_claims)
+        .where(
+            run_claims.c.claim_id == claim_id,
+            run_claims.c.run_id.in_(dispatches),
+            run_claims.c.result["held_for_review"].as_boolean().is_not(True),
+        )
+        .values(result=saved)
+    )
+
+
 def members(
     db: Connection, row: Any, work: dict[str, dict[str, Any]]
 ) -> list[RunMember]:
@@ -127,7 +173,9 @@ def members(
         claim_id = member["claim_id"]
         measured = work.get(claim_id, {"llm_cost": 0.0, "active_seconds": 0.0})
         result = live.get(claim_id, {})
-        if row["status"] != "running":
+        if row["status"] != "running" or (member["result"] or {}).get(
+            "held_for_review"
+        ):
             result = result | member["result"]
         if claim_id in refresh:
             result = result | member_timing(row, result, measured.get("started_at"))
@@ -235,11 +283,18 @@ def record_member(
     )
     validate_scope(row, claim["evaluation_id"])
     key = (run_claims.c.run_id == run_id) & (run_claims.c.claim_id == claim_id)
-    if db.execute(select(run_claims).where(key)).first() is None:
-        raise HTTPException(409, "Claim was not selected for this run")
-    db.execute(
-        update(run_claims).where(key).values(**request.model_dump(), result=result)
+    outcome = case(
+        (
+            run_claims.c.result["held_for_review"].as_boolean().is_(True),
+            run_claims.c.result,
+        ),
+        else_=literal(result, type_=JSON),
     )
+    updated = db.execute(
+        update(run_claims).where(key).values(**request.model_dump(), result=outcome)
+    )
+    if updated.rowcount != 1:
+        raise HTTPException(409, "Claim was not selected for this run")
 
 
 def validate_scope(run: Any, evaluation_id: str | None) -> None:

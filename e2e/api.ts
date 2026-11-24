@@ -39,10 +39,12 @@ async function medicalPayout(
   claimId: string,
   amount: number,
   threadId: string | null,
+  revision = 0,
 ) {
   const response = await post(request, `/api/claims/${claimId}/payout`, {
     benefit: "emergency_medical",
     thread_id: threadId,
+    revision,
     paid_by_others: 0,
     lines: [
       {
@@ -65,7 +67,10 @@ export async function decide(
   decision: TestDecision,
 ) {
   const response = await get(request, `/api/claims/${claimId}`);
-  const claim = (await response.json()) as { thread_id: string };
+  const claim = (await response.json()) as {
+    thread_id: string;
+    revision: number;
+  };
   if (decision.decision === "approve") {
     const probe = Math.max(decision.payout, 100);
     const deductible =
@@ -75,11 +80,13 @@ export async function decide(
       claimId,
       decision.payout + deductible,
       claim.thread_id,
+      claim.revision,
     );
   }
   return post(request, `/api/claims/${claimId}/decision`, {
     ...decision,
     thread_id: claim.thread_id,
+    revision: claim.revision,
     decided_by: "UnderCover Agent (configuration 1)",
   });
 }

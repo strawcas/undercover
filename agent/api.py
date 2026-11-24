@@ -2,7 +2,7 @@
 
 import json
 from enum import StrEnum
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 from pydantic import BaseModel, Field
 
@@ -41,6 +41,7 @@ class Status(StrEnum):
     WAITING = "waiting"
     IN_PROGRESS = "in_progress"
     WAITING_FOR_SIGN_OFF = "waiting_for_sign_off"
+    SENT_BACK = "sent_back"
     DECIDED = "decided"
     LEFT_FOR_HANDLER = "left_for_handler"
 
@@ -62,6 +63,7 @@ class DecisionInput(TypedDict):
     reason: str
     decided_by: str
     thread_id: str
+    revision: NotRequired[int]
 
 
 LineKind = Literal[
@@ -151,6 +153,7 @@ class PayoutInput(TypedDict):
     lines: list[dict[str, Any]]
     paid_by_others: float
     thread_id: str
+    revision: NotRequired[int]
 
 
 def calculate_payout(
@@ -161,30 +164,58 @@ def calculate_payout(
     return _call("POST", f"/claims/{claim_id}/payout", json=body)
 
 
-def start_claim(claim_id: str, thread_id: str) -> dict[str, Any]:
-    return _call("POST", f"/claims/{claim_id}/start", json={"thread_id": thread_id})
+def start_claim(claim_id: str, thread_id: str, revision: int = 0) -> dict[str, Any]:
+    return _call(
+        "POST",
+        f"/claims/{claim_id}/start",
+        json={"thread_id": thread_id, "revision": revision},
+    )
+
+
+def take_review(claim_id: str, owner: str, run_id: str | None = None) -> dict[str, Any]:
+    return _call(
+        "POST",
+        f"/claims/{claim_id}/take-review",
+        json={"owner": owner, "run_id": run_id},
+    )
+
+
+def review_heartbeat(claim_id: str, owner: str, *, working: bool) -> None:
+    _call(
+        "PUT",
+        f"/claims/{claim_id}/review-heartbeat",
+        json={"owner": owner, "working": working},
+    )
 
 
 def list_pending_memory() -> list[str]:
     return _call("GET", "/agent/pending-memory")
 
 
-def prepare_memory(claim_id: str, thread_id: str) -> None:
-    _call("POST", f"/claims/{claim_id}/prepare-memory", json={"thread_id": thread_id})
+def prepare_memory(claim_id: str, thread_id: str, revision: int) -> None:
+    _call(
+        "POST",
+        f"/claims/{claim_id}/prepare-memory",
+        json={"thread_id": thread_id, "revision": revision},
+    )
 
 
 def finish_memory(
-    claim_id: str, thread_id: str, messages: list[dict[str, str]]
+    claim_id: str, thread_id: str, messages: list[dict[str, str]], revision: int
 ) -> None:
     _call(
         "POST",
         f"/claims/{claim_id}/finish-memory",
-        json={"thread_id": thread_id, "messages": messages},
+        json={"thread_id": thread_id, "messages": messages, "revision": revision},
     )
 
 
-def admit_claim(claim_id: str, run_id: str | None) -> dict[str, str]:
-    return _call("POST", f"/claims/{claim_id}/admission", json={"run_id": run_id})
+def admit_claim(claim_id: str, run_id: str | None, revision: int = 0) -> dict[str, str]:
+    return _call(
+        "POST",
+        f"/claims/{claim_id}/admission",
+        json={"run_id": run_id, "revision": revision},
+    )
 
 
 def stop_run(run_id: str) -> dict[str, Any]:
@@ -212,25 +243,40 @@ def record_decision(
 
 
 def pay_claim(
-    claim_id: str, amount: float, *, via: gateway.Gateway | None = None
+    claim_id: str,
+    amount: float,
+    *,
+    via: gateway.Gateway | None = None,
+    revision: int = 0,
 ) -> dict[str, Any]:
+    body = {"amount": amount, "revision": revision}
     if via:
-        return via.call(gateway.APP, "pay_claim", claim_id=claim_id, amount=amount)
-    return _call("POST", f"/claims/{claim_id}/payment", json={"amount": amount})
+        return via.call(gateway.APP, "pay_claim", claim_id=claim_id, **body)
+    return _call("POST", f"/claims/{claim_id}/payment", json=body)
 
 
-def hold_limit_payment(claim_id: str) -> dict[str, Any]:
-    return _call("POST", f"/claims/{claim_id}/hold-limit-payment")
-
-
-def hold_gateway_payment(claim_id: str, reason: str) -> dict[str, Any]:
+def hold_limit_payment(claim_id: str, revision: int = 0) -> dict[str, Any]:
     return _call(
-        "POST", f"/claims/{claim_id}/hold-gateway-payment", json={"reason": reason}
+        "POST", f"/claims/{claim_id}/hold-limit-payment", json={"revision": revision}
     )
 
 
-def fail_claim(claim_id: str, reason: str) -> dict[str, Any]:
-    return _call("POST", f"/claims/{claim_id}/failure", json={"reason": reason})
+def hold_gateway_payment(
+    claim_id: str, reason: str, revision: int = 0
+) -> dict[str, Any]:
+    return _call(
+        "POST",
+        f"/claims/{claim_id}/hold-gateway-payment",
+        json={"reason": reason, "revision": revision},
+    )
+
+
+def fail_claim(claim_id: str, reason: str, revision: int = 0) -> dict[str, Any]:
+    return _call(
+        "POST",
+        f"/claims/{claim_id}/failure",
+        json={"reason": reason, "revision": revision},
+    )
 
 
 def start_run(configuration: dict[str, Any]) -> dict[str, Any]:

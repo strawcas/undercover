@@ -38,6 +38,13 @@ export function StepList({ claimId }: Readonly<{ claimId: string }>) {
 }
 
 function StepBody({ step }: Readonly<{ step: Step }>) {
+  if (step.kind === "claim_review")
+    return (
+      <div>
+        <p className="step-label">Sent back by {step.content.handler}</p>
+        <p>{step.content.note}</p>
+      </div>
+    );
   if (step.kind === "lookup")
     return (
       <div>

@@ -101,7 +101,7 @@ def remember(
 
 def claim_fields(claim: dict[str, Any]) -> dict[str, Any]:
     """Keep only the fields the memory step may read."""
-    fields = ("customer_id", "claim_id", "thread_id", *CLAIM_FIELDS)
+    fields = ("customer_id", "claim_id", "thread_id", "revision", *CLAIM_FIELDS)
     return {field: claim[field] for field in fields}
 
 
@@ -120,7 +120,9 @@ def save_decision(
         for message in saved
     ]
     try:
-        api.finish_memory(claim["claim_id"], claim["thread_id"], messages)
+        api.finish_memory(
+            claim["claim_id"], claim["thread_id"], messages, claim["revision"]
+        )
     except (Refused, httpx.RequestError) as error:
         log.warning(
             "%s could not settle its memory receipt: %s", claim["claim_id"], error

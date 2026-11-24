@@ -31,6 +31,7 @@ def test_the_graph():
         "agent",
         "tools",
         "wait_for_sign_off",
+        "stage_review",
         "pay",
         "save_memory",
         "__end__",
@@ -53,6 +54,7 @@ def test_the_graph():
         ("tools", "__end__", True),
         ("wait_for_sign_off", "save_memory", True),
         ("wait_for_sign_off", "__end__", True),
+        ("wait_for_sign_off", "agent", True),
         ("pay", "__end__", True),
         ("pay", "wait_for_sign_off", True),
         ("pay", "save_memory", True),
@@ -394,7 +396,7 @@ def test_a_claim_agent_going_round_in_circles_stops(client):
 
 
 def test_a_failure_after_the_decision_keeps_it(client, monkeypatch, caplog):
-    def lost(claim_id, amount):
+    def lost(claim_id, amount, **kwargs):
         raise RuntimeError("The connection was lost")
 
     monkeypatch.setattr(api, "pay_claim", lost)

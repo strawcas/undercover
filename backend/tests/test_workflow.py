@@ -134,21 +134,14 @@ def test_a_repeated_payment_is_done_and_a_different_one_refused(client):
     assert different.json()["detail"] == "Claim CLM-1001 has already been paid"
 
 
-def test_payment_retry_refreshes_a_join_that_predates_the_claim_lock(
-    client, monkeypatch
-):
+def test_concurrent_payment_retries_return_one_payment(client):
     claim_id = "CLM-1001"
     start(client, claim_id)
     decide(client, claim_id, "approve", 420)
-    payment = pay(client, claim_id, 420).json()["payment"]
-    lookup = main.find_claim
-
-    def joined_snapshot(db, claim_id, lock=False):
-        row = lookup(db, claim_id, lock)
-        return dict(row) | {"paid_at": None} if lock else row
-
-    monkeypatch.setattr(main, "find_claim", joined_snapshot)
-    assert pay(client, claim_id, 420).json()["payment"] == payment
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first, second = pool.map(lambda _: pay(client, claim_id, 420), range(2))
+    assert first.status_code == second.status_code == 200
+    assert first.json()["payment"] == second.json()["payment"]
 
 
 def test_queue_shows_the_decision(client):

@@ -12,6 +12,12 @@ def require_attempt(claim: RowMapping, thread_id: str) -> None:
         raise HTTPException(409, "The claim is on a different attempt")
 
 
+def require_revision(claim: RowMapping, revision: int) -> None:
+    """Reject changes from a worker on an earlier decision revision."""
+    if (claim["revision"] or 0) != revision:
+        raise HTTPException(409, "The claim is on a different decision revision")
+
+
 def calculation_for(claim: RowMapping, request: DecisionRequest) -> dict | None:
     """Return the current attempt's matching calculation for an approval."""
     if request.decision != "approve":

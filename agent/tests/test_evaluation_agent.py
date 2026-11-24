@@ -246,12 +246,12 @@ def test_evaluation_payment_hold_survives_a_restored_limit(client, monkeypatch):
     settings = client.get("/api/settings").json()["values"]
     pay = api.pay_claim
 
-    def pay_during_lower_limit(claim_id, amount):
+    def pay_during_lower_limit(claim_id, amount, **kwargs):
         client.put(
             "/api/settings", json=settings | {"payout_approval_limit": 500}
         ).raise_for_status()
         try:
-            return pay(claim_id, amount)
+            return pay(claim_id, amount, **kwargs)
         finally:
             client.put("/api/settings", json=settings).raise_for_status()
 

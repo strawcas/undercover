@@ -3,7 +3,7 @@
 import json
 import operator
 from dataclasses import dataclass, field
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, Any, NotRequired, TypedDict
 
 from langchain.tools import ToolRuntime, tool
 from langchain_core.messages import AnyMessage, ToolMessage
@@ -32,6 +32,7 @@ class ClaimContext:
     knowledge: ContextClient | None = None
     configuration_version: int | None = None
     memory_claim: dict[str, Any] = field(default_factory=dict)
+    revision: int = 0
 
 
 def keep_last(_: Any, new: Any) -> Any:
@@ -50,6 +51,7 @@ class ClaimState(TypedDict):
     status: Annotated[str, keep_last]
     screening: ScreenAttempt
     screen_attempts: Annotated[int, operator.add]
+    reviews_applied: NotRequired[int]
 
 
 @tool
@@ -178,6 +180,7 @@ def calculate_payout(
                 "lines": [line.model_dump() for line in lines],
                 "paid_by_others": paid_by_others,
                 "thread_id": context.thread_id,
+                "revision": context.revision,
             },
             via=context.gateway,
         )
@@ -205,6 +208,7 @@ def record_decision(
                 f"UnderCover Agent (configuration {context.configuration_version})"
             ),
             "thread_id": context.thread_id,
+            "revision": context.revision,
         },
         via=context.gateway,
     )

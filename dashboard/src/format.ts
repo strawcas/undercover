@@ -45,6 +45,7 @@ export const statusLabels: Record<Status, string> = {
   waiting: "Waiting",
   in_progress: "In progress",
   waiting_for_sign_off: "Waiting for sign-off",
+  sent_back: "Sent back",
   decided: "Decided",
   left_for_handler: "Left for a handler",
 };

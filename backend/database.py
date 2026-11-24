@@ -37,7 +37,7 @@ from sqlalchemy.dialects.sqlite import Insert as SQLiteInsert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.pool import NullPool
-from sqlalchemy.schema import CreateSchema
+from sqlalchemy.schema import CreateSchema, CreateTable
 
 from backend.clock import now
 from backend.configuration_defaults import initial_model
@@ -165,6 +165,16 @@ decisions = Table(
     Column("gateway_hold", Text),
     Column("signed_off_by", Text),
     Column("signed_off_at", Text),
+)
+claim_reviews = Table(
+    "claim_reviews",
+    metadata,
+    Column("claim_id", Text, ForeignKey("claims.claim_id"), primary_key=True),
+    Column("history", JSON, nullable=False),
+    Column("revision", Integer, nullable=False),
+    Column("owner", Text),
+    Column("run_id", Text),
+    Column("heartbeat_at", Text),
 )
 payments = Table(
     "payments",
@@ -298,6 +308,11 @@ claim_view = (
         claims.c.attempts,
         claims.c.evaluation_id,
         claims.c.source_id,
+        claim_reviews.c.history.label("returned_decisions"),
+        claim_reviews.c.revision,
+        claim_reviews.c.owner.label("review_owner"),
+        claim_reviews.c.run_id.label("review_run_id"),
+        claim_reviews.c.heartbeat_at.label("review_heartbeat"),
         customers.c.name.label("customer_name"),
         decisions.c.decision,
         decisions.c.payout,
@@ -320,6 +335,7 @@ claim_view = (
     .join(customers, customers.c.customer_id == claims.c.customer_id)
     .outerjoin(decisions, decisions.c.claim_id == claims.c.claim_id)
     .outerjoin(payments, payments.c.claim_id == claims.c.claim_id)
+    .outerjoin(claim_reviews, claim_reviews.c.claim_id == claims.c.claim_id)
 )
 
 
@@ -386,6 +402,12 @@ def location(db: Engine) -> str:
 def is_seeded(db: Engine) -> bool:
     """Say whether the database has its tables."""
     return inspect(db).has_table("claims")
+
+
+def upgrade(db: Engine) -> None:
+    """Add the Runtime tables to a previously seeded business database."""
+    with db.begin() as connection:
+        connection.execute(CreateTable(claim_reviews, if_not_exists=True))
 
 
 def load(name: str) -> Any:

@@ -1,18 +1,35 @@
 """The shapes of the backend's requests and responses."""
 
 from datetime import date
-from typing import Any, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 Status = Literal[
-    "waiting", "in_progress", "waiting_for_sign_off", "decided", "left_for_handler"
+    "waiting",
+    "in_progress",
+    "waiting_for_sign_off",
+    "sent_back",
+    "decided",
+    "left_for_handler",
 ]
 DecisionKind = Literal["approve", "decline", "refer"]
 SECTION_14 = "Claims manual section 14"
 OrdinaryStepKind = Literal["tool_call", "tool_result", "message", "reading", "error"]
 StepKind = Literal[
-    OrdinaryStepKind, "security", "lookup", "memory_search", "memory_save", "refusal"
+    OrdinaryStepKind,
+    "security",
+    "lookup",
+    "memory_search",
+    "memory_save",
+    "refusal",
+    "claim_review",
 ]
 Benefit = Literal[
     "trip_cancellation",
@@ -71,6 +88,34 @@ class Payment(BaseModel):
     signed_off_at: str | None
 
 
+class SendBackRequest(BaseModel):
+    note: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)
+    ]
+
+
+class ClaimReview(SendBackRequest):
+    handler: str
+    reviewed_at: str
+
+
+class ReturnedDecision(ClaimReview):
+    decision: Decision
+    approval_limit: float
+
+
+class ClaimWorkOwner(BaseModel):
+    owner: str = Field(min_length=1)
+
+
+class TakeClaimRequest(ClaimWorkOwner):
+    run_id: str | None
+
+
+class ClaimHeartbeat(ClaimWorkOwner):
+    working: bool
+
+
 class ClaimSummary(BaseModel):
     claim_id: str
     customer_name: str
@@ -81,6 +126,7 @@ class ClaimSummary(BaseModel):
     status: Status
     decision: DecisionKind | None
     payout: float | None
+    review_active: bool
 
 
 class Claim(BaseModel):
@@ -105,6 +151,9 @@ class Claim(BaseModel):
     sign_off_available: bool
     evaluation_id: str | None
     source_id: str | None
+    returned_decisions: list[ReturnedDecision]
+    revision: int
+    review_active: bool
 
 
 class Trip(BaseModel):
@@ -175,7 +224,7 @@ class Refusal(BaseModel):
     reason: str
 
 
-StepContent = str | Lookup | MemorySearch | MemorySave | Refusal
+StepContent = str | Lookup | MemorySearch | MemorySave | Refusal | ClaimReview
 
 
 class Step(BaseModel):
@@ -190,7 +239,21 @@ class StartRequest(BaseModel):
     thread_id: str = Field(min_length=1)
 
 
-class FinishMemoryRequest(StartRequest):
+class DecisionRevision(BaseModel):
+    revision: int = Field(ge=0, description="The current decision revision")
+
+    @model_validator(mode="before")
+    @classmethod
+    def legacy_revision(cls, data: Any) -> Any:
+        """Allow older callers to write only before the first review."""
+        return {"revision": 0, **data} if isinstance(data, dict) else data
+
+
+class DecisionAttemptRequest(StartRequest, DecisionRevision):
+    pass
+
+
+class FinishMemoryRequest(DecisionAttemptRequest):
     messages: list[MemoryMessage] = Field(min_length=1, max_length=2)
 
     @field_validator("messages")
@@ -236,7 +299,7 @@ NewStepRequest = (
 )
 
 
-class DecisionRequest(BaseModel):
+class DecisionRequest(DecisionRevision):
     decision: DecisionKind
     thread_id: str = Field(
         min_length=1, description="The attempt recording the decision"
@@ -282,11 +345,11 @@ class DecisionRequest(BaseModel):
         return self
 
 
-class PaymentRequest(BaseModel):
+class PaymentRequest(DecisionRevision):
     amount: float = Field(gt=0, description="The approved payout in US dollars")
 
 
-class GatewayHoldRequest(BaseModel):
+class GatewayHoldRequest(DecisionRevision):
     reason: str = Field(min_length=1, description="The Gateway's payment refusal")
 
 
@@ -337,7 +400,7 @@ class PayoutRequest(BaseModel):
     paid_by_others: float = Field(ge=0, description="Paid or refunded by others")
 
 
-class ClaimPayoutRequest(PayoutRequest):
+class ClaimPayoutRequest(PayoutRequest, DecisionRevision):
     thread_id: str | None = Field(description="The attempt, or null for a preview")
 
 
@@ -345,7 +408,7 @@ class Payout(PayoutCalculation):
     needs_sign_off: bool
 
 
-class FailureRequest(BaseModel):
+class FailureRequest(DecisionRevision):
     reason: str = Field(min_length=1, description="What went wrong")
 
 
@@ -429,7 +492,7 @@ class RunSelectionRequest(BaseModel):
     claim_ids: list[str]
 
 
-class RunAdmission(BaseModel):
+class RunAdmission(DecisionRevision):
     run_id: str | None
 
 
