@@ -8,7 +8,7 @@ from sqlalchemy import Connection, insert, select, update
 
 from backend import configurations, evaluations, improvement_budget, improvement_rules
 from backend import settings as platform_settings
-from backend.clock import now
+from backend.clock import has_live_lease, now
 from backend.configuration_defaults import DEFAULT_MODEL
 from backend.configuration_models import ConfigurationProposal, RecipeProposal
 from backend.database import (
@@ -32,6 +32,8 @@ from backend.improvement_models import (
 from backend.models import Handler, SetName
 
 EVALUATION_COUNTS: dict[SetName, int] = {"evaluation": 1, "held_out": 2}
+AWAITING_REVIEW = ("awaiting_configuration", "awaiting_recipe")
+WORKING_ROUND = ("baseline", "working", "evaluating")
 
 
 def row(db: Connection, round_id: str, writable: bool = False):
@@ -70,11 +72,15 @@ def get_round(db: Connection, round_id: str) -> Round:
     )
     if value is None:
         raise HTTPException(404, "Round not found")
+    record = value["record"]
+    review = record.get("submitted_review")
     return Round(
-        **value["record"],
+        **record,
         round_id=round_id,
         status=value["status"],
         proposals=proposals(db, round_id),
+        pending_proposal_id=review["proposal_id"] if review else None,
+        work_expired=value["status"] in WORKING_ROUND and not live_lease(record, now()),
         spending=improvement_budget.spending(
             db, round_id, value["record"]["settings"]["spending_limit"]
         ),
@@ -100,9 +106,13 @@ def start(db: Connection, handler: Handler) -> Round:
         raise HTTPException(409, "An improvement round is already open")
     base = configurations.get_configuration(db, current["current_configuration"])
     identity = str(uuid.uuid4())
+    started_at = now()
     record = {
         "thread_id": str(uuid.uuid4()),
-        "started_at": now(),
+        "started_at": started_at,
+        "work_started_at": started_at,
+        "work_id": str(uuid.uuid4()),
+        "heartbeat_at": None,
         "started_by": handler.name,
         "finished_at": None,
         "base_version": base.version,
@@ -222,25 +232,138 @@ def pending(db: Connection, round_id: str, request: ProposalRequest) -> Round:
     return get_round(db, round_id)
 
 
-def decide(
+def reviewable(
     db: Connection, round_id: str, proposal_id: str, decision: HandlerDecision
-) -> Round:
-    """Record the handler's decision before the service resumes its checkpoint."""
+) -> tuple[dict, Proposal]:
+    """Find the waiting proposal and validate the senior handler's answer."""
     value = row(db, round_id, writable=True)
     proposal = next(
         (p for p in proposals(db, round_id) if p.proposal_id == proposal_id), None
     )
     if proposal is None:
         raise HTTPException(404, "Proposal not found")
-    if proposal.decision is not None or value["status"] not in (
-        "awaiting_configuration",
-        "awaiting_recipe",
-    ):
+    if proposal.decision is not None or value["status"] not in AWAITING_REVIEW:
         raise HTTPException(409, "This proposal is no longer waiting for approval")
     if decision.decision == "reject" and not (decision.reason or "").strip():
         raise HTTPException(422, "Give a reason for rejecting the proposal")
     if not decision.handler.can_approve_over_limit:
         raise HTTPException(403, "A senior handler must decide proposals")
+    return dict(value), proposal
+
+
+def queue_review(
+    db: Connection, round_id: str, proposal_id: str, decision: HandlerDecision
+) -> str:
+    """Store a review and occupy the work slot without publishing its approval."""
+    value, proposal = reviewable(db, round_id, proposal_id, decision)
+    if decision.decision == "approve" and (
+        refusal := validate_proposal(db, round_id, proposal)
+    ):
+        raise HTTPException(422, refusal)
+    work_id = str(uuid.uuid4())
+    record = value["record"] | {
+        "work_id": work_id,
+        "work_started_at": now(),
+        "heartbeat_at": None,
+        "submitted_review": {
+            "proposal_id": proposal_id,
+            "previous_status": value["status"],
+            "answer": decision.model_dump(),
+        },
+    }
+    save(db, round_id, "working", record)
+    return work_id
+
+
+def cancel_review(db: Connection, round_id: str, work_id: str) -> None:
+    """Restore only an unclaimed review submitted by the failed invocation."""
+    value = row(db, round_id)
+    record = dict(value["record"])
+    if (
+        value["status"] != "working"
+        or record.get("work_id") != work_id
+        or record.get("heartbeat_at")
+    ):
+        return
+    if review := record.pop("submitted_review", None):
+        save(db, round_id, review["previous_status"], record)
+
+
+def live_lease(record: dict, at: str) -> bool:
+    """Read the current work stretch, with a fallback for pre-lease rounds."""
+    return has_live_lease(
+        record.get("work_started_at", record["started_at"]),
+        record.get("heartbeat_at"),
+        at,
+    )
+
+
+def ensure_work(db: Connection, round_id: str, proposal_id: str | None) -> dict:
+    """Lock the named round only if its pending stretch can still be taken."""
+    value = row(db, round_id, writable=True)
+    record = value["record"]
+    review = record.get("submitted_review")
+    pending_id = review["proposal_id"] if review else None
+    if (
+        value["status"] not in ("baseline", "working")
+        or pending_id != proposal_id
+        or record.get("heartbeat_at")
+        or not live_lease(record, now())
+    ):
+        raise HTTPException(409, "This round is no longer available for that work")
+    return dict(value)
+
+
+def take_work(db: Connection, round_id: str, proposal_id: str | None) -> dict:
+    """Accept a stretch and apply any review only once a worker takes it."""
+    value = ensure_work(db, round_id, proposal_id)
+    record = dict(value["record"])
+    review = record.pop("submitted_review", None)
+    work_id = record.get("work_id") or str(uuid.uuid4())
+    record.update(work_id=work_id, heartbeat_at=now())
+    if review is None:
+        save(db, round_id, value["status"], record)
+        return {"work_id": work_id, "review": None}
+    answer = HandlerDecision(**review["answer"])
+    save(db, round_id, review["previous_status"], record)
+    decide(
+        db,
+        round_id,
+        review["proposal_id"],
+        answer,
+        reviewed_at=record["work_started_at"],
+    )
+    response: dict[str, str | None] = {"type": answer.decision}
+    if answer.decision == "reject":
+        response["message"] = answer.reason
+    return {"work_id": work_id, "review": response}
+
+
+def heartbeat(db: Connection, round_id: str, work_id: str) -> None:
+    """Renew only the currently working stretch of an open round."""
+    value = row(db, round_id, writable=True)
+    record = value["record"]
+    at = now()
+    if (
+        record.get("work_id") != work_id
+        or value["status"] not in WORKING_ROUND
+        or not record.get("heartbeat_at")
+        or not live_lease(record, at)
+    ):
+        raise HTTPException(409, "The round is on a different stretch")
+    save(db, round_id, value["status"], record | {"heartbeat_at": at})
+
+
+def decide(
+    db: Connection,
+    round_id: str,
+    proposal_id: str,
+    decision: HandlerDecision,
+    *,
+    reviewed_at: str | None = None,
+) -> Round:
+    """Apply the reviewed proposal when the accepting worker takes the stretch."""
+    value, proposal = reviewable(db, round_id, proposal_id, decision)
     record = dict(value["record"])
     version = None
     if decision.decision == "approve":
@@ -273,7 +396,7 @@ def decide(
             "decision": decision.decision,
             "feedback": decision.reason,
             "handler": decision.handler.name,
-            "decided_at": now(),
+            "decided_at": reviewed_at or now(),
             "version": version,
         }
     )
@@ -441,6 +564,9 @@ def finish(db: Connection, round_id: str, stopped: bool, reason: str) -> Round:
     elif record["explanation"] is None:
         record["explanation"] = reason
     record["finished_at"] = now()
+    if stopped:
+        record.pop("submitted_review", None)
+        record["stop_reason"] = reason
     save(db, round_id, "stopped" if stopped else "finished", record)
     return get_round(db, round_id)
 
@@ -497,19 +623,3 @@ def report(db: Connection, round_id: str) -> dict:
             if item.round_id != round_id
         ],
     }
-
-
-def recover(db: Connection) -> list[str]:
-    """Preserve pending approvals and close abandoned active stretches."""
-    identities = list(
-        db.execute(
-            select(rounds.c.round_id).where(
-                rounds.c.status.in_(("baseline", "working", "evaluating"))
-            )
-        ).scalars()
-    )
-    for identity in identities:
-        finish(
-            db, identity, True, "Agent service restarted before this stretch finished"
-        )
-    return identities

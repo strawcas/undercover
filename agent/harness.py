@@ -299,9 +299,10 @@ def call_model(
     reply = llm.invoke([prompt, *state["messages"]])
     api.record_model_call(
         runtime.context.claim_id,
-        measurements.model_reply(reply, runtime.context.run_id),
+        measurements.model_reply(reply, context.run_id)
+        | {"thread_id": context.thread_id},
     )
-    if context.revision:
+    if context.revision or context.run_id is not None:
         api.admit_claim(context.claim_id, context.run_id, context.revision)
         reply.response_metadata[DECISION_REVISION] = context.revision
     observations.record_reply(context, reply, via)
@@ -341,7 +342,9 @@ def screen_claim(state: ClaimState, runtime: Runtime[ClaimContext]) -> dict[str,
     attempt = screening.check(context.claim_id, context.run_id, context.revision)
     if context.evaluation_id is not None and attempt["usage"] is not None:
         # Startup discards stopped evaluation checkpoints, so save the charge first.
-        api.record_model_call(context.claim_id, attempt["usage"])
+        api.record_model_call(
+            context.claim_id, attempt["usage"] | {"thread_id": context.thread_id}
+        )
         attempt["usage"] = None
     return {
         "screening": attempt,
@@ -353,7 +356,9 @@ def record_screen(state: ClaimState, runtime: Runtime[ClaimContext]) -> dict[str
     """Record the saved result once and refer any flagged claim."""
     context, attempt = runtime.context, state["screening"]
     if attempt["usage"] is not None:
-        api.record_model_call(context.claim_id, attempt["usage"])
+        api.record_model_call(
+            context.claim_id, attempt["usage"] | {"thread_id": context.thread_id}
+        )
     result = attempt["result"]
     if result is None:
         if state["screen_attempts"] >= screening.MAX_ATTEMPTS:
@@ -365,7 +370,11 @@ def record_screen(state: ClaimState, runtime: Runtime[ClaimContext]) -> dict[str
     flagged, reason = result["instructions_found"], result["reason"]
     label = "Flagged" if flagged else "Passed"
     api.record_step(
-        context.claim_id, "security", f"{label}. {reason}", thread_id=context.thread_id
+        context.claim_id,
+        "security",
+        f"{label}. {reason}",
+        thread_id=context.thread_id,
+        run_id=context.run_id,
     )
     if flagged:
         claim = api.record_decision(
@@ -378,6 +387,7 @@ def record_screen(state: ClaimState, runtime: Runtime[ClaimContext]) -> dict[str
                 "decided_by": screening.SECTION,
                 "thread_id": context.thread_id,
                 "revision": context.revision,
+                "run_id": context.run_id or "",
             },
         )
         return {"decision": claim["decision"], "status": claim["status"]}
@@ -406,17 +416,23 @@ def pay(
         log.warning("%s could not record the payment call: %s", context.claim_id, error)
     try:
         claim = api.pay_claim(
-            context.claim_id, amount, via=via, revision=context.revision
+            context.claim_id,
+            amount,
+            via=via,
+            revision=context.revision,
+            run_id=context.run_id,
         )
     except gateway.GatewayDenied as denied:
         claim = api.hold_gateway_payment(
-            context.claim_id, str(denied), context.revision
+            context.claim_id, str(denied), context.revision, context.run_id
         )
     except Refused as denied:
         if denied.status_code != HTTPStatus.FORBIDDEN:
             observations.record_refusal(context, "pay_claim", refusal(denied))
             raise
-        claim = api.hold_limit_payment(context.claim_id, context.revision)
+        claim = api.hold_limit_payment(
+            context.claim_id, context.revision, context.run_id
+        )
         observations.record_refusal(context, "pay_claim", refusal(denied))
     return {"status": claim["status"]}
 
@@ -455,7 +471,9 @@ def save_memory(state: ClaimState, runtime: Runtime[ClaimContext]) -> dict[str, 
     """Save the recorded decision and minimal claim after adjudication."""
     if runtime.store is not None and state["status"] == api.Status.DECIDED:
         context = runtime.context
-        api.prepare_memory(context.claim_id, context.thread_id, context.revision)
+        api.prepare_memory(
+            context.claim_id, context.thread_id, context.revision, context.run_id
+        )
         memory.save_decision(runtime.store, context.memory_claim, state["decision"])
     return {}
 
@@ -679,7 +697,9 @@ def run_claim_graph(
     return error
 
 
-def settle(claim_id: str, error: str | None, revision: int = 0) -> str:
+def settle(
+    claim_id: str, error: str | None, revision: int = 0, run_id: str | None = None
+) -> str:
     """Fail a claim the agent left undecided, and report how the claim ended. An
     error after the decision is logged, and the claim keeps its decision."""
     claim = api.get_claim(claim_id)
@@ -687,7 +707,7 @@ def settle(claim_id: str, error: str | None, revision: int = 0) -> str:
     if claim["revision"] != revision:
         return f"{claim_id}  handed off for review"
     if claim["status"] == api.Status.IN_PROGRESS and claim["decision"] is None:
-        claim = api.fail_claim(claim_id, reason, revision)
+        claim = api.fail_claim(claim_id, reason, revision, run_id)
     elif error:
         log.warning("%s  %s", claim_id, error)
     line = report(claim, reason)
@@ -774,9 +794,9 @@ def work_claim(
     revision: int = 0,
 ) -> str:
     """Work a waiting claim as a new attempt, measuring preparation and execution."""
-    claim = api.start_claim(claim_id, str(uuid.uuid4()), revision)
+    claim = api.start_claim(claim_id, str(uuid.uuid4()), revision, run_id)
     error = run_claim_graph(graph, claim, WORK_CLAIM, run_id, version)
-    return settle(claim_id, error, revision)
+    return settle(claim_id, error, revision, run_id)
 
 
 def carry_on(
@@ -790,4 +810,4 @@ def carry_on(
     if decision and decision["signed_off_by"] and not claim["payment"]:
         return report(claim, "")
     error = run_claim_graph(graph, claim, CARRY_ON, run_id, version)
-    return settle(claim["claim_id"], error, claim["revision"])
+    return settle(claim["claim_id"], error, claim["revision"], run_id)

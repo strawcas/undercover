@@ -2,34 +2,53 @@
 
 import os
 from contextlib import contextmanager
+from json import JSONDecodeError
 from threading import Event
 
+import httpx
 import pytest
 from bedrock_agentcore.runtime.models import IDENTITY_WAT_HEADER
-from fastapi import BackgroundTasks
 
 from agent import api, checkpoints, dispatcher, memory, runtime_settings, service
-from agent.backend_client import Refused
-from agent.tests.records import latest
 from agent.tests.runtime_support import invoke, runtime_client, wait_for_idle
 from backend import agent_key
-from backend.tests.run_requests import configuration
+from backend.tests.run_requests import configuration, fixture_run
 
 
-def test_admission_reserves_before_creating_backend_run(client):
-    background = BackgroundTasks()
-    assert service.start_dispatch(
-        service.DispatchRequest(concurrency=25), background
-    ) == {"status": "accepted"}
-    try:
-        assert latest(client) is None
-        with pytest.raises(Refused, match="dispatch") as busy:
-            service.start_dispatch(
-                service.DispatchRequest(concurrency=1), BackgroundTasks()
-            )
-        assert busy.value.status_code == 409
-    finally:
-        service.run_slot.release()
+def test_agent_schedules_only_a_named_committed_run(client):
+    run = (
+        client.post("/api/dispatches", json={"concurrency": 25})
+        .raise_for_status()
+        .json()
+    )
+    assert api.get_run(run["run_id"])["concurrency"] == 25
+    assert client.post("/api/dispatches", json={"concurrency": 1}).status_code == 409
+
+
+@pytest.mark.usefixtures("runtime_defaults")
+def test_entrypoint_reports_definite_take_refusal_before_accepting(client):
+    run = fixture_run(configuration())
+    api.stop_run(run["run_id"])
+    agent = runtime_client()
+    response = invoke(agent, "work_run", run_id=run["run_id"])
+    assert response.json() == {"refused": "This run is no longer available"}
+    wait_for_idle(agent)
+
+
+@pytest.mark.usefixtures("runtime_defaults")
+@pytest.mark.parametrize(
+    "problem", [httpx.ReadTimeout("no reply"), JSONDecodeError("invalid reply", "", 0)]
+)
+def test_entrypoint_preserves_uncertainty_when_take_loses_its_reply(
+    monkeypatch, problem
+):
+    def lost_reply(run_id):
+        raise problem
+
+    monkeypatch.setattr(api, "take_run", lost_reply)
+    agent = runtime_client()
+    assert invoke(agent, "work_run", run_id="new-run").json() == {"uncertain": True}
+    wait_for_idle(agent)
 
 
 @pytest.mark.parametrize("fails", [False, True])
@@ -44,23 +63,20 @@ def test_worker_keeps_ping_busy_until_it_finishes(client, monkeypatch, fails):
             raise RuntimeError("stand-in worker failed")
 
     monkeypatch.setattr(dispatcher, "dispatch", dispatch)
+    run_id = fixture_run(configuration(concurrency=1))["run_id"]
+    untouched = fixture_run(configuration(concurrency=2))["run_id"]
     with runtime_client() as agent:
         assert agent.get("/ping").json()["status"] == "Healthy"
         try:
-            assert invoke(agent, "start_dispatch", agents=1).json() == {
-                "accepted": True
-            }
+            assert invoke(agent, "work_run", run_id=run_id).json() == {"accepted": True}
             assert entered.wait(timeout=10)
             assert agent.get("/ping").json()["status"] == "HealthyBusy"
             assert invoke(agent, "health").json() == {"healthy": True}
-            busy = invoke(agent, "start_dispatch", agents=3)
-            assert busy.status_code == 200
-            assert "dispatch" in busy.json()["refused"]
         finally:
             finish.set()
         wait_for_idle(agent)
-    assert latest(client)["status"] == ("stopped" if fails else "finished")
-    assert not service.run_slot.locked()
+    assert api.get_run(run_id)["status"] == ("stopped" if fails else "finished")
+    assert api.get_run(untouched)["status"] == "running"
 
 
 @pytest.mark.parametrize(
@@ -68,9 +84,9 @@ def test_worker_keeps_ping_busy_until_it_finishes(client, monkeypatch, fails):
     [
         {},
         {"operation": "unknown"},
-        {"operation": "start_dispatch"},
-        {"operation": "start_dispatch", "agents": 26},
-        {"operation": "start_dispatch", "agents": "1"},
+        {"operation": "work_run"},
+        {"operation": "work_run", "run_id": 26},
+        {"operation": "work_round", "round_id": ""},
         {"operation": "resume_claim", "claim_id": ""},
     ],
 )
@@ -100,16 +116,13 @@ def test_first_request_initialization_can_retry(monkeypatch):
     def pool():
         transitions.append("open")
         try:
+            if len(transitions) == 1:
+                raise RuntimeError("initialization failed")
             yield None
         finally:
             transitions.append("close")
 
-    def recover():
-        if len(transitions) == 1:
-            raise RuntimeError("initialization failed")
-
     monkeypatch.setattr(checkpoints, "checkpointer", pool)
-    monkeypatch.setattr(service, "recover", recover)
     with runtime_client() as agent:
         assert not transitions
         assert agent.get("/ping").json()["status"] == "Healthy"
@@ -181,10 +194,11 @@ def test_first_request_replays_started_memory_receipts(monkeypatch):
     assert retried == ["once"]
 
 
-def test_interim_recovery_stops_abandoned_runs_without_changing_the_thread(monkeypatch):
-    run_id = api.start_run(configuration())["run_id"]
+@pytest.mark.usefixtures("runtime_defaults")
+def test_new_runtime_session_leaves_existing_work_to_its_owner():
+    run_id = fixture_run(configuration())["run_id"]
     api.start_claim("CLM-1001", "saved-thread")
-    monkeypatch.setattr(checkpoints, "clear_threads", lambda threads: None)
-    service.recover()
-    assert api.get_run(run_id)["status"] == "stopped"
+    with runtime_client({}) as agent:
+        assert invoke(agent, "health").json() == {"healthy": True}
+    assert api.get_run(run_id)["status"] == "running"
     assert api.get_claim("CLM-1001")["thread_id"] == "saved-thread"

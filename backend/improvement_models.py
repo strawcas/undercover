@@ -71,6 +71,9 @@ class Round(BaseModel):
     after: Scores | None
     verdict: Literal["kept", "rolled_back"] | None
     explanation: str | None
+    stop_reason: str | None = None
+    work_expired: bool = False
+    pending_proposal_id: str | None = None
     proposals: list[Proposal]
     spending: Spending
 
@@ -78,6 +81,18 @@ class Round(BaseModel):
 class RoundProgress(BaseModel):
     status: Literal["baseline", "working", "evaluating"]
     progress: int = Field(ge=0, le=3)
+
+
+class RoundTake(BaseModel):
+    proposal_id: str | None
+
+
+class RoundHeartbeat(BaseModel):
+    work_id: str = Field(min_length=1)
+
+
+class StopRoundWork(RoundHeartbeat):
+    reason: str = Field(min_length=1)
 
 
 class RoundUsage(ModelCallRequest):

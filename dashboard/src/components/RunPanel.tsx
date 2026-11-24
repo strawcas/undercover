@@ -49,6 +49,7 @@ function RunDetails({ run }: Readonly<{ run: Run }>) {
       ) : (
         <MembersTable members={run.members} status={run.status} />
       )}
+      {run.stop_reason && <p className="message">{run.stop_reason}</p>}
       {run.summary && (
         <>
           <h3>Summary for the handlers</h3>

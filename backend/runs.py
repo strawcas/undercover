@@ -18,7 +18,7 @@ from sqlalchemy import (
     update,
 )
 
-from backend.clock import now
+from backend.clock import has_live_lease, now
 from backend.configurations import get_configuration
 from backend.database import (
     claim_view,
@@ -26,6 +26,7 @@ from backend.database import (
     conflict_insert,
     insert_once,
     model_calls,
+    rounds,
     run_claims,
     runs,
     steps,
@@ -42,9 +43,28 @@ from backend.models import (
 )
 
 
-def run_row(db: Connection, run_id: str) -> Any:
+def lock_sqlite_run(db: Connection, run_id: str) -> None:
+    """Start a write transaction before checking a run on SQLite."""
+    if db.dialect.name == "sqlite":
+        db.execute(
+            update(runs).where(runs.c.run_id == run_id).values(status=runs.c.status)
+        )
+
+
+def run_row(db: Connection, run_id: str, *, lock: bool = False) -> Any:
     """Find a run or raise a 404."""
-    row = db.execute(select(runs).where(runs.c.run_id == run_id)).mappings().first()
+    key = runs.c.run_id == run_id
+    if lock and db.dialect.name == "sqlite":
+        row = (
+            db.execute(
+                update(runs).where(key).values(status=runs.c.status).returning(runs)
+            )
+            .mappings()
+            .first()
+        )
+    else:
+        query = select(runs).where(key)
+        row = db.execute(query.with_for_update() if lock else query).mappings().first()
     if row is None:
         raise HTTPException(404, f"Run {run_id} not found")
     return row
@@ -52,13 +72,7 @@ def run_row(db: Connection, run_id: str) -> Any:
 
 def running(db: Connection, run_id: str) -> Any:
     """Lock a live run before changing its membership or lifecycle."""
-    row = (
-        db.execute(select(runs).where(runs.c.run_id == run_id).with_for_update())
-        .mappings()
-        .first()
-    )
-    if row is None:
-        raise HTTPException(404, f"Run {run_id} not found")
+    row = run_row(db, run_id, lock=True)
     if row["status"] != "running":
         raise HTTPException(409, f"Run {run_id} has finished")
     return row
@@ -117,6 +131,22 @@ def member_result(db: Connection, claim_id: str) -> dict[str, Any]:
     return result
 
 
+def lock_review_runs(db: Connection, claim_id: str) -> None:
+    """Lock dispatch rows before a senior review locks a selected claim."""
+    if db.dialect.name == "postgresql":
+        selected = select(run_claims.c.run_id).where(run_claims.c.claim_id == claim_id)
+        db.execute(
+            select(runs.c.run_id)
+            .where(
+                runs.c.run_id.in_(selected),
+                runs.c.status == "running",
+                runs.c.kind == "dispatch",
+            )
+            .order_by(runs.c.run_id)
+            .with_for_update()
+        ).all()
+
+
 def preserve_hold(db: Connection, claim: RowMapping) -> None:
     """Save a dispatch's held outcome before a handler changes the live claim."""
     claim_id = claim["claim_id"]
@@ -134,10 +164,8 @@ def preserve_hold(db: Connection, claim: RowMapping) -> None:
         if claim["returned_decisions"]
         else worked_claim
     )
-    dispatches = (
-        select(runs.c.run_id)
-        .where(runs.c.status == "running", runs.c.kind == "dispatch", assigned_run)
-        .with_for_update()
+    dispatches = select(runs.c.run_id).where(
+        runs.c.status == "running", runs.c.kind == "dispatch", assigned_run
     )
     saved = member_result(db, claim_id) | {"held_for_review": True}
     saved["claim_status"] = "waiting_for_sign_off"
@@ -245,14 +273,23 @@ def latest(db: Connection) -> Run | None:
 
 
 def active(db: Connection) -> Run | None:
-    """Read any running kind so both dashboard forms share admission state."""
-    run_id = db.execute(
-        select(runs.c.run_id)
+    """Show live work without recovering stale records during a dashboard poll."""
+    at = now()
+    candidates = db.execute(
+        select(runs.c.run_id, runs.c.started_at, runs.c.heartbeat_at, rounds.c.record)
+        .select_from(runs.outerjoin(rounds, runs.c.round_id == rounds.c.round_id))
         .where(runs.c.status == "running")
         .order_by(runs.c.number.desc())
-        .limit(1)
-    ).scalar_one_or_none()
-    return get_run(db, run_id) if run_id else None
+    ).all()
+    for run in candidates:
+        record = run.record or {}
+        started = record.get(
+            "work_started_at", record.get("started_at", run.started_at)
+        )
+        pulse = record.get("heartbeat_at", run.heartbeat_at)
+        if has_live_lease(started, pulse, at):
+            return get_run(db, run.run_id)
+    return None
 
 
 def start_run(db: Connection, request: RunRequest) -> Run:
@@ -359,7 +396,9 @@ def summary(items: list[RunMember]) -> str:
     return "\n".join(lines)
 
 
-def finish_run(db: Connection, run_id: str, status: str = "finished") -> Run:
+def finish_run(
+    db: Connection, run_id: str, status: str = "finished", reason: str | None = None
+) -> Run:
     """Freeze every selected outcome and build the final summary."""
     row = dict(running(db, run_id)) | {"finished_at": now()}
     snapshots = members(db, row, measured_work(db, run_id))
@@ -384,20 +423,25 @@ def finish_run(db: Connection, run_id: str, status: str = "finished") -> Run:
         update(runs)
         .where(runs.c.run_id == run_id)
         .values(
-            status=status, finished_at=row["finished_at"], summary=summary(snapshots)
+            status=status,
+            finished_at=row["finished_at"],
+            summary=summary(snapshots),
+            stop_reason=reason,
         )
     )
     return get_run(db, run_id)
 
 
-def stop_runs(db: Connection) -> list[str]:
-    """Close abandoned runs; ordinary claim threads remain resumable."""
-    ids = list(
-        db.execute(select(runs.c.run_id).where(runs.c.status == "running")).scalars()
-    )
-    for run_id in ids:
-        finish_run(db, run_id, "stopped")
-    return evaluation_threads(db, None)
+def stop(
+    db: Connection, run_id: str, reason: str, *, only_unclaimed: bool = False
+) -> Run:
+    """Stop the named run once and preserve its existing terminal outcome."""
+    current = run_row(db, run_id, lock=True)
+    if current["status"] == "running" and not (
+        only_unclaimed and current["heartbeat_at"]
+    ):
+        return finish_run(db, run_id, "stopped", reason)
+    return get_run(db, run_id)
 
 
 def evaluation_threads(db: Connection, run_id: str | None) -> list[str]:
@@ -405,7 +449,12 @@ def evaluation_threads(db: Connection, run_id: str | None) -> list[str]:
     selection = (
         claims.c.evaluation_id == run_id
         if run_id
-        else claims.c.evaluation_id.is_not(None)
+        else claims.c.evaluation_id.in_(
+            select(runs.c.run_id).where(
+                runs.c.kind == "evaluation",
+                runs.c.status == "stopped",
+            )
+        )
     )
     current = select(claims.c.thread_id).where(
         selection, claims.c.thread_id.is_not(None)
@@ -437,11 +486,12 @@ def has_work_slice(db: Connection, run_id: str, claim_attempt: tuple[str, str]) 
 def validate_run(
     db: Connection, run_id: str | None, claim_attempt: tuple[str, str] | None = None
 ) -> str | None:
-    """Validate live work or a model receipt recovered from a stopped dispatch."""
+    """Validate live work or a model receipt from a previously admitted attempt."""
     if run_id is None:
         return None
+    lock_sqlite_run(db, run_id)
     row = db.execute(
-        select(runs.c.status, runs.c.kind, runs.c.round_id)
+        select(runs.c.status, runs.c.round_id)
         .where(runs.c.run_id == run_id)
         .with_for_update(read=True)
     ).first()
@@ -449,7 +499,6 @@ def validate_run(
         raise HTTPException(404, "Run not found")
     if row.status != "running" and not (
         row.status == "stopped"
-        and row.kind == "dispatch"
         and claim_attempt is not None
         and has_work_slice(db, run_id, claim_attempt)
     ):
@@ -467,7 +516,11 @@ def record_model_call(
     insert_once(
         db,
         model_calls,
-        {"claim_id": claim_id, "thread_id": thread_id, **request.model_dump()},
+        {
+            "claim_id": claim_id,
+            "thread_id": thread_id,
+            **request.model_dump(exclude={"thread_id"}),
+        },
     )
 
 

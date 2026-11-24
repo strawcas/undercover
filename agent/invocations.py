@@ -1,4 +1,4 @@
-"""Validate the wire format for AgentCore work requests."""
+"""Validate and route the AgentCore work protocol."""
 
 from typing import Annotated, Literal
 
@@ -15,36 +15,20 @@ class Health(Request):
     operation: Literal["health"]
 
 
-class Dispatch(Request):
-    operation: Literal["start_dispatch"]
-    agents: int = Field(ge=1, le=25)
+class WorkRun(Request):
+    operation: Literal["work_run"]
+    run_id: str = Field(min_length=1)
 
 
-class Evaluation(Request):
-    operation: Literal["start_evaluation"]
-    agents: int = Field(ge=1, le=25)
-    set_name: Literal["evaluation", "held_out"]
-    tiny: bool
-
-
-class StartRound(Request):
-    operation: Literal["start_round"]
-    handler: service.Handler
-
-
-class StopRound(Request):
-    operation: Literal["stop_round"]
+class WorkRound(Request):
+    operation: Literal["work_round"]
     round_id: str = Field(min_length=1)
-    handler: service.Handler
 
 
-class DecideProposal(Request):
-    operation: Literal["decide_proposal"]
+class CarryRound(Request):
+    operation: Literal["carry_round_on"]
     round_id: str = Field(min_length=1)
     proposal_id: str = Field(min_length=1)
-    handler: service.Handler
-    decision: Literal["approve", "reject"]
-    reason: str | None
 
 
 class ResumeClaim(Request):
@@ -52,44 +36,19 @@ class ResumeClaim(Request):
     claim_id: str = Field(min_length=1)
 
 
-WorkRequest = (
-    Dispatch | Evaluation | StartRound | StopRound | DecideProposal | ResumeClaim
-)
+WorkRequest = WorkRun | WorkRound | CarryRound | ResumeClaim
 Invocation = Health | WorkRequest
 invocation = TypeAdapter(Annotated[Invocation, Field(discriminator="operation")])
 
 
-def work(request: WorkRequest, background: service.Scheduler) -> dict[str, str]:
-    """Dispatch a validated request to the appropriate work operation."""
+def work(request: WorkRequest, background: service.Scheduler) -> None:
+    """Admit a validated job by the IDs already committed by the app."""
     match request:
-        case Dispatch():
-            response = service.start_dispatch(
-                service.DispatchRequest(concurrency=request.agents), background
-            )
-        case Evaluation():
-            response = service.start_evaluation(
-                service.EvaluationRequest(
-                    concurrency=request.agents,
-                    set_name=request.set_name,
-                    tiny=request.tiny,
-                ),
-                background,
-            )
-        case StartRound():
-            response = service.start_round(request.handler, background)
-        case StopRound():
-            response = service.stop_round(request.round_id, request.handler)
-        case DecideProposal():
-            response = service.decide_proposal(
-                request.round_id,
-                request.proposal_id,
-                service.HandlerDecision(
-                    decision=request.decision,
-                    reason=request.reason,
-                    handler=request.handler,
-                ),
-                background,
-            )
+        case WorkRun():
+            service.schedule_run(request.run_id, background)
+        case WorkRound():
+            service.schedule_round(request.round_id, None, background)
+        case CarryRound():
+            service.schedule_round(request.round_id, request.proposal_id, background)
         case ResumeClaim():
-            response = service.resume_claim(request.claim_id, background)
-    return {key: value for key, value in response.items() if key != "status"}
+            service.resume_claim(request.claim_id, background)

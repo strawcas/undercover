@@ -8,7 +8,7 @@ from backend.database import claims, engine, evaluation_labels, evaluation_sourc
 from backend.scoring import compare
 from backend.tests.claim_requests import decide, pay, sign_off, start
 from backend.tests.evaluation_requests import evaluation
-from backend.tests.run_requests import configuration
+from backend.tests.run_requests import configuration, fixture_run
 
 
 @pytest.mark.parametrize("set_name", ["evaluation", "held_out"])
@@ -45,7 +45,7 @@ def test_pristine_copies_never_change_queue(client, set_name, tiny, count):
             ).scalar_one()
         assert record["claim_id"] == claim_id
     assert client.get("/api/claims").json() == before
-    ordinary = client.post("/api/runs", json=configuration()).json()["run_id"]
+    ordinary = fixture_run(configuration())["run_id"]
     assert (
         client.put(
             f"/api/runs/{ordinary}/claims/{ids[0]}",
@@ -245,7 +245,9 @@ def test_all_selected_copies_are_scored_with_attributed_cost_time(client, monkey
         json={"run_id": run["run_id"], "seconds": 5},
     )
     monkeypatch.setattr(runs, "now", lambda: "2026-11-09T00:00:30+00:00")
-    client.post("/api/runs/stop")
+    client.post(
+        f"/api/runs/{run['run_id']}/stop", json={"reason": "Stopped by worker"}
+    ).raise_for_status()
     result = client.get(f"/api/evaluations/{run['run_id']}").json()
     assert result["status"] == "stopped"
     assert result["seconds"] == 30
@@ -265,7 +267,7 @@ def test_all_selected_copies_are_scored_with_attributed_cost_time(client, monkey
 
 
 def test_evaluation_reads_require_an_evaluation(client):
-    run_id = client.post("/api/runs", json=configuration()).json()["run_id"]
+    run_id = fixture_run(configuration())["run_id"]
     assert client.get(f"/api/evaluations/{run_id}").status_code == 404
     assert client.get("/api/evaluations/missing").status_code == 404
 

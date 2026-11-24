@@ -130,3 +130,23 @@ def test_lease_expires_at_five_minutes_and_rejects_old_worker_writes(
     )
     assert replacement.status_code == 200
     assert replacement.json()["decision"]["decision"] == "refer"
+
+
+def test_stopping_a_dispatch_releases_its_returned_claim_for_another_worker(client):
+    hold(client)
+    send_back(client).raise_for_status()
+    run_id = (
+        client.post("/api/dispatches", json={"concurrency": 1})
+        .raise_for_status()
+        .json()["run_id"]
+    )
+    client.post(
+        f"/api/claims/{CLAIM}/take-review", json={"owner": "dispatch", "run_id": run_id}
+    ).raise_for_status()
+    assert client.get(f"/api/claims/{CLAIM}").json()["review_active"]
+    client.post(
+        f"/api/runs/{run_id}/stop", json={"reason": "Stopped"}
+    ).raise_for_status()
+    assert not client.get(f"/api/claims/{CLAIM}").json()["review_active"]
+    assert heartbeat(client, "dispatch").status_code == 409
+    assert take(client, "next-worker").status_code == 200

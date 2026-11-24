@@ -1,5 +1,11 @@
 # Status
 
+The backend admits one dispatch, evaluation or working improvement round at a time. It commits the request before invoking the agent, and the worker takes the saved record by ID. Pending proposals remain available while another kind of work runs. A definite refusal stops a new run or round, or restores an unclaimed proposal review. An uncertain reply leaves the record available to reload.
+
+Workers renew their leases each minute. Starting work recovers records that have gone five minutes without a heartbeat. Dashboard polls release stale start controls and show saved reasons after a dispatch, evaluation or round stops. Stopping a round also stops its running evaluation. Late state writes are fenced, and replies already billed can still be recorded against their original attempts.
+
+The Phase 4 and whole-branch reviews added atomic SQLite run guards, enforced the rule that nested evaluations belong to a live working round, and handled ambiguous worker takes. The production build passed. The full offline check passed with 449 Python tests, 123 dashboard tests and 13 Playwright tests. The backend, context and Runtime imports passed in isolated environments. The check ran with `.env` absent and confirmed its byte-for-byte restoration.
+
 The agent runs as an AgentCore HTTP app. On a laptop it listens on `127.0.0.1:8080` with bearer authentication for work and an open health invocation. The backend can send the same payload to the ARN in `UNDERCOVER_AGENT_RUNTIME`. On Runtime, the first invocation fetches three Identity credentials and opens the four-connection checkpoint pool with prepared statements disabled. `/ping` reports accepted jobs as busy until their workers finish.
 
 The locked `runtime` group and a package staged with just `runtime/` and `agent/` both imported in isolation. The production build passed on Windows. The offline checks passed with 433 Python tests, 123 dashboard tests and 12 Playwright tests. The review fixed worker startup cleanup, restored pending memory replay after the first request, and distinguished pre-send failures from incomplete replies. The real AWS workload token handoff remains for the deployment lab.
@@ -179,7 +185,7 @@ The pilot, harness and durable state builds are complete. The Swarm implementati
 ## Running it
 
 - `uv sync` and `npm install` install dependencies and hooks. `npm run seed` rebuilds the database selected by `.env`, including pristine evaluation sources and isolated handler labels. It resets the queue and clears runs, measurements, evaluation copies and the scoreboard. Reseed when moving from an earlier schema.
-- `npm run dev` starts backend 8000, agent service 8002 and dashboard http://localhost:5173 with `.env`. The backend uses Supabase when `DATABASE_URL` is set, otherwise SQLite. The agent needs Postgres for checkpoints and `UNDERCOVER_API_KEY` for service traffic. Both local server processes keep at most four database connections.
+- `npm run dev` starts the backend on 8000, AgentCore HTTP app on 8080, context service on 8006 and dashboard at http://localhost:5173. Stop Lab 1's `agentcore dev` first so port 8080 is free. The backend uses Supabase when `DATABASE_URL` is set, otherwise SQLite. The agent needs Postgres for checkpoints and `UNDERCOVER_API_KEY` for service traffic. Both database clients keep at most four connections.
 - Start a dispatch from the queue. Choose N from 1 to 25, default 3. The service accepts immediately and reserves one dispatch/evaluation slot; a second start gets 409. An unavailable service produces 503 and no run record.
 - `uv run -m agent CLM-1001` still works one waiting claim. A claim id is required; queue mode and `--cap` are removed. The API address comes from the shell's UNDERCOVER_API (default localhost 8000); model/database/tracing configuration can come from `.env`.
 - A senior handler can sign off a held original on its claim page. The backend pays the claim in the same transaction and the dashboard shows the paid result immediately.

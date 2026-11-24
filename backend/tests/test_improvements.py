@@ -29,12 +29,7 @@ def test_round_snapshot_baseline_and_one_open_round(client):
     assert current["improver_effort"] == "medium"
     assert current["settings"]["concurrency"] == 25
     assert current["thread_id"] != current["round_id"]
-    assert (
-        client.post(
-            "/api/improver/rounds", json=client.get("/api/me").json()
-        ).status_code
-        == 409
-    )
+    assert client.post("/api/rounds").status_code == 409
     with engine().begin() as db:
         assert improvements.baseline(db, current["round_id"])["missing"] == [
             "evaluation",
@@ -118,16 +113,16 @@ def test_invalid_proposals_recipe_versions_and_no_candidate_completion(client):
     assert next_round["thread_id"] != current["thread_id"]
 
 
-def test_stop_restart_and_late_writes_preserve_pending_approvals(client):
+def test_handler_stop_rejects_late_writes_without_global_recovery(client):
     current = new_round(client)
     baseline(client, current)
     path = f"/api/improver/rounds/{current['round_id']}"
     pending = proposal(client, current)
     client.post(path + "/proposals", json=pending).raise_for_status()
-    assert client.post("/api/improver/recover").json() == []
+    assert client.post("/api/improver/recover").status_code == 404
     assert client.get(path).json()["status"] == "awaiting_configuration"
     decide(client, current, pending).raise_for_status()
-    assert client.post("/api/improver/recover").json() == [current["round_id"]]
+    client.post(f"/api/rounds/{current['round_id']}/stop").raise_for_status()
     stopped = client.get(path).json()
     assert stopped["status"] == "stopped"
     assert stopped["verdict"] == "rolled_back"
@@ -171,12 +166,12 @@ def test_held_out_sentinels_never_enter_any_improver_report(client):
 @pytest.mark.parametrize(
     ("path", "body", "operation"),
     [
-        ("/api/rounds", None, "start_round"),
-        ("/api/rounds/unknown/stop", None, "stop_round"),
+        ("/api/rounds", None, "work_round"),
+        ("/api/rounds/unknown/stop", None, None),
         (
             "/api/rounds/unknown/proposals/p/decision",
             {"decision": "approve", "reason": None},
-            "decide_proposal",
+            None,
         ),
     ],
 )
@@ -189,8 +184,10 @@ def test_handler_round_actions_require_senior_identity(
     ):
         assert client.post(path, json=body, headers=headers).status_code == expected
     assert agent_calls == []
-    assert client.post(path, json=body).status_code == 202
-    assert [call["operation"] for call in agent_calls] == [operation]
+    assert client.post(path, json=body).status_code == (202 if operation else 404)
+    assert [call["operation"] for call in agent_calls] == (
+        [operation] if operation else []
+    )
 
 
 def test_budget_counts_idempotent_billing_and_rollback_without_tests(client):

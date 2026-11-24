@@ -13,7 +13,6 @@ from agent import (
     improver,
     improver_api,
     screening,
-    service,
 )
 from agent.mcp_client import McpClient
 from agent.runtime_settings import PROVIDERS, RuntimeSettings
@@ -47,7 +46,6 @@ def runtime_defaults(monkeypatch):
     """Give each AgentCore invocation test its own lazy settings and offline pool."""
     monkeypatch.setattr(entrypoint, "settings", RuntimeSettings())
     monkeypatch.setattr(checkpoints, "checkpointer", lambda: nullcontext(None))
-    monkeypatch.setattr(service, "recover", lambda: None)
 
 
 @pytest.fixture(autouse=True)

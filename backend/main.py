@@ -16,6 +16,7 @@ from backend import (
     evaluations,
     improvement_budget,
     improvements,
+    work_admission,
 )
 from backend import runs as run_records
 from backend import settings as platform_settings
@@ -24,7 +25,9 @@ from backend.auth import (
     CurrentHandler,
     ReviewHandler,
     SeniorHandler,
+    VerifiedEmail,
     agent_or_handler,
+    handler_for_email,
     require_agent,
 )
 from backend.clock import now
@@ -54,13 +57,13 @@ from backend.improvement_routes import router as improvement_router
 from backend.models import (
     Claim,
     ClaimHeartbeat,
+    ClaimModelCall,
     ClaimPayoutRequest,
     ClaimReview,
     ClaimSummary,
     Decision,
     DecisionAttemptRequest,
     DecisionRequest,
-    DecisionRevision,
     DispatchRequest,
     Evaluation,
     EvaluationDetail,
@@ -69,8 +72,8 @@ from backend.models import (
     FinishMemoryRequest,
     GatewayHoldRequest,
     Handler,
+    LimitHoldRequest,
     MemorySave,
-    ModelCallRequest,
     NewStepRequest,
     Payment,
     PaymentRequest,
@@ -82,13 +85,16 @@ from backend.models import (
     Run,
     RunAdmission,
     RunClaimRequest,
+    RunKind,
     RunRequest,
     RunSelectionRequest,
     SecurityStepRequest,
     SendBackRequest,
+    SetName,
     Status,
     Step,
     StepContent,
+    StoppedWork,
     TakeClaimRequest,
     WorkSliceRequest,
 )
@@ -116,19 +122,51 @@ shared_read = [Depends(agent_or_handler)]
 
 
 @app.post("/api/dispatches", operation_id="start_dispatch", status_code=202)
-def start_dispatch(request: DispatchRequest, handler: CurrentHandler) -> dict[str, str]:
-    """Ask the agent service to accept a dispatch without creating a run first."""
-    return agent_service.start_dispatch(request.concurrency)
+def start_dispatch(request: DispatchRequest, email: VerifiedEmail) -> dict[str, str]:
+    """Admit and commit one dispatch before asking the agent to work it."""
+    return launch_run("dispatch", request.concurrency, None, None, email)
 
 
 @app.post("/api/evaluations", operation_id="start_evaluation", status_code=202)
 def start_evaluation(
-    request: EvaluationRequest, handler: CurrentHandler
+    request: EvaluationRequest, email: VerifiedEmail
 ) -> dict[str, str]:
-    """Ask the agent service to accept an isolated evaluation."""
-    return agent_service.start_evaluation(
-        request.set_name, request.tiny, request.concurrency
+    """Admit an evaluation and its copies before asking the agent to work it."""
+    return launch_run(
+        "evaluation", request.concurrency, request.set_name, request.tiny, email
     )
+
+
+def launch_run(
+    kind: RunKind,
+    concurrency: int,
+    set_name: SetName | None,
+    tiny: bool | None,
+    email: str,
+) -> dict[str, str]:
+    """Pin and commit backend-owned work before making any remote call."""
+    with engine().begin() as db:
+        handler_for_email(email, db)
+        work_admission.admit(db)
+        run = create_run(
+            db,
+            RunRequest(
+                kind=kind,
+                concurrency=concurrency,
+                configuration_version=configurations.current_version(db),
+                round_id=None,
+                set_name=set_name,
+                tiny=tiny,
+            ),
+        )
+    work_admission.launch(
+        "work_run",
+        {"run_id": run.run_id},
+        lambda db, reason: run_records.stop(
+            db, run.run_id, reason, only_unclaimed=True
+        ),
+    )
+    return {"status": "accepted", "run_id": run.run_id}
 
 
 @app.get("/api/me", operation_id="get_current_handler")
@@ -161,11 +199,13 @@ def plans(db: Connection) -> Plans:
     return Plans(**db.execute(select(settings.c.plans)).scalar_one())
 
 
-def find_claim(db: Connection, claim_id: str, lock: bool = False) -> RowMapping:
+def find_claim(
+    db: Connection, claim_id: str, lock: bool = False, *, run_id: str = ""
+) -> RowMapping:
     """Return one claim's row, or raise a 404."""
     query = claim_view.where(claims.c.claim_id == claim_id)
     if lock:
-        improvement_budget.guard_claim_write(db, claim_id)
+        improvement_budget.guard_claim_write(db, claim_id, run_id)
         if db.dialect.name == "sqlite":
             db.execute(
                 update(claims)
@@ -378,8 +418,8 @@ def list_handlers(handler: CurrentHandler, db: Database) -> list[Handler]:
 )
 def start_claim(claim_id: str, request: DecisionAttemptRequest, db: Database) -> Claim:
     """Start work on a waiting claim, which moves it to in progress."""
-    improvement_budget.admit_run(db, find_claim(db, claim_id)["evaluation_id"])
-    claim = find_claim(db, claim_id, lock=True)
+    claim = find_claim(db, claim_id, lock=True, run_id=request.run_id)
+    improvement_budget.admit_run(db, request.run_id or claim["evaluation_id"])
     require_revision(claim, request.revision)
     if claim["status"] != "waiting":
         raise HTTPException(409, f"Claim {claim_id} is not waiting")
@@ -401,7 +441,7 @@ def original_for_memory(
     db: Connection, claim_id: str, request: DecisionAttemptRequest
 ) -> RowMapping:
     """Lock the original claim and verify the memory receipt's attempt."""
-    claim = find_claim(db, claim_id, lock=True)
+    claim = find_claim(db, claim_id, lock=True, run_id=request.run_id)
     require_attempt(claim, request.thread_id)
     require_revision(claim, request.revision)
     if claim["evaluation_id"] is not None:
@@ -498,7 +538,7 @@ def record_step(claim_id: str, request: NewStepRequest, db: Database) -> Step:
     """Record one step of the agent's work on a claim."""
     if isinstance(request, SecurityStepRequest):
         return record_security_step(db, claim_id, request)
-    claim = find_claim(db, claim_id, lock=True)
+    claim = find_claim(db, claim_id, lock=True, run_id=request.run_id)
     require_attempt(claim, request.thread_id)
     thread_id = claim["thread_id"]
     if thread_id is None:
@@ -510,7 +550,7 @@ def record_security_step(
     db: Connection, claim_id: str, request: SecurityStepRequest
 ) -> Step:
     """Return the existing step if a saved screening result is replayed."""
-    claim = find_claim(db, claim_id, lock=True)
+    claim = find_claim(db, claim_id, lock=True, run_id=request.run_id)
     if claim["thread_id"] != request.thread_id:
         raise HTTPException(409, f"Claim {claim_id} is on a different attempt")
     saved = (
@@ -544,7 +584,7 @@ def list_steps(claim_id: str, handler: CurrentHandler, db: Database) -> list[Ste
 )
 def record_decision(claim_id: str, request: DecisionRequest, db: Database) -> Claim:
     """Record a claim's decision once; an approval waits to be paid or signed off."""
-    claim = find_claim(db, claim_id, lock=True)
+    claim = find_claim(db, claim_id, lock=True, run_id=request.run_id)
     require_attempt(claim, request.thread_id)
     require_revision(claim, request.revision)
     payout = round(request.payout, 2)
@@ -587,7 +627,9 @@ def calculate_payout(
     claim_id: str, request: ClaimPayoutRequest, db: Database
 ) -> Payout:
     """Work out the payout and retain the current attempt's calculation."""
-    claim = find_claim(db, claim_id, lock=request.thread_id is not None)
+    claim = find_claim(
+        db, claim_id, lock=request.thread_id is not None, run_id=request.run_id
+    )
     if request.thread_id is not None:
         require_attempt(claim, request.thread_id)
         require_revision(claim, request.revision)
@@ -614,7 +656,7 @@ def calculate_payout(
 def pay_claim(claim_id: str, request: PaymentRequest, db: Database) -> Claim:
     """Pay an approved claim its payout once, unless it needs a handler's sign-off."""
     check_payment_limit(request.amount, platform_settings.approval_limit(db))
-    claim = find_claim(db, claim_id, lock=True)
+    claim = find_claim(db, claim_id, lock=True, run_id=request.run_id)
     require_revision(claim, request.revision)
     if claim["decision"] != "approve":
         raise HTTPException(409, f"Claim {claim_id} has not been approved")
@@ -700,6 +742,7 @@ def sign_off_payment(db: Connection, claim: RowMapping, handler: Handler) -> Cla
 
 def lock_review(db: Connection, claim_id: str, revision: str | None) -> RowMapping:
     """Lock a reviewable claim and re-read its decision after taking the lock."""
+    run_records.lock_review_runs(db, claim_id)
     claim = find_claim(db, claim_id, lock=True)
     if claim["evaluation_id"] is not None:
         raise HTTPException(409, "Evaluation claims cannot be reviewed")
@@ -738,7 +781,7 @@ def send_back_claim(
 def take_review_claim(claim_id: str, request: TakeClaimRequest, db: Database) -> Claim:
     """Give one worker the lease for a returned claim."""
     improvement_budget.admit_run(db, request.run_id)
-    claim = find_claim(db, claim_id, lock=True)
+    claim = find_claim(db, claim_id, lock=True, run_id=request.run_id or "")
     claim_reviews.take(db, claim, request.owner, request.run_id)
     return to_claim(find_claim(db, claim_id))
 
@@ -752,7 +795,8 @@ def review_heartbeat(
     claim_id: str, request: ClaimHeartbeat, db: Database
 ) -> dict[str, str]:
     """Renew or release the review lease for the current owner."""
-    claim = find_claim(db, claim_id, lock=True)
+    run_id = find_claim(db, claim_id)["review_run_id"] if request.working else None
+    claim = find_claim(db, claim_id, lock=True, run_id=run_id or "")
     claim_reviews.update_heartbeat(db, claim, request.owner, request.working)
     return {"status": "recorded"}
 
@@ -762,12 +806,9 @@ def review_heartbeat(
     operation_id="hold_limit_payment",
     dependencies=agent_only,
 )
-def hold_limit_payment(claim_id: str, request: DecisionRevision, db: Database) -> Claim:
+def hold_limit_payment(claim_id: str, request: LimitHoldRequest, db: Database) -> Claim:
     """Hold an unpaid approval refused under the current approval limit."""
-    run_id = find_claim(db, claim_id)["evaluation_id"]
-    if run_id is not None:
-        run_records.validate_run(db, run_id)
-    claim = find_claim(db, claim_id, lock=True)
+    claim = find_claim(db, claim_id, lock=True, run_id=request.run_id)
     require_revision(claim, request.revision)
     if claim["paid_at"] is not None and claim["signed_off_by"] is not None:
         return to_claim(claim)
@@ -779,7 +820,7 @@ def hold_limit_payment(claim_id: str, request: DecisionRevision, db: Database) -
         raise HTTPException(409, "Only an unpaid approval can be held")
     if claim["status"] == "in_progress":
         limit = platform_settings.approval_limit(db, lock=True)
-        if run_id is None and not needs_sign_off(
+        if claim["evaluation_id"] is None and not needs_sign_off(
             claim["payout"], min(limit, claim["approval_limit"])
         ):
             raise HTTPException(409, "This payout does not need sign-off")
@@ -796,7 +837,7 @@ def hold_gateway_payment(
     claim_id: str, request: GatewayHoldRequest, db: Database
 ) -> Claim:
     """Hold an unpaid approval after the Gateway refused payment."""
-    claim = find_claim(db, claim_id, lock=True)
+    claim = find_claim(db, claim_id, lock=True, run_id=request.run_id)
     require_revision(claim, request.revision)
     if claim["decision"] != "approve" or claim["paid_at"] is not None:
         raise HTTPException(409, "Only an unpaid approval can be held by the Gateway")
@@ -827,7 +868,7 @@ def hold_gateway_payment(
 )
 def fail_claim(claim_id: str, request: FailureRequest, db: Database) -> Claim:
     """Put a failed claim back in the queue, or leave it for a handler after two."""
-    claim = find_claim(db, claim_id, lock=True)
+    claim = find_claim(db, claim_id, lock=True, run_id=request.run_id)
     require_revision(claim, request.revision)
     if claim["status"] != "in_progress":
         raise HTTPException(409, f"Claim {claim_id} is not in progress")
@@ -841,7 +882,17 @@ def fail_claim(claim_id: str, request: FailureRequest, db: Database) -> Claim:
 
 @app.post("/api/runs", operation_id="start_run", dependencies=agent_only)
 def start_run(request: RunRequest, db: Database) -> Run:
-    """Create a run recording its execution configuration."""
+    """Create an improver's nested evaluation under its parent's admission."""
+    if request.round_id is None:
+        raise HTTPException(422, "The app admits standalone work")
+    if request.tiny is not False:
+        raise HTTPException(422, "Round work must be a whole-set evaluation")
+    work_admission.admit_round_evaluation(db, request.round_id)
+    return create_run(db, request)
+
+
+def create_run(db: Connection, request: RunRequest) -> Run:
+    """Pin run records and create isolated evaluation copies."""
     if request.round_id is not None:
         if request.set_name is None:
             raise HTTPException(422, "Round work must be a whole-set evaluation")
@@ -867,10 +918,14 @@ def get_latest_run(handler: CurrentHandler, db: Database) -> Run | None:
     return run_records.latest(db)
 
 
-@app.post("/api/runs/stop", operation_id="stop_runs", dependencies=agent_only)
-def stop_runs(db: Database) -> list[str]:
-    """Mark abandoned runs stopped and return evaluation threads for cleanup."""
-    return run_records.stop_runs(db)
+@app.get(
+    "/api/runs/stopped-threads",
+    operation_id="stopped_evaluation_threads",
+    dependencies=agent_only,
+)
+def stopped_evaluation_threads(db: Database) -> list[str]:
+    """List only checkpoint threads from stopped evaluation runs."""
+    return run_records.evaluation_threads(db, None)
 
 
 @app.get("/api/runs/active", operation_id="get_active_run")
@@ -885,6 +940,24 @@ def get_run(run_id: str, db: Database) -> Run:
     return run_records.get_run(db, run_id)
 
 
+@app.post("/api/runs/{run_id}/take", operation_id="take_run", dependencies=agent_only)
+def take_run(run_id: str, db: Database) -> Run:
+    """Claim one committed standalone run for its accepting worker."""
+    work_admission.take_run(db, run_id)
+    return run_records.get_run(db, run_id)
+
+
+@app.put(
+    "/api/runs/{run_id}/heartbeat",
+    operation_id="run_heartbeat",
+    dependencies=agent_only,
+)
+def run_heartbeat(run_id: str, db: Database) -> dict[str, str]:
+    """Renew a running standalone run without reopening closed work."""
+    work_admission.heartbeat_run(db, run_id)
+    return {"status": "recorded"}
+
+
 @app.get(
     "/api/runs/{run_id}/threads",
     operation_id="get_run_threads",
@@ -892,7 +965,11 @@ def get_run(run_id: str, db: Database) -> Run:
 )
 def get_run_threads(run_id: str, db: Database) -> list[str]:
     """List evaluation checkpoint threads without reading expected outcomes."""
-    run_records.run_row(db, run_id)
+    row = run_records.run_row(db, run_id)
+    if row["kind"] != "evaluation" or row["status"] == "running":
+        raise HTTPException(
+            409, "Only stopped or finished evaluations can clear checkpoints"
+        )
     return run_records.evaluation_threads(db, run_id)
 
 
@@ -936,13 +1013,19 @@ def finish_run(run_id: str) -> Run:
     dependencies=agent_only,
 )
 def record_model_call(
-    claim_id: str, request: ModelCallRequest, db: Database
+    claim_id: str, request: ClaimModelCall, db: Database
 ) -> dict[str, str]:
     """Record the provider's usage and cost for one received model reply."""
     claim = find_claim(db, claim_id)
-    if claim["thread_id"] is None:
+    thread_id = request.thread_id or claim["thread_id"]
+    if thread_id is None:
         raise HTTPException(409, "Claim has not been started")
-    run_records.record_model_call(db, claim_id, claim["thread_id"], request)
+    if thread_id != claim["thread_id"] and (
+        request.run_id is None
+        or not run_records.has_work_slice(db, request.run_id, (claim_id, thread_id))
+    ):
+        raise HTTPException(409, "Claim work belongs to a different attempt")
+    run_records.record_model_call(db, claim_id, thread_id, request)
     return {"status": "recorded"}
 
 
@@ -962,9 +1045,9 @@ def admit_claim(claim_id: str, request: RunAdmission, db: Database) -> dict[str,
 
 
 @app.post("/api/runs/{run_id}/stop", operation_id="stop_run", dependencies=agent_only)
-def stop_run(run_id: str, db: Database) -> Run:
+def stop_run(run_id: str, request: StoppedWork, db: Database) -> Run:
     """Close one drained run without interrupting another accepted operation."""
-    return run_records.finish_run(db, run_id, "stopped")
+    return run_records.stop(db, run_id, request.reason)
 
 
 @app.put(

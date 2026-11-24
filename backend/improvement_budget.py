@@ -1,7 +1,7 @@
 """Round spending and conservative evaluation admission, without orchestration."""
 
 from fastapi import HTTPException
-from sqlalchemy import Connection, func, literal, select, union_all
+from sqlalchemy import Connection, func, literal, select, union_all, update
 
 from backend.database import (
     claims,
@@ -58,6 +58,12 @@ def spending(db: Connection, round_id: str, limit: float) -> Spending:
 
 def lock_round(db: Connection, round_id: str, *, shared: bool = False):
     """Protect parent state; compatible readers still exclude billing and stop."""
+    if not shared and db.dialect.name == "sqlite":
+        db.execute(
+            update(rounds)
+            .where(rounds.c.round_id == round_id)
+            .values(status=rounds.c.status)
+        )
     row = (
         db.execute(
             select(rounds)
@@ -97,14 +103,28 @@ def admit_run(db: Connection, run_id: str | None) -> None:
         admit(db, row.round_id)
 
 
-def guard_claim_write(db: Connection, claim_id: str) -> None:
+def claim_run_lock(claim_id: str, run_id: str, *, sqlite: bool):
+    """Lock the originating run before taking the parent or claim lock."""
+    evaluation = select(claims.c.evaluation_id).where(claims.c.claim_id == claim_id)
+    target = runs.c.run_id == func.coalesce(evaluation.scalar_subquery(), run_id)
+    columns = (runs.c.run_id, runs.c.round_id, runs.c.status, runs.c.kind)
+    if sqlite:
+        return (
+            update(runs).where(target).values(status=runs.c.status).returning(*columns)
+        )
+    return select(*columns).where(target).with_for_update(read=True, of=runs)
+
+
+def guard_claim_write(db: Connection, claim_id: str, run_id: str = "") -> None:
     """Refuse late claim state writes after stop, before taking a claim row lock."""
     run = db.execute(
-        select(runs.c.round_id)
-        .join(claims, claims.c.evaluation_id == runs.c.run_id)
-        .where(claims.c.claim_id == claim_id)
-        .with_for_update(read=True, of=runs)
+        claim_run_lock(claim_id, run_id, sqlite=db.dialect.name == "sqlite")
     ).first()
+    if run_id and (run is None or run.run_id != run_id):
+        raise HTTPException(409, "Claim work must use its own run")
+    if run is not None and run.status != "running":
+        name = "Evaluation run" if run.kind == "evaluation" else "Run"
+        raise HTTPException(409, f"{name} is no longer running")
     if run is not None and run.round_id is not None:
         parent = lock_round(db, run.round_id, shared=True)
         if parent["status"] in ("stopped", "finished"):

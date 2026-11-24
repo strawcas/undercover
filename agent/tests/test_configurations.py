@@ -8,14 +8,14 @@ from backend import configurations
 from backend.configuration_models import ConfigurationProposal
 from backend.database import engine
 from backend.models import Handler
-from backend.tests.run_requests import configuration
+from backend.tests.run_requests import configuration, fixture_run
 
 
 def test_pinned_version_supplies_the_model_and_prompt_after_activation(
     client, monkeypatch
 ):
     initial = api.get_current_configuration()
-    run = api.start_run(configuration())
+    run = fixture_run(configuration())
     handler = Handler(**client.get("/api/me").json())
     with engine().begin() as db:
         candidate = configurations.append_configuration(

@@ -65,12 +65,17 @@ def test_unknowns_and_membership_validation(client):
     assert start(client, set_name="evaluation").status_code == 422
 
 
-def test_summary_and_startup_recovery(client):
+def test_stopping_one_run_preserves_its_summary_and_claim_thread(client):
     run_id = start(client).json()["run_id"]
     for claim_id in ("CLM-1001", "CLM-1002"):
         member(client, run_id, claim_id)
     client.post("/api/claims/CLM-1001/start", json={"thread_id": "keep"})
-    assert client.post("/api/runs/stop").json() == []
+    assert (
+        client.post(
+            f"/api/runs/{run_id}/stop", json={"reason": "Stopped by worker"}
+        ).status_code
+        == 200
+    )
     run = client.get(f"/api/runs/{run_id}").json()
     assert run["status"] == "stopped"
     assert "CLM-1001: in progress." in run["summary"]

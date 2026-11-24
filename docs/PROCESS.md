@@ -4,7 +4,7 @@
 
 `npm run check` runs every check:
 
-- The backend and context server import in separate isolated environments containing the locked `server` and `context` groups. uv uses its local cache for these checks.
+- The backend, context server and Runtime entrypoint import in separate isolated environments containing the locked `server`, `context` and `runtime` groups. The staged Runtime import includes only the platform entrypoint and agent package. uv uses its local cache.
 - Python: ruff (lint and format), pyright, and pytest with 80% coverage
 - TypeScript: ESLint, Prettier, tsc, and vitest with 80% coverage
 - Playwright end-to-end tests
@@ -54,6 +54,10 @@ The checks show that the code works, but not that it is fit to merge. Every code
 - Never push.
 - Don't open `data/evals/` unless you're asked to.
 - Everything must work on Windows: write `package.json` scripts as `uv run` commands or `.mjs` files.
+
+## Runtime live verification
+
+Follow the final sequence in [PLAN_RUNTIME.md](PLAN_RUNTIME.md). Work against disposable data, preserve the configured environment, and run the full offline checks with `.env` temporarily absent. The production health check runs `runtime.main` on port 8080 after the dev services stop.
 
 ## Context live verification
 

@@ -197,7 +197,7 @@ it("confirms stopping without implying in-flight work is already drained", async
   );
   fireEvent.click((await dialog()).getByRole("button", { name: "Stop round" }));
   expect(
-    await screen.findByText(/Work already in hand will drain/),
+    await screen.findByText(/Work already in hand is winding down/),
   ).toBeDefined();
 });
 

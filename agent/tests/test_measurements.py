@@ -13,7 +13,7 @@ from agent.backend_client import Refused
 from agent.tests.queue_setup import leave_waiting
 from agent.tests.stubs import calculate, graph_on, record, stub
 from backend.database import engine, model_calls, work_slices
-from backend.tests.run_requests import configuration
+from backend.tests.run_requests import configuration, fixture_run
 
 
 def rows(table):
@@ -78,8 +78,8 @@ def test_null_provider_usage_completes_with_unavailable_measurements():
 def test_active_slices_exclude_wait_and_split_run_attribution(client, monkeypatch):
     clock = itertools.count()
     monkeypatch.setattr(harness, "monotonic", lambda: next(clock))
-    first = api.start_run(configuration())["run_id"]
-    second = api.start_run(configuration())["run_id"]
+    first = fixture_run(configuration())["run_id"]
+    second = fixture_run(configuration())["run_id"]
     saver = InMemorySaver()
     harness.work_claim(
         "CLM-1001",
@@ -182,7 +182,7 @@ def test_work_slice_uses_one_owner_checked_monotonic_upsert(client):
     finally:
         event.remove(db_engine, "before_cursor_execute", record_query)
     assert rows(work_slices)[0]["seconds"] == 5
-    run = api.start_run(configuration())["run_id"]
+    run = fixture_run(configuration())["run_id"]
     with pytest.raises(Refused) as refused:
         api.record_work_slice("CLM-1001", "slice", run, 6)
     assert refused.value.status_code == 409
@@ -196,7 +196,7 @@ def test_dispatch_attributes_its_measurements(monkeypatch):
         "execution_graph",
         lambda version=None, **options: graph_on(stub(record("refer", 0))),
     )
-    run_id = api.start_run(configuration())["run_id"]
+    run_id = fixture_run(configuration())["run_id"]
     dispatcher.dispatch(run_id, 1)
     api.finish_run(run_id)
     assert {row["run_id"] for row in rows(model_calls)} == {run_id}

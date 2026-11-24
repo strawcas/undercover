@@ -64,6 +64,7 @@ class DecisionInput(TypedDict):
     decided_by: str
     thread_id: str
     revision: NotRequired[int]
+    run_id: NotRequired[str]
 
 
 LineKind = Literal[
@@ -154,6 +155,7 @@ class PayoutInput(TypedDict):
     paid_by_others: float
     thread_id: str
     revision: NotRequired[int]
+    run_id: NotRequired[str]
 
 
 def calculate_payout(
@@ -164,11 +166,13 @@ def calculate_payout(
     return _call("POST", f"/claims/{claim_id}/payout", json=body)
 
 
-def start_claim(claim_id: str, thread_id: str, revision: int = 0) -> dict[str, Any]:
+def start_claim(
+    claim_id: str, thread_id: str, revision: int = 0, run_id: str | None = None
+) -> dict[str, Any]:
     return _call(
         "POST",
         f"/claims/{claim_id}/start",
-        json={"thread_id": thread_id, "revision": revision},
+        json={"thread_id": thread_id, "revision": revision, "run_id": run_id or ""},
     )
 
 
@@ -192,11 +196,13 @@ def list_pending_memory() -> list[str]:
     return _call("GET", "/agent/pending-memory")
 
 
-def prepare_memory(claim_id: str, thread_id: str, revision: int) -> None:
+def prepare_memory(
+    claim_id: str, thread_id: str, revision: int, run_id: str | None = None
+) -> None:
     _call(
         "POST",
         f"/claims/{claim_id}/prepare-memory",
-        json={"thread_id": thread_id, "revision": revision},
+        json={"thread_id": thread_id, "revision": revision, "run_id": run_id or ""},
     )
 
 
@@ -218,8 +224,16 @@ def admit_claim(claim_id: str, run_id: str | None, revision: int = 0) -> dict[st
     )
 
 
-def stop_run(run_id: str) -> dict[str, Any]:
-    return _call("POST", f"/runs/{run_id}/stop")
+def stop_run(run_id: str, reason: str = "Stopped by the agent") -> dict[str, Any]:
+    return _call("POST", f"/runs/{run_id}/stop", json={"reason": reason})
+
+
+def take_run(run_id: str) -> dict[str, Any]:
+    return _call("POST", f"/runs/{run_id}/take")
+
+
+def run_heartbeat(run_id: str) -> None:
+    _call("PUT", f"/runs/{run_id}/heartbeat")
 
 
 def record_step(
@@ -228,9 +242,11 @@ def record_step(
     content: StepContent,
     *,
     thread_id: str,
+    run_id: str | None = None,
 ) -> dict[str, Any]:
     body = {"kind": kind, "content": content}
     body["thread_id"] = thread_id
+    body["run_id"] = run_id or ""
     return _call("POST", f"/claims/{claim_id}/steps", json=body)
 
 
@@ -248,34 +264,41 @@ def pay_claim(
     *,
     via: gateway.Gateway | None = None,
     revision: int = 0,
+    run_id: str | None = None,
 ) -> dict[str, Any]:
-    body = {"amount": amount, "revision": revision}
+    body = {"amount": amount, "revision": revision, "run_id": run_id or ""}
     if via:
         return via.call(gateway.APP, "pay_claim", claim_id=claim_id, **body)
     return _call("POST", f"/claims/{claim_id}/payment", json=body)
 
 
-def hold_limit_payment(claim_id: str, revision: int = 0) -> dict[str, Any]:
+def hold_limit_payment(
+    claim_id: str, revision: int = 0, run_id: str | None = None
+) -> dict[str, Any]:
     return _call(
-        "POST", f"/claims/{claim_id}/hold-limit-payment", json={"revision": revision}
+        "POST",
+        f"/claims/{claim_id}/hold-limit-payment",
+        json={"revision": revision, "run_id": run_id or ""},
     )
 
 
 def hold_gateway_payment(
-    claim_id: str, reason: str, revision: int = 0
+    claim_id: str, reason: str, revision: int = 0, run_id: str | None = None
 ) -> dict[str, Any]:
     return _call(
         "POST",
         f"/claims/{claim_id}/hold-gateway-payment",
-        json={"reason": reason, "revision": revision},
+        json={"reason": reason, "revision": revision, "run_id": run_id or ""},
     )
 
 
-def fail_claim(claim_id: str, reason: str, revision: int = 0) -> dict[str, Any]:
+def fail_claim(
+    claim_id: str, reason: str, revision: int = 0, run_id: str | None = None
+) -> dict[str, Any]:
     return _call(
         "POST",
         f"/claims/{claim_id}/failure",
-        json={"reason": reason, "revision": revision},
+        json={"reason": reason, "revision": revision, "run_id": run_id or ""},
     )
 
 
@@ -309,8 +332,8 @@ def finish_run(run_id: str) -> dict[str, Any]:
     return _call("POST", f"/runs/{run_id}/finish")
 
 
-def stop_runs() -> list[str]:
-    return _call("POST", "/runs/stop")
+def stopped_evaluation_threads() -> list[str]:
+    return _call("GET", "/runs/stopped-threads")
 
 
 def health() -> dict[str, str]:

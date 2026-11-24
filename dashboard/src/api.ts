@@ -187,6 +187,7 @@ export interface Run {
   set_name: "evaluation" | "held_out" | null;
   tiny: boolean | null;
   status: RunStatus;
+  stop_reason?: string | null;
   started_at: string;
   finished_at: string | null;
   summary: string | null;
@@ -322,6 +323,8 @@ export interface Round {
   round_id: string;
   thread_id: string;
   status: RoundStatus;
+  stop_reason?: string | null;
+  work_expired?: boolean;
   started_at: string;
   started_by: string;
   finished_at: string | null;

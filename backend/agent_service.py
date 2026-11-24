@@ -22,8 +22,6 @@ from botocore.exceptions import (
 from fastapi import HTTPException
 
 from backend import agent_key
-from backend.improvement_models import ProposalDecision
-from backend.models import Handler
 
 DEFAULT_AGENT = "http://127.0.0.1:8080"
 INVOCATIONS = "/invocations"
@@ -125,17 +123,13 @@ def invoke(operation: str, **inputs: Any) -> dict[str, Any]:
     except ValueError as error:
         raise InvocationError(UNCERTAIN, uncertain=True) from error
     if isinstance(reply, dict):
+        if reply.get("uncertain") is True:
+            raise InvocationError(UNCERTAIN, uncertain=True)
         if isinstance(reason := reply.get("refused"), str):
             raise InvocationError(reason, status=409)
         if reply.get("accepted") is True:
             return reply
     raise InvocationError(UNCERTAIN, uncertain=True)
-
-
-def start_dispatch(concurrency: int) -> dict[str, str]:
-    """Ask the agent service to start a dispatch at the chosen concurrency."""
-    invoke("start_dispatch", agents=concurrency)
-    return {"status": "accepted"}
 
 
 def resume_claim(claim_id: str) -> None:
@@ -146,37 +140,3 @@ def resume_claim(claim_id: str) -> None:
         log.warning(
             "Could not resume claim %s after review: %s", claim_id, error.detail
         )
-
-
-def start_evaluation(set_name: str, tiny: bool, concurrency: int) -> dict[str, str]:
-    """Ask the agent service to evaluate copies from a selected labelled set."""
-    invoke("start_evaluation", set_name=set_name, tiny=tiny, agents=concurrency)
-    return {"status": "accepted"}
-
-
-def start_round(handler: Handler) -> dict[str, str]:
-    """Ask the service to start a round with the verified senior handler."""
-    reply = invoke("start_round", handler=handler.model_dump())
-    if not isinstance(round_id := reply.get("round_id"), str):
-        raise InvocationError(UNCERTAIN, uncertain=True)
-    return {"status": "accepted", "round_id": round_id}
-
-
-def stop_round(round_id: str, handler: Handler) -> dict[str, str]:
-    """Ask the service to mark a round stopped before draining its work."""
-    invoke("stop_round", round_id=round_id, handler=handler.model_dump())
-    return {"status": "accepted"}
-
-
-def decide_proposal(
-    round_id: str, proposal_id: str, decision: ProposalDecision, handler: Handler
-) -> dict[str, str]:
-    """Forward a proposal decision without writing an approval prematurely."""
-    invoke(
-        "decide_proposal",
-        round_id=round_id,
-        proposal_id=proposal_id,
-        handler=handler.model_dump(),
-        **decision.model_dump(),
-    )
-    return {"status": "accepted"}

@@ -61,7 +61,9 @@ def test_route_inventory_requires_the_right_credential():
         "hold_gateway_payment",
         "fail_claim",
         "start_run",
-        "stop_runs",
+        "stopped_evaluation_threads",
+        "take_run",
+        "run_heartbeat",
         "get_run",
         "get_run_threads",
         "record_run_claim",
@@ -113,11 +115,7 @@ def test_agent_routes_reject_missing_wrong_and_handler_credentials(headers):
         == 401
     )
     assert routes.post("/api/claims/CLM-1001/model-calls", json={}).status_code == 401
-    assert routes.post("/api/improver/rounds", json={}).status_code == 401
-    assert (
-        routes.post("/api/improver/rounds/1/proposals/1/decision", json={}).status_code
-        == 401
-    )
+    assert routes.post("/api/improver/rounds/1/take", json={}).status_code == 401
 
 
 def test_agent_key_alone_grants_internal_write_access():
@@ -132,8 +130,12 @@ def test_agent_key_alone_grants_internal_write_access():
         ).status_code
         == 200
     )
-    handler = TestClient(app, headers=authorization()).get("/api/me").json()
-    assert routes.post("/api/improver/rounds", json=handler).status_code == 200
+    assert (
+        routes.post(
+            "/api/improver/rounds/missing/take", json={"proposal_id": None}
+        ).status_code
+        == 404
+    )
 
 
 def test_shared_reads_and_missing_key_startup(monkeypatch):

@@ -2,7 +2,7 @@ import pytest
 from fastapi import BackgroundTasks
 from langgraph.checkpoint.memory import InMemorySaver
 
-from agent import harness, improver_api, service
+from agent import harness, service
 from agent.backend_client import Refused
 from agent.tests.records import claim_of, steps_of
 from agent.tests.runtime_support import invoke, runtime_client, wait_for_idle
@@ -34,73 +34,41 @@ def test_health():
 
 
 @pytest.mark.parametrize(
-    ("operation", "inputs"),
+    ("operation", "function", "inputs"),
     [
-        ("start_dispatch", {"agents": 25}),
-        ("start_evaluation", {"agents": 5, "set_name": "evaluation", "tiny": True}),
-        ("start_round", {}),
-        ("stop_round", {"round_id": "round"}),
-        (
-            "decide_proposal",
-            {
-                "round_id": "round",
-                "proposal_id": "p",
-                "decision": "reject",
-                "reason": "Check the clause",
-            },
-        ),
-        ("resume_claim", {"claim_id": "CLM-1001"}),
+        ("work_run", "schedule_run", {"run_id": "run"}),
+        ("work_round", "schedule_round", {"round_id": "round"}),
+        ("carry_round_on", "schedule_round", {"round_id": "round", "proposal_id": "p"}),
+        ("resume_claim", "resume_claim", {"claim_id": "CLM-1001"}),
     ],
 )
 @pytest.mark.usefixtures("runtime_defaults")
 def test_invocation_accepts_and_passes_on_refusal(
-    client, monkeypatch, operation, inputs
+    monkeypatch, operation, function, inputs
 ):
-    if operation in {"start_round", "stop_round", "decide_proposal"}:
-        inputs = inputs | {"handler": client.get("/api/me").json()}
-    reply = {"status": "accepted"}
-    expected: dict[str, bool | str] = {"accepted": True}
-    if operation == "start_round":
-        reply["round_id"] = expected["round_id"] = "round"
-    monkeypatch.setattr(service, operation, lambda *args: reply)
+    monkeypatch.setattr(service, function, lambda *args: None)
     agent = runtime_client()
-    assert invoke(agent, operation, **inputs).json() == expected
+    assert invoke(agent, operation, **inputs).json() == {"accepted": True}
 
     def refuse(*args):
         raise Refused(409, "The work is unavailable")
 
-    monkeypatch.setattr(service, operation, refuse)
+    monkeypatch.setattr(service, function, refuse)
     assert invoke(agent, operation, **inputs).json() == {
         "refused": "The work is unavailable"
     }
 
 
 @pytest.mark.parametrize("headers", [{}, {"Authorization": "Bearer wrong"}])
-def test_round_writes_refuse_direct_unauthenticated_service_calls(
-    client, monkeypatch, headers
-):
+def test_round_work_refuses_unauthenticated_requests(monkeypatch, headers):
     def unexpected(*args):
-        pytest.fail("The service attempted an unauthenticated round write")
+        pytest.fail("The service attempted unauthenticated round work")
 
-    monkeypatch.setattr(improver_api, "start_round", unexpected)
-    monkeypatch.setattr(improver_api, "finish", unexpected)
-    monkeypatch.setattr(improver_api, "decide", unexpected)
-    handler = client.get("/api/me").json()
-    routes = runtime_client(headers)
-    assert invoke(routes, "start_round", handler=handler).status_code == 401
+    monkeypatch.setattr(service, "schedule_round", unexpected)
+    agent = runtime_client(headers)
+    assert invoke(agent, "work_round", round_id="round").status_code == 401
     assert (
-        invoke(routes, "stop_round", round_id="1", handler=handler).status_code == 401
-    )
-    assert (
-        invoke(
-            routes,
-            "decide_proposal",
-            handler=handler,
-            round_id="1",
-            proposal_id="1",
-            decision="approve",
-            reason=None,
-        ).status_code
+        invoke(agent, "carry_round_on", round_id="round", proposal_id="p").status_code
         == 401
     )
 

@@ -1,11 +1,16 @@
 """Recorded round and whole-set score fixtures without model calls."""
 
+from typing import Literal
+
+import httpx
+from fastapi import HTTPException
 from sqlalchemy import insert, select, update
 
 from backend import evaluations, improvements
 from backend import runs as run_records
 from backend.database import engine, model_calls, run_claims, runs
-from backend.models import RunRequest, Scores
+from backend.improvement_models import HandlerDecision
+from backend.models import Handler, RunRequest, Scores
 from backend.tests.run_requests import configuration
 
 
@@ -27,10 +32,9 @@ def scores(
 
 
 def new_round(client):
-    handler = client.get("/api/me").json()
-    response = client.post("/api/improver/rounds", json=handler)
-    assert response.status_code == 200, response.text
-    return response.json()
+    handler = Handler(**client.get("/api/me").json())
+    with engine().begin() as db:
+        return improvements.start(db, handler).model_dump(mode="json")
 
 
 def freeze(round_id, version=1, set_name="held_out", values=None):
@@ -104,12 +108,27 @@ def proposal(client, current, identity="proposal-one", kind="configuration", **c
     return {"proposal_id": identity, "kind": kind, "arguments": arguments | changes}
 
 
-def decide(client, current, pending, decision="approve", reason=None):
-    return client.post(
-        f"/api/improver/rounds/{current['round_id']}/proposals/{pending['proposal_id']}/decision",
-        json={
-            "decision": decision,
-            "reason": reason,
-            "handler": client.get("/api/me").json(),
-        },
+def decide(
+    client,
+    current,
+    pending,
+    decision: Literal["approve", "reject"] = "approve",
+    reason=None,
+):
+    answer = HandlerDecision(
+        decision=decision, reason=reason, handler=client.get("/api/me").json()
     )
+    request = httpx.Request(
+        "POST",
+        f"/api/rounds/{current['round_id']}/proposals/{pending['proposal_id']}/decision",
+    )
+    try:
+        with engine().begin() as db:
+            result = improvements.decide(
+                db, current["round_id"], pending["proposal_id"], answer
+            )
+    except HTTPException as error:
+        return httpx.Response(
+            error.status_code, json={"detail": error.detail}, request=request
+        )
+    return httpx.Response(200, json=result.model_dump(mode="json"), request=request)

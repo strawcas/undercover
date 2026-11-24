@@ -1,13 +1,15 @@
-"""Admit and execute the agent's work for the AgentCore entrypoint."""
+"""Schedule and execute backend-admitted work in this Runtime session."""
 
 import logging
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
-from threading import Lock
-from typing import Any, Literal, Protocol
+from concurrent.futures import Future
+from functools import partial
+from http import HTTPStatus
+from json import JSONDecodeError
+from typing import Any, Protocol
 
-from pydantic import BaseModel, Field
+import httpx
 
 from agent import api, checkpoints, improver, improver_api, memory, run_execution
 from agent.backend_client import Refused
@@ -20,40 +22,14 @@ from agent.harness import (
     take_resume,
     work_returned,
 )
+from agent.heartbeat import heartbeat
 
-run_slot = Lock()
-
-
-@dataclass
-class Slot:
-    owner: str = "another operation"
-
-
-slot = Slot()
 log = logging.getLogger(__name__)
+ROUND_FAILURE = "The agent could not finish this round"
 
 
-class DispatchRequest(BaseModel):
-    concurrency: int = Field(ge=1, le=25)
-
-
-class EvaluationRequest(DispatchRequest):
-    set_name: Literal["evaluation", "held_out"]
-    tiny: bool
-
-
-class Handler(BaseModel):
-    handler_id: str
-    name: str
-    role: str
-    email: str
-    can_approve_over_limit: bool
-
-
-class HandlerDecision(BaseModel):
-    decision: Literal["approve", "reject"]
-    reason: str | None
-    handler: Handler
+class UnconfirmedTake(Exception):
+    """The backend may have taken work before its reply was lost."""
 
 
 class Scheduler(Protocol):
@@ -62,125 +38,84 @@ class Scheduler(Protocol):
     ) -> None: ...
 
 
-def recover() -> None:
-    """Close abandoned local runs before admitting another work stretch."""
-    checkpoints.clear_threads(api.stop_runs())
-    improver_api.recover()
-
-
-def work_run(selection: dict[str, Any]) -> None:
-    """Create the accepted run in background and always release its admission slot."""
+def clear_abandoned_evaluations() -> None:
+    """Discard only checkpoint threads from evaluations the app marked stopped."""
     try:
-        configuration = api.get_current_configuration()
-        run_execution.execute(
-            selection
-            | {
-                "configuration_version": configuration["version"],
-                "round_id": None,
-            }
-        )
+        threads = api.stopped_evaluation_threads()
+        if threads:
+            checkpoints.clear_threads(threads)
     except Exception:
-        log.exception("The run stopped before it finished")
-    finally:
-        run_slot.release()
-    if selection["kind"] == "dispatch":
-        memory.recover_pending()
+        log.exception(
+            "Stopped evaluation checkpoint cleanup will retry with the next work"
+        )
 
 
-def reserve(owner: str) -> None:
-    """Name the current work while holding the service's single admission lock."""
-    if not run_slot.acquire(blocking=False):
-        raise Refused(409, f"Cannot start while {slot.owner} is running")
-    slot.owner = owner
-
-
-def accept_run(selection: dict[str, Any], background: Scheduler) -> dict[str, str]:
-    """Reserve the single dispatch/evaluation slot before scheduling any work."""
-    reserve(selection["kind"])
+def work_run(run: dict) -> None:
+    """Work one admitted dispatch or evaluation and report its heartbeats."""
+    run_id = run["run_id"]
     try:
-        background.add_task(work_run, selection)
-    except RuntimeError:
-        run_slot.release()
+        with heartbeat(partial(api.run_heartbeat, run_id)):
+            clear_abandoned_evaluations()
+            run_execution.work(run)
+    finally:
+        if run["kind"] == "dispatch":
+            memory.recover_pending()
+
+
+def schedule_run(run_id: str, background: Scheduler) -> None:
+    """Take the app's named run before confirming acceptance."""
+    schedule(background, partial(api.take_run, run_id), work_run)
+
+
+def work_round(round_id: str, accepted: dict) -> None:
+    """Keep a taken stretch alive through its evaluations."""
+    work_id = accepted["work_id"]
+    try:
+        with heartbeat(partial(improver_api.heartbeat, round_id, work_id)):
+            clear_abandoned_evaluations()
+            improver.work(round_id, accepted["review"])
+    except Exception:
+        improver_api.stop_work(round_id, work_id, ROUND_FAILURE)
         raise
-    return {"status": "accepted"}
 
 
-def start_dispatch(request: DispatchRequest, background: Scheduler) -> dict[str, str]:
-    """Accept a dispatch immediately or refuse while another run owns the slot."""
-    return accept_run(
-        {
-            "kind": "dispatch",
-            "concurrency": request.concurrency,
-            "set_name": None,
-            "tiny": None,
-        },
+def schedule_round(
+    round_id: str, proposal_id: str | None, background: Scheduler
+) -> None:
+    """Take the app's current stretch before confirming acceptance."""
+    schedule(
         background,
+        partial(improver_api.take_work, round_id, proposal_id),
+        partial(work_round, round_id),
     )
 
 
-def start_evaluation(
-    request: EvaluationRequest, background: Scheduler
-) -> dict[str, str]:
-    """Accept an evaluation in the same single admission slot as dispatches."""
-    return accept_run({"kind": "evaluation", **request.model_dump()}, background)
+def schedule[T](
+    background: Scheduler, take: Callable[[], T], work: Callable[[T], None]
+) -> None:
+    """Confirm ownership only after a tracked worker exists and takes the job."""
+    taken: Future[None] = Future()
 
-
-def work_round(round_id: str, decision: dict | None = None) -> None:
-    """Hold the work slot until all nested work drains or an approval pauses it."""
-    try:
-        improver.work(round_id, decision)
-    except Exception:
-        log.exception("The improvement stretch stopped")
+    def accept_and_work() -> None:
         try:
-            current = improver_api.get_round(round_id)
-            if current["status"] not in ("finished", "stopped"):
-                improver_api.finish(
-                    round_id, True, "The improvement stretch failed; see service logs"
-                )
-        except Exception:
-            log.exception("Round recovery will be retried at startup")
-    finally:
-        run_slot.release()
+            job = take()
+        except BaseException as error:
+            taken.set_exception(error)
+            return
+        taken.set_result(None)
+        work(job)
 
-
-def start_round(handler: Handler, background: Scheduler) -> dict[str, str]:
-    """Reserve a stretch before creating and scheduling a senior handler's round."""
-    reserve("improvement round")
+    background.add_task(accept_and_work)
     try:
-        current = improver_api.start_round(handler.model_dump())
-        background.add_task(work_round, current["round_id"])
-    except Exception:
-        run_slot.release()
+        taken.result()
+    except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout):
         raise
-    return {"status": "accepted", "round_id": current["round_id"]}
-
-
-def stop_round(round_id: str, handler: Handler) -> dict[str, str]:
-    """Mark a round stopped immediately, leaving in-flight work to drain."""
-    if not handler.can_approve_over_limit:
-        raise Refused(403, "A senior handler must stop rounds")
-    improver_api.finish(round_id, True, f"Stopped by {handler.name}")
-    return {"status": "accepted"}
-
-
-def decide_proposal(
-    round_id: str,
-    proposal_id: str,
-    request: HandlerDecision,
-    background: Scheduler,
-) -> dict[str, str]:
-    """Record a decision only after admission, then resume the saved tool call."""
-    reserve(f"improvement round {round_id}")
-    decision: dict[str, Any] = {"type": request.decision}
-    if request.decision == "reject":
-        decision["message"] = request.reason
-    try:
-        improver_api.decide(round_id, proposal_id, request.model_dump())
-        background.add_task(work_round, round_id, decision)
-    except Exception:
-        run_slot.release()
+    except (httpx.RequestError, JSONDecodeError) as error:
+        raise UnconfirmedTake() from error
+    except Refused as error:
+        if error.status_code >= HTTPStatus.INTERNAL_SERVER_ERROR:
+            raise UnconfirmedTake() from error
         raise
-    return {"status": "accepted"}
 
 
 def resume_owned(claim: dict[str, Any], owner: str | None = None) -> None:

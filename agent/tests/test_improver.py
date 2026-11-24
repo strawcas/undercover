@@ -5,7 +5,6 @@ from contextvars import ContextVar
 from threading import Event
 
 import pytest
-from fastapi import BackgroundTasks
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
@@ -174,36 +173,25 @@ def test_call_cap_survives_repeated_approval_stretches(client, monkeypatch):
     assert improver_api.get_round(current["round_id"])["candidate_version"] is None
 
 
-def test_busy_decision_writes_nothing_and_pause_frees_slot(client, monkeypatch):
+def test_busy_decision_writes_nothing_and_pause_frees_slot(client):
     current = new_round(client)
     baseline(client, current)
     pending = proposal(client, current)
-    improver_api.pending(current["round_id"], pending)
-    background = BackgroundTasks()
-    service.start_dispatch(service.DispatchRequest(concurrency=1), background)
-    try:
-        with pytest.raises(Refused, match="dispatch") as busy:
-            service.decide_proposal(
-                current["round_id"],
-                pending["proposal_id"],
-                service.HandlerDecision(
-                    decision="approve",
-                    reason=None,
-                    handler=client.get("/api/me").json(),
-                ),
-                BackgroundTasks(),
-            )
-        assert busy.value.status_code == 409
-        assert (
-            improver_api.get_round(current["round_id"])["proposals"][0]["decision"]
-            is None
-        )
-    finally:
-        service.run_slot.release()
-    monkeypatch.setattr(improver, "work", lambda *args: None)
-    service.reserve("improvement round")
-    service.work_round(current["round_id"])
-    assert not service.run_slot.locked()
+    round_id, proposal_id = current["round_id"], pending["proposal_id"]
+    improver_api.pending(round_id, pending)
+    started = (
+        client.post("/api/dispatches", json={"concurrency": 1})
+        .raise_for_status()
+        .json()
+    )
+    response = client.post(
+        f"/api/rounds/{round_id}/proposals/{proposal_id}/decision",
+        json={"decision": "approve", "reason": None},
+    )
+    assert response.status_code == 409
+    assert "dispatch" in response.json()["detail"]
+    assert improver_api.get_round(round_id)["proposals"][0]["decision"] is None
+    api.stop_run(started["run_id"])
 
 
 def test_default_model_settings_and_shared_savers(client, monkeypatch):
@@ -233,6 +221,7 @@ def test_nested_dispatch_has_fresh_context_and_claim_traces_carry_both_ids(
     client, monkeypatch
 ):
     current = new_round(client)
+    improver_api.take_work(current["round_id"], None)
     inherited = ContextVar("improver_test_context", default="fresh")
     inherited.set("improver-parent")
     seen = []
@@ -267,6 +256,7 @@ def test_stop_or_limit_refuses_new_claims_and_holds_slot_until_drain(
     client, monkeypatch, stop
 ):
     current = new_round(client)
+    accepted = improver_api.take_work(current["round_id"], None)
     run = api.start_run(
         configuration(
             kind="evaluation",
@@ -288,15 +278,18 @@ def test_stop_or_limit_refuses_new_claims_and_holds_slot_until_drain(
         assert api.finish_run(run["run_id"])["status"] == "stopped"
 
     monkeypatch.setattr(improver, "work", working)
-    service.reserve("improvement round")
     with ThreadPoolExecutor(max_workers=1) as workers:
-        active = workers.submit(service.work_round, current["round_id"])
+        active = workers.submit(
+            service.work_round,
+            current["round_id"],
+            accepted,
+        )
         try:
             assert entered.wait(10)
             if stop:
-                service.stop_round(
-                    current["round_id"], service.Handler(**client.get("/api/me").json())
-                )
+                client.post(
+                    f"/api/rounds/{current['round_id']}/stop"
+                ).raise_for_status()
                 assert (
                     client.post(
                         f"/api/claims/{first}/decision",
@@ -327,14 +320,10 @@ def test_stop_or_limit_refuses_new_claims_and_holds_slot_until_drain(
                 improver_api.admit(current["round_id"])
             with pytest.raises(Refused):
                 api.start_claim(second, "must-not-start")
-            assert service.run_slot.locked()
-            with pytest.raises(Refused, match="improvement round"):
-                service.start_dispatch(
-                    service.DispatchRequest(concurrency=1), BackgroundTasks()
-                )
+            response = client.post("/api/dispatches", json={"concurrency": 1})
+            assert response.status_code == (202 if stop else 409)
         finally:
             drain.set()
         active.result()
-    assert not service.run_slot.locked()
     assert api.get_claim(second)["attempts"] == 0
     assert api.get_current_configuration()["version"] == 1

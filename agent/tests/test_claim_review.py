@@ -8,7 +8,7 @@ from agent.tests.records import claim_of
 from agent.tests.runtime_support import invoke, runtime_client, wait_for_idle
 from agent.tests.stubs import calculate, call, graph_on, record, stub
 from backend import claim_reviews, main
-from backend.tests.run_requests import configuration
+from backend.tests.run_requests import configuration, fixture_run
 
 CLAIM = "CLM-1002"
 NOTE = "Check the clinic charge against section 7."
@@ -101,7 +101,7 @@ def test_dispatch_recovers_a_missed_handoff_or_an_expired_review(
     timestamp = ["2026-11-10T09:00:00+00:00"]
     monkeypatch.setattr(claim_reviews, "now", lambda: timestamp[0])
     monkeypatch.setattr(main, "now", lambda: timestamp[0])
-    run = api.start_run(configuration(concurrency=1))
+    run = fixture_run(configuration(concurrency=1))
     if taken:
         api.take_review(CLAIM, "lost")
         assert "refused" in resume()
@@ -150,7 +150,7 @@ def test_dispatch_resumes_after_the_review_was_saved_and_worker_was_lost(
     timestamp[0] = "2026-11-10T09:05:00+00:00"
     replacement = stub(record("refer", 0))
     use_graph(monkeypatch, graph_on(replacement, saver))
-    run = api.start_run(configuration(concurrency=1))
+    run = fixture_run(configuration(concurrency=1))
     dispatcher.dispatch(run["run_id"], 1)
     assert claim_of(client, CLAIM)["decision"]["decision"] == "refer"
     assert (
@@ -183,7 +183,7 @@ def test_dispatch_recovers_if_the_old_tool_saved_only_to_the_backend(
     assert not checkpoint.interrupts
     assert checkpoint.next == (harness.TOOLS,)
     use_graph(monkeypatch, graph_on(stub(record("refer", 0)), saver))
-    run = api.start_run(configuration(concurrency=1))
+    run = fixture_run(configuration(concurrency=1))
     dispatcher.dispatch(run["run_id"], 1)
     resolved = claim_of(client, CLAIM)
     assert resolved["thread_id"] == returned["thread_id"]

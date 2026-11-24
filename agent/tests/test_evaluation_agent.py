@@ -3,14 +3,11 @@
 import json
 
 import pytest
-from fastapi import BackgroundTasks
 from langchain_core.exceptions import ModelTimeoutError
 from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy import update
 
 from agent import api, checkpoints, dispatcher, harness, service
-from agent.backend_client import Refused
-from agent.tests.records import latest
 from agent.tests.stubs import (
     calculate_for_claim,
     calculate_from_policy_reply,
@@ -20,6 +17,7 @@ from agent.tests.stubs import (
     stub,
 )
 from backend.database import engine, evaluation_labels
+from backend.tests.run_requests import fixture_run
 
 
 def test_service_works_copies_with_no_labels_and_clears_held_threads(
@@ -70,11 +68,17 @@ def test_service_works_copies_with_no_labels_and_clears_held_threads(
                 }
             )
         )
-    assert service.run_slot.acquire(blocking=False)
-    service.work_run(
-        {"kind": "evaluation", "set_name": "evaluation", "tiny": True, "concurrency": 1}
+    run = fixture_run(
+        {
+            "kind": "evaluation",
+            "set_name": "evaluation",
+            "tiny": True,
+            "concurrency": 1,
+            "configuration_version": 1,
+            "round_id": None,
+        }
     )
-    assert not service.run_slot.locked()
+    service.work_run(api.take_run(run["run_id"]))
     result = client.get("/api/evaluations").json()[0]
     assert result["status"] == "finished"
     assert result["configuration_version"] == 1
@@ -99,25 +103,8 @@ def test_service_works_copies_with_no_labels_and_clears_held_threads(
         assert '"handler_id"' not in prompts
 
 
-def test_same_admission_slot_covers_both_kinds_before_background_creation(client):
-    background = BackgroundTasks()
-    service.start_evaluation(
-        service.EvaluationRequest(set_name="held_out", tiny=True, concurrency=5),
-        background,
-    )
-    try:
-        with pytest.raises(Refused) as busy:
-            service.start_dispatch(
-                service.DispatchRequest(concurrency=25), BackgroundTasks()
-            )
-        assert busy.value.status_code == 409
-        assert latest(client) is None
-    finally:
-        service.run_slot.release()
-
-
-def test_failed_attempt_threads_are_all_returned_for_startup_cleanup(client):
-    run = api.start_run(
+def test_failed_attempt_threads_are_all_returned_for_terminal_cleanup(client):
+    run = fixture_run(
         {
             "kind": "evaluation",
             "set_name": "held_out",
@@ -131,11 +118,15 @@ def test_failed_attempt_threads_are_all_returned_for_startup_cleanup(client):
     api.start_claim(claim_id, "failed-attempt")
     api.fail_claim(claim_id, "Error before decision")
     api.start_claim(claim_id, "stopped-attempt")
+    api.stop_run(run["run_id"])
     assert set(api.get_run_threads(run["run_id"])) == {
         "failed-attempt",
         "stopped-attempt",
     }
-    assert set(api.stop_runs()) == {"failed-attempt", "stopped-attempt"}
+    assert set(api.stopped_evaluation_threads()) == {
+        "failed-attempt",
+        "stopped-attempt",
+    }
     assert api.get_run(run["run_id"])["status"] == "stopped"
 
 
@@ -156,10 +147,17 @@ def test_exhausted_and_failed_copies_clear_all_attempts(client, monkeypatch, tra
     )
     monkeypatch.setattr(checkpoints.state, "pool", object())
     monkeypatch.setattr(checkpoints, "PostgresSaver", lambda pool: saver)
-    assert service.run_slot.acquire(blocking=False)
-    service.work_run(
-        {"kind": "evaluation", "set_name": "evaluation", "tiny": True, "concurrency": 1}
+    run = fixture_run(
+        {
+            "kind": "evaluation",
+            "set_name": "evaluation",
+            "tiny": True,
+            "concurrency": 1,
+            "configuration_version": 1,
+            "round_id": None,
+        }
     )
+    service.work_run(api.take_run(run["run_id"]))
     result = client.get("/api/evaluations").json()[0]
     first_copy = api.get_claim(result["members"][0]["claim_id"])
     assert first_copy["status"] == ("in_progress" if transient else "left_for_handler")
@@ -175,8 +173,8 @@ def test_exhausted_and_failed_copies_clear_all_attempts(client, monkeypatch, tra
     assert api.list_claims() == before
 
 
-def test_startup_cleans_stopped_evaluation_threads_but_preserves_records(monkeypatch):
-    run = api.start_run(
+def test_cleanup_removes_stopped_evaluation_threads_but_preserves_records(monkeypatch):
+    run = fixture_run(
         {
             "kind": "evaluation",
             "set_name": "held_out",
@@ -199,12 +197,13 @@ def test_startup_cleans_stopped_evaluation_threads_but_preserves_records(monkeyp
     assert saver.get_tuple(harness.thread_of(before)) is not None
     monkeypatch.setattr(checkpoints.state, "pool", object())
     monkeypatch.setattr(checkpoints, "PostgresSaver", lambda pool: saver)
-    service.recover()
+    api.stop_run(run["run_id"])
+    service.clear_abandoned_evaluations()
     assert api.get_run(run["run_id"])["status"] == "stopped"
 
     assert api.get_claim(claim_id) == before
     assert saver.get_tuple(harness.thread_of(before)) is None
-    later = api.start_run(
+    later = fixture_run(
         {
             "kind": "dispatch",
             "set_name": None,
@@ -229,7 +228,7 @@ def test_startup_cleans_stopped_evaluation_threads_but_preserves_records(monkeyp
 
 
 def test_evaluation_payment_hold_survives_a_restored_limit(client, monkeypatch):
-    run = api.start_run(
+    run = fixture_run(
         {
             "kind": "evaluation",
             "set_name": "held_out",

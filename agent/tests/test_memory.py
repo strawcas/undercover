@@ -17,7 +17,7 @@ from agent import api, checkpoints, harness, memory, models, screening, service
 from agent.tests.queue_setup import leave_waiting
 from agent.tests.records import claim_of, latest, steps_of
 from agent.tests.stubs import calculate, call, graph_on, record, stub
-from backend.tests.run_requests import configuration
+from backend.tests.run_requests import configuration, fixture_run
 
 CLAIM = "CLM-1002"
 CUSTOMER = "CUS-3002"
@@ -189,8 +189,8 @@ def test_next_dispatch_recovers_memory_for_a_settled_claim(
     assert claim_of(client, CLAIM)["status"] == "decided"
     store.interrupt = False
 
-    service.reserve("dispatch")
-    service.work_run(configuration(concurrency=1))
+    run = fixture_run(configuration(concurrency=1))
+    service.work_run(api.take_run(run["run_id"]))
     assert not latest(client)["members"]
     assert not api.list_pending_memory()
     assert len(store.events) == 2
@@ -241,14 +241,16 @@ def test_receipt_recovery_does_not_block_claim_work_or_the_next_dispatch(
     )
     monkeypatch.setattr(checkpoints, "new_saver", InMemorySaver)
     with ThreadPoolExecutor(max_workers=1) as pool:
-        service.reserve("dispatch")
-        run = pool.submit(service.work_run, configuration(concurrency=1))
+        current = fixture_run(configuration(concurrency=1))
+        run = pool.submit(service.work_run, api.take_run(current["run_id"]))
         try:
             assert entered.wait(10)
             assert claim_of(client, CLAIM)["status"] == "decided"
             assert latest(client)["status"] == "finished"
-            service.reserve("next dispatch")
-            service.run_slot.release()
+            assert (
+                client.post("/api/dispatches", json={"concurrency": 1}).status_code
+                == 202
+            )
         finally:
             resume.set()
         run.result(timeout=10)
@@ -268,7 +270,7 @@ def test_screen_referrals_do_not_save_memory(store, monkeypatch):
 
 
 def test_evaluation_copies_do_not_bind_or_use_memory(store, monkeypatch):
-    run = api.start_run(
+    run = fixture_run(
         {
             "kind": "evaluation",
             "set_name": "evaluation",

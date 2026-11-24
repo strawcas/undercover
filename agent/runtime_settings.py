@@ -12,7 +12,7 @@ from bedrock_agentcore.identity.auth import requires_api_key
 from bedrock_agentcore.runtime.context import BedrockAgentCoreContext
 from starlette.concurrency import run_in_threadpool
 
-from agent import checkpoints, service
+from agent import checkpoints
 from agent.console import show_reports
 from agent.credentials import API_KEY, configured_key
 
@@ -94,13 +94,12 @@ class RuntimeSettings:
             return True
 
     def open(self) -> ExitStack:
-        """Open the pool and recover local service work after credentials are ready."""
+        """Open the checkpoint pool after credentials are ready."""
         if not configured_key():
             raise RuntimeError(f"{API_KEY} is missing")
         show_reports()
         with ExitStack() as resources:
             resources.enter_context(checkpoints.checkpointer())
-            service.recover()
             return resources.pop_all()
 
     def close(self) -> None:

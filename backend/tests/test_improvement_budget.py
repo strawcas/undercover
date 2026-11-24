@@ -25,7 +25,7 @@ from backend.tests.improvement_support import (
 )
 
 
-def observed_run(round_id, total, model="openai/gpt-6-luna"):
+def observed_run(round_id, total, model="openai/gpt-6-luna", *, status="finished"):
     identity = freeze(round_id)
     with engine().begin() as db:
         claim_id = (
@@ -36,7 +36,11 @@ def observed_run(round_id, total, model="openai/gpt-6-luna"):
             .first()
         )
         assert isinstance(claim_id, str)
-        db.execute(update(runs).where(runs.c.run_id == identity).values(model=model))
+        db.execute(
+            update(runs)
+            .where(runs.c.run_id == identity)
+            .values(model=model, status=status)
+        )
         db.execute(
             insert(model_calls).values(
                 claim_id=claim_id,
@@ -230,7 +234,7 @@ def test_billing_uses_one_query_and_retains_mixed_unknown_costs(client, unknown_
 
 def test_claim_write_guard_uses_two_queries_in_run_round_lock_order(client):
     current = new_round(client)
-    _, claim_id = observed_run(current["round_id"], 0.02)
+    _, claim_id = observed_run(current["round_id"], 0.02, status="running")
     database = engine()
     statements = []
 
@@ -246,8 +250,13 @@ def test_claim_write_guard_uses_two_queries_in_run_round_lock_order(client):
         assert len(statements) == 2
         first = str(statements[0].compile(dialect=postgresql.dialect()))
         second = str(statements[1].compile(dialect=postgresql.dialect()))
-        assert "JOIN claims" in first
-        assert "FOR SHARE OF runs" in first
+        assert first.startswith("UPDATE runs")
+        assert "FROM claims" in first
+        assert "RETURNING runs.run_id" in first
+        postgres_lock = improvement_budget.claim_run_lock(claim_id, "", sqlite=False)
+        assert "FOR SHARE OF runs" in str(
+            postgres_lock.compile(dialect=postgresql.dialect())
+        )
         assert "FOR SHARE" in second
         assert "rounds" in second
         db.execute(
@@ -280,13 +289,15 @@ def test_admission_lock_mode_excludes_billing_and_stop(client, shared):
                 improvement_budget.admit(db, current["round_id"], shared=False)
         finally:
             event.remove(database, "before_execute", capture)
+    if not shared:
+        assert statements.pop(0).startswith("UPDATE rounds")
     assert statements[0].endswith("FOR SHARE" if shared else "FOR UPDATE")
     assert len(statements) == 2
 
 
 def test_judge_billing_takes_exclusive_parent_lock_without_upgrade(client):
     current = new_round(client)
-    identity, claim_id = observed_run(current["round_id"], 0.02)
+    identity, claim_id = observed_run(current["round_id"], 0.02, status="running")
     database = engine()
     statements = []
 

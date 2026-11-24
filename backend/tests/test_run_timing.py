@@ -148,7 +148,9 @@ def test_unfinished_members_do_not_invent_completion(client, clock, state):
         BEGIN if state in ("in_progress", "left_for_handler") else None
     )
     assert row["finished_at"] is row["elapsed_seconds"] is None
-    stopped = client.post("/api/runs/stop")
+    stopped = client.post(
+        f"/api/runs/{run_id}/stop", json={"reason": "Stopped by worker"}
+    )
     assert stopped.status_code == 200
     assert read_member(client, run_id) == row
 

@@ -180,6 +180,7 @@ def calculate_payout(
                 "paid_by_others": paid_by_others,
                 "thread_id": context.thread_id,
                 "revision": context.revision,
+                "run_id": context.run_id or "",
             },
             via=context.gateway,
         )
@@ -208,6 +209,7 @@ def record_decision(
             ),
             "thread_id": context.thread_id,
             "revision": context.revision,
+            "run_id": context.run_id or "",
         },
         via=context.gateway,
     )

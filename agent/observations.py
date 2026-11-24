@@ -29,7 +29,13 @@ def record_step(
     context: ClaimContext, kind: api.StepKind, value: api.StepContent
 ) -> None:
     """Tie this observation to the attempt that made it."""
-    api.record_step(context.claim_id, kind, value, thread_id=context.thread_id)
+    api.record_step(
+        context.claim_id,
+        kind,
+        value,
+        thread_id=context.thread_id,
+        run_id=context.run_id,
+    )
 
 
 def record_call(

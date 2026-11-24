@@ -30,6 +30,7 @@ from sqlalchemy import (
     inspect,
     select,
     text,
+    update,
 )
 from sqlalchemy.dialects.postgresql import Insert as PostgresInsert
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
@@ -149,6 +150,11 @@ claims = Table(
     Column("evaluation_id", Text, ForeignKey("runs.run_id")),
     Column("source_id", Text),
 )
+work_gate = Table(
+    "work_gate",
+    metadata,
+    Column("id", Integer, primary_key=True),
+)
 decisions = Table(
     "decisions",
     metadata,
@@ -240,6 +246,8 @@ runs = Table(
     Column("started_at", Text, nullable=False),
     Column("finished_at", Text),
     Column("summary", Text),
+    Column("heartbeat_at", Text),
+    Column("stop_reason", Text),
 )
 run_claims = Table(
     "run_claims",
@@ -312,6 +320,7 @@ claim_view = (
         claim_reviews.c.revision,
         claim_reviews.c.owner.label("review_owner"),
         claim_reviews.c.run_id.label("review_run_id"),
+        runs.c.status.label("review_run_status"),
         claim_reviews.c.heartbeat_at.label("review_heartbeat"),
         customers.c.name.label("customer_name"),
         decisions.c.decision,
@@ -336,6 +345,7 @@ claim_view = (
     .outerjoin(decisions, decisions.c.claim_id == claims.c.claim_id)
     .outerjoin(payments, payments.c.claim_id == claims.c.claim_id)
     .outerjoin(claim_reviews, claim_reviews.c.claim_id == claims.c.claim_id)
+    .outerjoin(runs, runs.c.run_id == claim_reviews.c.run_id)
 )
 
 
@@ -408,6 +418,16 @@ def upgrade(db: Engine) -> None:
     """Add the Runtime tables to a previously seeded business database."""
     with db.begin() as connection:
         connection.execute(CreateTable(claim_reviews, if_not_exists=True))
+        connection.execute(CreateTable(work_gate, if_not_exists=True))
+        insert_once(connection, work_gate, {"id": 1})
+        connection.execute(update(work_gate).where(work_gate.c.id == 1).values(id=1))
+        existing = {
+            column["name"] for column in inspect(connection).get_columns("runs")
+        }
+        if "heartbeat_at" not in existing:
+            connection.execute(text("ALTER TABLE runs ADD COLUMN heartbeat_at TEXT"))
+        if "stop_reason" not in existing:
+            connection.execute(text("ALTER TABLE runs ADD COLUMN stop_reason TEXT"))
 
 
 def load(name: str) -> Any:
@@ -432,6 +452,7 @@ def seed(db: Engine) -> dict[str, int]:
         connection.execute(text("DROP TABLE IF EXISTS todos"))
         metadata.drop_all(connection)
         metadata.create_all(connection)
+        connection.execute(insert(work_gate).values(id=1))
         configuration = initial_model()
         provenance = {
             "parent_version": None,

@@ -259,6 +259,26 @@ function RoundMeasures({ round }: Readonly<{ round: Round }>) {
   );
 }
 
+function RoundExplanation({ round }: Readonly<{ round: Round }>) {
+  return (
+    <>
+      {round.stop_reason && round.stop_reason !== round.explanation && (
+        <p className="message">{round.stop_reason}</p>
+      )}
+      {round.verdict ? (
+        <div className="verdict">
+          <span className={`chip verdict-${round.verdict}`}>
+            {label(round.verdict)}
+          </span>
+          <p>{round.explanation}</p>
+        </div>
+      ) : (
+        round.explanation && <p>{round.explanation}</p>
+      )}
+    </>
+  );
+}
+
 export function RoundDetail({
   round,
   configurations,
@@ -314,15 +334,7 @@ export function RoundDetail({
         </div>
       )}
       <RoundMeasures round={round} />
-      {round.verdict && (
-        <div className="verdict">
-          <span className={`chip verdict-${round.verdict}`}>
-            {label(round.verdict)}
-          </span>
-          <p>{round.explanation}</p>
-        </div>
-      )}
-      {!round.verdict && round.explanation && <p>{round.explanation}</p>}
+      <RoundExplanation round={round} />
       <RoundScores
         before={round.before}
         after={round.after}

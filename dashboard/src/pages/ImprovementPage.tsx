@@ -195,7 +195,12 @@ function startDisabled(
   actions: ReturnType<typeof useRoundActions>,
 ) {
   if (!data || actions.busy) return true;
-  if (data.rounds.some((round) => !roundClosed(round.status))) return true;
+  if (
+    data.rounds.some(
+      (round) => !roundClosed(round.status) && !round.work_expired,
+    )
+  )
+    return true;
   return (
     actions.accepted !== null &&
     !data.rounds.some((round) => round.round_id === actions.accepted)
@@ -237,7 +242,7 @@ export function ImprovementPage() {
           start or stop rounds and approve or reject proposals.
         </p>
       )}
-      {open && (
+      {open && !open.work_expired && (
         <p className="muted small round-notice">
           Finish or stop the open round before starting another.
         </p>

@@ -11,14 +11,6 @@ def _call(method: str, path: str, **request: Any) -> Any:
     return backend_client.call(backend, method, path, **request)
 
 
-def start_round(handler: dict) -> dict:
-    return _call("POST", "/improver/rounds", json=handler)
-
-
-def recover() -> list[str]:
-    return _call("POST", "/improver/recover")
-
-
 def get_round(round_id: str) -> dict:
     return _call("GET", f"/improver/rounds/{round_id}")
 
@@ -49,11 +41,21 @@ def pending(round_id: str, proposal: dict) -> dict:
     return _call("POST", f"/improver/rounds/{round_id}/proposals", json=proposal)
 
 
-def decide(round_id: str, proposal_id: str, decision: dict) -> dict:
+def take_work(round_id: str, proposal_id: str | None) -> dict:
     return _call(
+        "POST", f"/improver/rounds/{round_id}/take", json={"proposal_id": proposal_id}
+    )
+
+
+def heartbeat(round_id: str, work_id: str) -> None:
+    _call("PUT", f"/improver/rounds/{round_id}/heartbeat", json={"work_id": work_id})
+
+
+def stop_work(round_id: str, work_id: str, reason: str) -> None:
+    _call(
         "POST",
-        f"/improver/rounds/{round_id}/proposals/{proposal_id}/decision",
-        json=decision,
+        f"/improver/rounds/{round_id}/stop-work",
+        json={"work_id": work_id, "reason": reason},
     )
 
 

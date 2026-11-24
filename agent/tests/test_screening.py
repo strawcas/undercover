@@ -19,7 +19,7 @@ from agent.tests.records import steps_of
 from agent.tests.stubs import calculate, graph_on, record, stub
 from agent.tools import ClaimState
 from backend.database import engine, model_calls
-from backend.tests.run_requests import configuration
+from backend.tests.run_requests import configuration, fixture_run
 
 REASON = "The customer asks the handler to waive a coverage rule."
 
@@ -112,7 +112,7 @@ def test_retries_count_in_an_evaluation_before_the_first_adjudication_call(
     prompts = use_checker(
         monkeypatch, screen, reply("s1"), reply("s2"), reply("s3", flagged=False)
     )
-    run = api.start_run(
+    run = fixture_run(
         configuration(kind="evaluation", set_name="evaluation", tiny=True)
     )
     claim_id = run["members"][0]["claim_id"]
@@ -320,7 +320,7 @@ def test_restart_preserves_the_saved_screen_and_its_original_dispatch_cost(
 ):
     claim_id = "CLM-1901"
     prompts = use_checker(monkeypatch, screen, reply("screen", flagged=True))
-    first = api.start_run(configuration())["run_id"]
+    first = fixture_run(configuration())["run_id"]
     api.record_run_selection(first, [claim_id])
     bill = api.record_model_call
 
@@ -336,7 +336,7 @@ def test_restart_preserves_the_saved_screen_and_its_original_dispatch_cost(
     interrupted = api.get_claim(claim_id)
     assert interrupted["decision"] is None
     assert api.stop_run(first)["status"] == "stopped"
-    second = api.start_run(configuration())["run_id"]
+    second = fixture_run(configuration())["run_id"]
     api.record_run_selection(second, [claim_id])
     monkeypatch.setattr(api, "record_model_call", bill)
     assert "refer" in harness.carry_on(interrupted, graph, second)
@@ -390,7 +390,7 @@ def test_interrupted_evaluation_keeps_screening_cost_after_checkpoint_cleanup(
     monkeypatch, screen
 ):
     use_checker(monkeypatch, screen, reply("screen", flagged=False))
-    run = api.start_run(
+    run = fixture_run(
         configuration(kind="evaluation", set_name="evaluation", tiny=True)
     )
     claim_id = run["members"][0]["claim_id"]
@@ -406,7 +406,8 @@ def test_interrupted_evaluation_keeps_screening_cost_after_checkpoint_cleanup(
     attempt = api.get_claim(claim_id)
     assert attempt["decision"] is None
     assert graph.get_state(harness.thread_of(attempt)).next == (harness.RECORD_SCREEN,)
-    assert attempt["thread_id"] in api.stop_runs()
+    api.stop_run(run["run_id"])
+    assert attempt["thread_id"] in api.stopped_evaluation_threads()
     saver.delete_thread(attempt["thread_id"])
     assert saver.get_tuple(harness.thread_of(attempt)) is None
     stopped = api.get_run(run["run_id"])

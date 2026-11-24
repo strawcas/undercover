@@ -56,13 +56,7 @@ class PreparedEvaluation:
 def prepare(run_id: str) -> PreparedEvaluation | Run:
     """Reserve evaluation grading or return an already closed dispatch/run."""
     with engine().begin() as db:
-        row = (
-            db.execute(select(runs).where(runs.c.run_id == run_id).with_for_update())
-            .mappings()
-            .first()
-        )
-        if row is None:
-            raise HTTPException(404, "Run not found")
+        row = run_records.run_row(db, run_id, lock=True)
         if row["kind"] != "evaluation":
             return run_records.finish_run(db, run_id)
         if row["status"] != "running":
@@ -70,8 +64,8 @@ def prepare(run_id: str) -> PreparedEvaluation | Run:
         if row["round_id"] is not None:
             try:
                 improvement_budget.admit(db, row["round_id"])
-            except HTTPException:
-                return run_records.finish_run(db, run_id, "stopped")
+            except HTTPException as error:
+                return run_records.stop(db, run_id, str(error.detail))
         claimed = db.execute(
             update(runs)
             .where(
@@ -113,17 +107,13 @@ def hold_blocked_payments(db: Connection, run_id: str) -> None:
 def save_results(run_id: str, results: list[tuple[str, Grade]]) -> Run:
     """Persist grading facts and the final score snapshot in one transaction."""
     with engine().begin() as db:
-        row = db.execute(
-            select(runs.c.status, runs.c.round_id)
-            .where(runs.c.run_id == run_id)
-            .with_for_update()
-        ).one()
-        stopped = row.status != "running"
-        if row.round_id is not None:
+        row = run_records.run_row(db, run_id, lock=True)
+        stop_reason = None
+        if row.status == "running" and row.round_id is not None:
             try:
                 improvement_budget.admit(db, row.round_id, shared=False)
-            except HTTPException:
-                stopped = True
+            except HTTPException as error:
+                stop_reason = str(error.detail)
         records = [
             {"run_id": run_id, "claim_id": claim_id, "record": judgement.model_dump()}
             for claim_id, judgement in results
@@ -132,8 +122,8 @@ def save_results(run_id: str, results: list[tuple[str, Grade]]) -> Run:
             insert_once(db, evaluation_grades, records)
         if row.status != "running":
             return run_records.get_run(db, run_id)
-        if stopped:
-            return run_records.finish_run(db, run_id, "stopped")
+        if stop_reason:
+            return run_records.stop(db, run_id, stop_reason)
         hold_blocked_payments(db, run_id)
         finished = run_records.finish_run(db, run_id)
         evaluation = evaluations.get_evaluation(db, run_id)

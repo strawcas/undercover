@@ -3,9 +3,10 @@
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from backend import agent_service, configurations, improvement_budget, improvements
-from backend.auth import CurrentHandler, SeniorHandler, require_agent
+from backend import configurations, improvement_budget, improvements, work_admission
+from backend.auth import CurrentHandler, ReviewHandler, require_agent
 from backend.configuration_models import RecipeHistory
+from backend.database import engine
 from backend.dependencies import Database
 from backend.improvement_models import (
     EvaluationQuote,
@@ -14,10 +15,12 @@ from backend.improvement_models import (
     ProposalRequest,
     Quote,
     Round,
+    RoundHeartbeat,
     RoundProgress,
+    RoundTake,
     RoundUsage,
+    StopRoundWork,
 )
-from backend.models import Handler
 
 router = APIRouter()
 service_router = APIRouter(dependencies=[Depends(require_agent)])
@@ -41,15 +44,27 @@ def list_recipes(handler: CurrentHandler, db: Database) -> list[RecipeHistory]:
 
 
 @router.post("/api/rounds", operation_id="start_round", status_code=202)
-def start_round(handler: SeniorHandler) -> dict[str, str]:
-    """Ask the agent service to reserve a stretch for a new round."""
-    return agent_service.start_round(handler)
+def start_round(handler: ReviewHandler) -> dict[str, str]:
+    """Commit a new round with pinned settings before invoking the agent."""
+    with engine().begin() as db:
+        work_admission.admit(db)
+        current = improvements.start(db, handler)
+    work_admission.launch(
+        "work_round",
+        {"round_id": current.round_id},
+        lambda db, reason: work_admission.cancel_round_start(
+            db, current.round_id, reason
+        ),
+    )
+    return {"status": "accepted", "round_id": current.round_id}
 
 
 @router.post("/api/rounds/{round_id}/stop", operation_id="stop_round", status_code=202)
-def stop_round(round_id: str, handler: SeniorHandler) -> dict[str, str]:
-    """Ask the service to stop a round before any further work starts."""
-    return agent_service.stop_round(round_id, handler)
+def stop_round(round_id: str, handler: ReviewHandler, db: Database) -> dict[str, str]:
+    """Stop the named round and its running evaluation."""
+    work_admission.lock(db)
+    work_admission.stop_round(db, round_id, f"Stopped by {handler.name}")
+    return {"status": "accepted"}
 
 
 @router.post(
@@ -58,22 +73,52 @@ def stop_round(round_id: str, handler: SeniorHandler) -> dict[str, str]:
     status_code=202,
 )
 def decide_proposal(
-    round_id: str, proposal_id: str, request: ProposalDecision, handler: SeniorHandler
+    round_id: str, proposal_id: str, request: ProposalDecision, handler: ReviewHandler
 ) -> dict[str, str]:
-    """Pass a verified handler's approval or rejection to the agent service."""
-    return agent_service.decide_proposal(round_id, proposal_id, request, handler)
+    """Commit the verified review before asking the agent to carry the round on."""
+    with engine().begin() as db:
+        work_admission.admit(db)
+        work_id = improvements.queue_review(
+            db,
+            round_id,
+            proposal_id,
+            HandlerDecision(**request.model_dump(), handler=handler),
+        )
+    work_admission.launch(
+        "carry_round_on",
+        {"round_id": round_id, "proposal_id": proposal_id},
+        lambda db, _: improvements.cancel_review(db, round_id, work_id),
+    )
+    return {"status": "accepted"}
 
 
-@service_router.post("/api/improver/rounds", operation_id="create_round")
-def create_round(handler: Handler, db: Database) -> Round:
-    """Create a round only after the service has reserved its work slot."""
-    return improvements.start(db, handler)
+@service_router.post("/api/improver/rounds/{round_id}/take", operation_id="take_round")
+def take_round(round_id: str, request: RoundTake, db: Database) -> dict:
+    """Let a worker take the round's committed stretch and any recorded review."""
+    work_admission.lock(db)
+    return improvements.take_work(db, round_id, request.proposal_id)
 
 
-@service_router.post("/api/improver/recover", operation_id="recover_rounds")
-def recover_rounds(db: Database) -> list[str]:
-    """Close abandoned stretches while retaining pending approval checkpoints."""
-    return improvements.recover(db)
+@service_router.put(
+    "/api/improver/rounds/{round_id}/heartbeat", operation_id="round_heartbeat"
+)
+def round_heartbeat(
+    round_id: str, request: RoundHeartbeat, db: Database
+) -> dict[str, str]:
+    """Renew only the current working stretch of the named round."""
+    work_admission.lock(db)
+    improvements.heartbeat(db, round_id, request.work_id)
+    return {"status": "recorded"}
+
+
+@service_router.post(
+    "/api/improver/rounds/{round_id}/stop-work", operation_id="stop_round_work"
+)
+def stop_round_work(round_id: str, request: StopRoundWork, db: Database) -> Round:
+    """Stop only the named worker's stretch and its evaluation."""
+    work_admission.lock(db)
+    work_admission.stop_round(db, round_id, request.reason, work_id=request.work_id)
+    return improvements.get_round(db, round_id)
 
 
 @service_router.get("/api/improver/rounds/{round_id}", operation_id="get_round")
@@ -125,17 +170,6 @@ def record_pending_proposal(
 
 
 @service_router.post(
-    "/api/improver/rounds/{round_id}/proposals/{proposal_id}/decision",
-    operation_id="record_proposal_decision",
-)
-def record_proposal_decision(
-    round_id: str, proposal_id: str, request: HandlerDecision, db: Database
-) -> Round:
-    """Save the handler decision before resuming durable execution."""
-    return improvements.decide(db, round_id, proposal_id, request)
-
-
-@service_router.post(
     "/api/improver/rounds/{round_id}/quote", operation_id="quote_evaluation"
 )
 def quote_evaluation(round_id: str, request: EvaluationQuote, db: Database) -> Quote:
@@ -184,7 +218,11 @@ def apply_round_verdict(round_id: str, db: Database) -> Round:
 )
 def finish_round(round_id: str, request: CloseRound, db: Database) -> Round:
     """Close or stop a round while preserving an existing verdict."""
-    return improvements.finish(db, round_id, request.stopped, request.reason)
+    if request.stopped:
+        work_admission.lock(db)
+        work_admission.stop_round(db, round_id, request.reason)
+        return improvements.get_round(db, round_id)
+    return improvements.finish(db, round_id, False, request.reason)
 
 
 router.include_router(service_router)

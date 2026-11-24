@@ -27,5 +27,9 @@ def call(backend: httpx.Client, method: str, path: str, **request: Any) -> Any:
     """Send a typed client's request and preserve backend refusals."""
     response = backend.request(method, path, headers=app_headers(), **request)
     if response.is_error:
-        raise Refused(response.status_code, response.json()["detail"])
+        try:
+            detail = response.json()["detail"]
+        except (ValueError, TypeError, KeyError):
+            detail = response.reason_phrase
+        raise Refused(response.status_code, detail)
     return response.json()

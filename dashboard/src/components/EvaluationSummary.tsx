@@ -39,6 +39,7 @@ export function EvaluationSummary({ run }: Readonly<{ run: Evaluation }>) {
         Started {timestamp(run.started_at)}
         {run.finished_at && ` · Ended ${timestamp(run.finished_at)}`}
       </p>
+      {run.stop_reason && <p className="message">{run.stop_reason}</p>}
       <dl className="evaluation-measures">
         {measures.map(([name, value]) => (
           <div key={name}>

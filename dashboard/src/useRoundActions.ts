@@ -42,9 +42,7 @@ export function useRoundActions(
         setAnnouncement("Round accepted. Progress will appear here shortly.");
       } else if (action.kind === "stop") {
         await api.stopRound(action.roundId);
-        setAnnouncement(
-          "Round stopped. Work already in hand will drain before another run can start.",
-        );
+        setAnnouncement("Round stopped. Work already in hand is winding down.");
       } else {
         await api.decideProposal(
           action.roundId,

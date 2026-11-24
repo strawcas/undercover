@@ -8,7 +8,7 @@ import {
 
 // These tests stand in for the dispatcher and a claim agent by calling the
 // API through the dashboard's proxy, and watch the pages update without a
-// reload. Starts are kept in this file so the shared service slot is sequential.
+// reload. Starts are kept in this file so the shared backend slot is sequential.
 
 test("the queue shows dispatch members and a records-built summary", async ({
   page,
@@ -23,14 +23,7 @@ test("the queue shows dispatch members and a records-built summary", async ({
   await expect(panel.getByText("Dispatch accepted.")).toBeVisible();
   const starts = await request.get(`${AGENT_STAND_IN}/api/starts`);
   expect(await starts.json()).toContainEqual({ concurrency: 25 });
-  const response = await post(request, "/api/runs", {
-    kind: "dispatch",
-    concurrency: 3,
-    configuration_version: 1,
-    round_id: null,
-    set_name: null,
-    tiny: null,
-  });
+  const response = await get(request, "/api/runs/active");
   const { run_id } = (await response.json()) as { run_id: string };
   await put(request, `/api/runs/${run_id}/selection`, {
     claim_ids: ["CLM-1013", "CLM-1014"],
@@ -92,7 +85,7 @@ test("the queue shows dispatch members and a records-built summary", async ({
     section: "3",
     reason: "Needs a handler",
   });
-  await post(request, `/api/runs/${run_id}/finish`, {});
+  await post(request, `${AGENT_STAND_IN}/api/release`, { run_id });
   await expect(panel.getByText("Finished", { exact: true })).toBeVisible();
   await expect(row.getByRole("cell").nth(3)).toHaveText("Referred");
   await expect(row.getByRole("cell").nth(4)).toHaveText("$0.00");
@@ -105,7 +98,6 @@ test("the queue shows dispatch members and a records-built summary", async ({
   ).toBeVisible();
   await panel.getByRole("link", { name: "CLM-1013" }).click();
   await expect(page).toHaveURL("/claims/CLM-1013");
-  await post(request, `${AGENT_STAND_IN}/api/release`, {});
 });
 
 test("a claim that fails twice is left for a handler", async ({
@@ -172,14 +164,7 @@ test("evaluations show scores, copied decisions and stopped runs without changin
     data: { concurrency: 25 },
   });
   expect(busy.status()).toBe(409);
-  const response = await post(request, "/api/runs", {
-    kind: "evaluation",
-    set_name: "held_out",
-    tiny: true,
-    concurrency: 5,
-    configuration_version: 1,
-    round_id: null,
-  });
+  const response = await get(request, "/api/runs/active");
   const run = (await response.json()) as {
     run_id: string;
     members: { claim_id: string }[];
@@ -229,8 +214,7 @@ test("evaluations show scores, copied decisions and stopped runs without changin
     .first()
     .click();
   await expect(page.getByText("Running", { exact: true })).toBeVisible();
-  await post(request, `/api/runs/${run.run_id}/finish`, {});
-  await post(request, `${AGENT_STAND_IN}/api/release`, {});
+  await post(request, `${AGENT_STAND_IN}/api/release`, { run_id: run.run_id });
   const evaluations = page.getByRole("list", { name: "Evaluations" });
   await expect(
     evaluations.getByText("Finished", { exact: true }),
@@ -256,18 +240,19 @@ test("evaluations show scores, copied decisions and stopped runs without changin
   const queueAfter = await request.get("/api/claims");
   const after = (await queueAfter.json()) as { claim_id: string }[];
   expect(after.map((c) => c.claim_id)).toEqual(original.map((c) => c.claim_id));
-  const stopped = await post(request, "/api/runs", {
-    kind: "evaluation",
+  const stopped = await post(request, "/api/evaluations", {
     set_name: "evaluation",
     tiny: true,
     concurrency: 3,
-    configuration_version: 1,
-    round_id: null,
   });
-  expect(stopped.ok()).toBe(true);
-  await post(request, "/api/runs/stop", {});
+  const stoppedRun = (await stopped.json()) as { run_id: string };
+  await post(request, `${AGENT_STAND_IN}/api/release`, {
+    run_id: stoppedRun.run_id,
+    reason: "The agent stopped answering",
+  });
   await page.getByRole("link", { name: "Scoreboard", exact: true }).click();
   await expect(page.getByText("Stopped", { exact: true })).toBeVisible();
+  await expect(page.getByText("The agent stopped answering")).toBeVisible();
 });
 
 test("improvement approvals retain feedback, refuse busy work and show the verdict and recipe", async ({
@@ -303,10 +288,11 @@ test("improvement approvals retain feedback, refuse busy work and show the verdi
   await expect(
     detail.getByRole("button", { name: "Approve testing" }),
   ).toBeVisible();
-  await post(request, "/api/dispatches", { concurrency: 25 });
+  const busyRun = await post(request, "/api/dispatches", { concurrency: 25 });
+  const busyIdentity = (await busyRun.json()) as { run_id: string };
   await detail.getByRole("button", { name: "Approve testing" }).click();
   await dialog.getByRole("button", { name: "Approve proposal" }).click();
-  await expect(dialog.getByText(/already running/)).toBeVisible();
+  await expect(dialog.getByText(/dispatch is running/)).toBeVisible();
   const stillPending = await get(request, internalRound(identity));
   const pending = (await stillPending.json()) as {
     proposals: { proposal_id: string; decision: string | null }[];
@@ -317,7 +303,9 @@ test("improvement approvals retain feedback, refuse busy work and show the verdi
     )?.decision,
   ).toBeNull();
   await dialog.getByRole("button", { name: "Cancel" }).click();
-  await post(request, `${AGENT_STAND_IN}/api/release`, {});
+  await post(request, `${AGENT_STAND_IN}/api/release`, {
+    run_id: busyIdentity.run_id,
+  });
   await detail.getByRole("button", { name: "Approve testing" }).click();
   await dialog.getByRole("button", { name: "Approve proposal" }).click();
   await expect(page.getByText(/Approval recorded/)).toBeVisible();
@@ -349,4 +337,29 @@ test("improvement approvals retain feedback, refuse busy work and show the verdi
       exact: true,
     }),
   ).toBeVisible();
+});
+
+test("dispatches and rounds show their saved stop reasons", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/");
+  const started = await post(request, "/api/dispatches", { concurrency: 1 });
+  const { run_id } = (await started.json()) as { run_id: string };
+  const dispatchReason = "The dispatch worker stopped answering";
+  await post(request, `${AGENT_STAND_IN}/api/release`, {
+    run_id,
+    reason: dispatchReason,
+  });
+  await expect(page.getByText(dispatchReason)).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Start dispatch" }),
+  ).toBeEnabled();
+
+  const round = await post(request, "/api/rounds", {});
+  const { round_id } = (await round.json()) as { round_id: string };
+  await post(request, `/api/rounds/${round_id}/stop`, {});
+  await page.goto("/improvement");
+  const detail = page.getByRole("region", { name: "Selected round" });
+  await expect(detail.getByText("Stopped by Dana Whitfield")).toBeVisible();
 });

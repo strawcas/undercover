@@ -26,6 +26,7 @@ from agent.tests.stubs import (
 from backend.database import engine, settings
 from backend.main import handler
 from backend.tests.claim_requests import sign_off
+from backend.tests.run_requests import fixture_run
 
 URL = "https://gateway.example.invalid/mcp"
 DENIAL = "Tool Execution Denied: Policy refused payment"
@@ -248,7 +249,7 @@ def test_gateway_refusal_and_payment_hold(client, stand_in, evaluation):
     with engine().begin() as db:
         db.execute(update(settings).values(payout_approval_limit=2000))
     run = (
-        api.start_run(
+        fixture_run(
             {
                 "kind": "evaluation",
                 "set_name": "evaluation",

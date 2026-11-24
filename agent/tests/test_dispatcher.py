@@ -11,7 +11,7 @@ from agent import api, checkpoints, dispatcher, harness, models
 from agent.tests.queue_setup import leave_waiting
 from agent.tests.stubs import calculate, call, graph_on, record, stub
 from backend.database import engine, run_claims, work_slices
-from backend.tests.run_requests import configuration
+from backend.tests.run_requests import configuration, fixture_run
 
 
 @pytest.mark.parametrize("n", [1, 3, 25])
@@ -33,7 +33,7 @@ def test_concurrency_is_bounded_and_every_claim_is_selected_once(monkeypatch, n)
         return "Done"
 
     monkeypatch.setattr(harness, "execute_claim", work)
-    run = api.start_run(configuration(concurrency=n))
+    run = fixture_run(configuration(concurrency=n))
     result = dispatcher.dispatch(run["run_id"], n)
     assert peak == n
     assert len(set(worked)) == len(worked) == len(result["results"]) == 26
@@ -62,7 +62,7 @@ def test_transient_retry_resumes_same_attempt_and_thread(
         "execution_graph",
         lambda version=None, **options: graph_on(next(models), saver),
     )
-    run = api.start_run(configuration())
+    run = fixture_run(configuration())
     dispatcher.dispatch(run["run_id"], 1)
     claim = api.get_claim("CLM-1001")
     assert (claim["status"], claim["attempts"], claim["payment"]["amount"]) == (
@@ -91,7 +91,7 @@ def test_exhaustion_keeps_progress_and_other_claims_finish(monkeypatch):
     monkeypatch.setattr(
         harness, "execution_graph", lambda version=None, **options: next(graphs)
     )
-    run_id = api.start_run(configuration())["run_id"]
+    run_id = fixture_run(configuration())["run_id"]
     dispatcher.dispatch(run_id, 1)
     assert api.get_claim("CLM-1001")["status"] == "in_progress"
     assert api.get_claim("CLM-1001")["attempts"] == 1
@@ -110,7 +110,7 @@ def test_ordinary_failure_retries_fresh_once(monkeypatch, succeed):
     monkeypatch.setattr(
         harness, "execution_graph", lambda version=None, **options: graph
     )
-    run_id = api.start_run(configuration())["run_id"]
+    run_id = fixture_run(configuration())["run_id"]
     dispatcher.dispatch(run_id, 1)
     claim = api.get_claim("CLM-1001")
     assert claim["attempts"] == 2
@@ -123,7 +123,7 @@ def test_empty_and_reserved_claims_are_skipped(monkeypatch):
     leave_waiting("CLM-1001")
     assert harness.reserve_claim("CLM-1001")
     try:
-        run_id = api.start_run(configuration())["run_id"]
+        run_id = fixture_run(configuration())["run_id"]
         assert dispatcher.dispatch(run_id, 25)["results"] == []
         assert harness.execute_claim("CLM-1001", run_id, 1).startswith("Skipped:")
     finally:
@@ -148,7 +148,7 @@ def test_graphs_have_distinct_savers_on_one_pool(monkeypatch):
 
 
 def test_worker_rechecks_status_and_releases_on_failure(monkeypatch):
-    run_id = api.start_run(configuration())["run_id"]
+    run_id = fixture_run(configuration())["run_id"]
     graph = graph_on(stub(record("refer", 0)))
     monkeypatch.setattr(
         harness, "execution_graph", lambda version=None, **options: graph
@@ -180,7 +180,7 @@ def test_get_state_failure_is_settled_and_retried_fresh(monkeypatch):
     monkeypatch.setattr(
         harness, "execution_graph", lambda version=None, **options: next(graphs)
     )
-    run_id = api.start_run(configuration())["run_id"]
+    run_id = fixture_run(configuration())["run_id"]
     api.record_run_claim(run_id, "CLM-1001", "selected", None)
     assert "refer" in harness.execute_claim("CLM-1001", run_id, 1)
     claim = api.get_claim("CLM-1001")

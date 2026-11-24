@@ -17,6 +17,7 @@ from agent import memory
 from agent.backend_client import Refused
 from agent.invocations import Invocation, invocation, work
 from agent.runtime_settings import RuntimeSettings, authorized, on_runtime
+from agent.service import UnconfirmedTake
 
 settings = RuntimeSettings()
 log = logging.getLogger(__name__)
@@ -65,8 +66,12 @@ async def response_for(request: Invocation, managed: bool) -> JSONResponse:
         background.add_task(memory.recover_pending)
     if request.operation == "health":
         return JSONResponse({"healthy": True})
-    reply = await run_in_threadpool(work, request, background)
-    return JSONResponse({"accepted": True, **reply})
+    try:
+        await run_in_threadpool(work, request, background)
+    except UnconfirmedTake:
+        log.warning("The backend did not confirm whether the agent took the work")
+        return JSONResponse({"uncertain": True})
+    return JSONResponse({"accepted": True})
 
 
 @app.entrypoint

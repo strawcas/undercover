@@ -20,6 +20,7 @@ Status = Literal[
     "left_for_handler",
 ]
 DecisionKind = Literal["approve", "decline", "refer"]
+RunKind = Literal["dispatch", "evaluation"]
 SECTION_14 = "Claims manual section 14"
 OrdinaryStepKind = Literal["tool_call", "tool_result", "message", "reading", "error"]
 StepKind = Literal[
@@ -235,7 +236,17 @@ class Step(BaseModel):
     created_at: str
 
 
-class StartRequest(BaseModel):
+class RunOwnership(BaseModel):
+    run_id: str = Field(description="The owning run, or an empty string")
+
+    @model_validator(mode="before")
+    @classmethod
+    def legacy_run(cls, data: Any) -> Any:
+        """Allow previously issued requests without an owning run."""
+        return {"run_id": "", **data} if isinstance(data, dict) else data
+
+
+class StartRequest(RunOwnership):
     thread_id: str = Field(min_length=1)
 
 
@@ -250,6 +261,10 @@ class DecisionRevision(BaseModel):
 
 
 class DecisionAttemptRequest(StartRequest, DecisionRevision):
+    pass
+
+
+class LimitHoldRequest(DecisionRevision, RunOwnership):
     pass
 
 
@@ -299,7 +314,7 @@ NewStepRequest = (
 )
 
 
-class DecisionRequest(DecisionRevision):
+class DecisionRequest(DecisionRevision, RunOwnership):
     decision: DecisionKind
     thread_id: str = Field(
         min_length=1, description="The attempt recording the decision"
@@ -345,11 +360,11 @@ class DecisionRequest(DecisionRevision):
         return self
 
 
-class PaymentRequest(DecisionRevision):
+class PaymentRequest(DecisionRevision, RunOwnership):
     amount: float = Field(gt=0, description="The approved payout in US dollars")
 
 
-class GatewayHoldRequest(DecisionRevision):
+class GatewayHoldRequest(DecisionRevision, RunOwnership):
     reason: str = Field(min_length=1, description="The Gateway's payment refusal")
 
 
@@ -400,7 +415,7 @@ class PayoutRequest(BaseModel):
     paid_by_others: float = Field(ge=0, description="Paid or refunded by others")
 
 
-class ClaimPayoutRequest(PayoutRequest, DecisionRevision):
+class ClaimPayoutRequest(PayoutRequest, DecisionRevision, RunOwnership):
     thread_id: str | None = Field(description="The attempt, or null for a preview")
 
 
@@ -408,11 +423,14 @@ class Payout(PayoutCalculation):
     needs_sign_off: bool
 
 
-class FailureRequest(DecisionRevision):
+class StoppedWork(BaseModel):
+    reason: str = Field(min_length=1)
+
+
+class FailureRequest(DecisionRevision, RunOwnership):
     reason: str = Field(min_length=1, description="What went wrong")
 
 
-RunKind = Literal["dispatch", "evaluation"]
 SetName = Literal["evaluation", "held_out"]
 MemberStatus = Literal["selected", "finished", "skipped", "in_progress"]
 
@@ -444,6 +462,7 @@ class Run(BaseModel):
     set_name: SetName | None
     tiny: bool | None
     status: Literal["running", "finished", "stopped"]
+    stop_reason: str | None = None
     started_at: str
     finished_at: str | None
     summary: str | None
@@ -503,6 +522,16 @@ class ModelCallRequest(BaseModel):
     output_tokens: int | None = Field(ge=0)
     total_tokens: int | None = Field(ge=0)
     cost: float | None = Field(ge=0)
+
+
+class ClaimModelCall(ModelCallRequest):
+    thread_id: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def legacy_thread(cls, data: Any) -> Any:
+        """Use the current thread for previously issued receipts."""
+        return {"thread_id": "", **data} if isinstance(data, dict) else data
 
 
 class WorkSliceRequest(BaseModel):

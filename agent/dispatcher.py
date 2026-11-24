@@ -82,7 +82,11 @@ def exhausted(
     claim = api.get_claim(state["claim_id"])
     if claim["thread_id"]:
         api.record_step(
-            state["claim_id"], "error", message, thread_id=claim["thread_id"]
+            state["claim_id"],
+            "error",
+            message,
+            thread_id=claim["thread_id"],
+            run_id=state["run_id"],
         )
     api.record_run_claim(state["run_id"], state["claim_id"], "in_progress", message)
     recovered.append(error.error)

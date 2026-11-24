@@ -167,7 +167,10 @@ def test_stopping_during_grading_does_not_revive_an_evaluation(client, monkeypat
         first = workers.submit(client.post, f"/api/runs/{run['run_id']}/finish")
         try:
             assert entered.wait(timeout=5)
-            client.post("/api/runs/stop")
+            client.post(
+                f"/api/runs/{run['run_id']}/stop",
+                json={"reason": "Stopped during grading"},
+            ).raise_for_status()
         finally:
             release.set()
         assert first.result().json()["status"] == "stopped"

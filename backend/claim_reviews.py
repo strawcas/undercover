@@ -1,29 +1,19 @@
 """Senior reviews and temporary ownership of returned claim work."""
 
-from datetime import datetime, timedelta
-
 from fastapi import HTTPException
 from sqlalchemy import Connection, RowMapping, delete, update
 
-from backend.clock import now
+from backend.clock import has_recent_heartbeat, now
 from backend.database import claim_reviews, claims, conflict_insert, decisions
 from backend.models import ClaimReview, Decision, ReturnedDecision
-
-STALE_AFTER = timedelta(minutes=5)
-
-
-def has_recent_heartbeat(heartbeat: str | None, at: str) -> bool:
-    """Treat a job as stale after five minutes of silence."""
-    return bool(
-        heartbeat
-        and datetime.fromisoformat(at) - datetime.fromisoformat(heartbeat) < STALE_AFTER
-    )
 
 
 def review_active(claim: RowMapping, at: str) -> bool:
     """Identify a claim whose review worker still holds it."""
-    return bool(claim["review_owner"]) and has_recent_heartbeat(
-        claim["review_heartbeat"], at
+    return (
+        bool(claim["review_owner"])
+        and (claim["review_run_id"] is None or claim["review_run_status"] == "running")
+        and has_recent_heartbeat(claim["review_heartbeat"], at)
     )
 
 
