@@ -117,11 +117,11 @@ def test_evaluation_closes_with_payment_held_after_a_limit_reduction(client):
     assert client.get(f"/api/claims/{claim_id}").json()["payment"] is None
 
 
-def test_an_agent_cannot_hold_an_original_through_the_evaluation_route(client):
+def test_an_agent_cannot_hold_an_original_within_the_approval_limit(client):
     claim_id = "CLM-1001"
     start(client, claim_id)
     decide(client, claim_id, "approve", 420)
-    response = client.post(f"/api/claims/{claim_id}/hold-evaluation-payment")
+    response = client.post(f"/api/claims/{claim_id}/hold-limit-payment")
     assert response.status_code == 409
     assert pay(client, claim_id, 420).status_code == 200
 
@@ -148,7 +148,7 @@ def test_original_work_is_not_copied_and_copies_cannot_be_signed_off(
         ).status_code
         == 200
     )
-    assert agent_calls == []
+    assert agent_calls == ["/api/claims/CLM-1001/resume"]
 
 
 @pytest.mark.parametrize(

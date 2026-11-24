@@ -280,11 +280,14 @@ def test_gateway_refusal_and_payment_hold(client, stand_in, evaluation):
         step["content"] == {"source": "Gateway", "reason": DENIAL} for step in refusals
     )
     signed = sign_off(client, claim_id, "HND-01")
+    checkpoint = graph.get_state(harness.thread_of(held))
     if evaluation:
         assert signed.status_code == 409
+        assert checkpoint.interrupts == checkpoint.next == ()
     else:
         assert model.prompts[-2][-1].text == f"Gateway refused: {DENIAL}"
-        assert graph.get_state(harness.thread_of(held)).next == (harness.PAUSE,)
+        assert checkpoint.next == (harness.PAUSE,)
+        assert len(checkpoint.interrupts) == 1
         assert signed.json()["payment"]["signed_off_by"] == "Dana Whitfield"
         decision = signed.json()["decision"]
         assert decision["calculation"] == held["decision"]["calculation"]

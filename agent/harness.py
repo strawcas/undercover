@@ -97,11 +97,14 @@ def is_reserved(claim_id: str) -> bool:
         return claim_id in owned_claims or claim_id in pending_resumes
 
 
-def queue_resume(claim_id: str) -> bool:
+def queue_resume(claim: dict[str, Any]) -> bool:
     """Reserve a sign-off handoff even while the worker is reaching its pause."""
+    claim_id = claim["claim_id"]
     with claim_lock:
         if claim_id in pending_resumes:
             return False
+        if claim_id not in owned_claims and not paused(claim):
+            raise Refused(409, f"Claim {claim_id} has no pending sign-off checkpoint")
         pending_resumes.add(claim_id)
         return True
 
@@ -237,10 +240,12 @@ def call_model(
     )
 
 
-def wait_for_sign_off(state: ClaimState, runtime: Runtime[ClaimContext]) -> None:
-    """Pause unless this execution has the backend's recorded sign-off."""
-    if runtime.context.signed_off_status is None:
-        interrupt({"claim_id": runtime.context.claim_id})
+def wait_for_sign_off(
+    state: ClaimState, runtime: Runtime[ClaimContext]
+) -> dict[str, Any]:
+    """Wait on the saved claim until a senior handler answers."""
+    interrupt({"claim_id": runtime.context.claim_id})
+    return {"status": runtime.context.signed_off_status}
 
 
 def screen_claim(state: ClaimState, runtime: Runtime[ClaimContext]) -> dict[str, Any]:
@@ -320,48 +325,49 @@ def pay(
     except gateway.GatewayDenied as denied:
         claim = api.hold_gateway_payment(context.claim_id, str(denied))
     except Refused as denied:
-        if denied.status_code != HTTPStatus.FORBIDDEN or context.evaluation_id is None:
+        if denied.status_code != HTTPStatus.FORBIDDEN:
             observations.record_refusal(context, "pay_claim", refusal(denied))
             raise
-        claim = api.hold_evaluation_payment(context.claim_id)
+        claim = api.hold_limit_payment(context.claim_id)
         observations.record_refusal(context, "pay_claim", refusal(denied))
     return {"status": claim["status"]}
 
 
 def after_payment(state: ClaimState, runtime: Runtime[ClaimContext]) -> str:
     """Pause an original when the Gateway held its payout."""
-    if (
-        state["status"] == api.Status.WAITING_FOR_SIGN_OFF
-        and runtime.context.evaluation_id is None
-    ):
-        return PAUSE
-    return END
-
-
-def after_decision(state: ClaimState) -> str:
-    """Send a recorded decision to payment, sign-off or completion."""
-    decision, status = state["decision"], state["status"]
-    if status == api.Status.WAITING_FOR_SIGN_OFF:
-        return PAUSE
-    if decision["decision"] == api.APPROVE and status == api.Status.IN_PROGRESS:
-        return PAY
-    return END
+    if state["status"] == api.Status.WAITING_FOR_SIGN_OFF:
+        return PAUSE if runtime.context.evaluation_id is None else END
+    return SAVE_MEMORY if runtime.store is not None else END
 
 
 def after_tools(state: ClaimState, runtime: Runtime[ClaimContext]) -> str:
-    """Continue adjudication or save an original decision before settlement."""
+    """Continue adjudication or settle a recorded decision before saving memory."""
     if not state["decision"]:
         return AGENT
-    return SAVE_MEMORY if runtime.store is not None else after_decision(state)
+    if state["status"] == api.Status.WAITING_FOR_SIGN_OFF:
+        return after_payment(state, runtime)
+    if (
+        state["decision"]["decision"] == api.APPROVE
+        and state["status"] == api.Status.IN_PROGRESS
+    ):
+        return PAY
+    return SAVE_MEMORY if runtime.store is not None else END
 
 
 def save_memory(state: ClaimState, runtime: Runtime[ClaimContext]) -> dict[str, Any]:
     """Save the recorded decision and minimal claim after adjudication."""
-    if runtime.store is not None:
-        memory.save_decision(
-            runtime.store, runtime.context.memory_claim, state["decision"]
-        )
+    if runtime.store is not None and state["status"] == api.Status.DECIDED:
+        context = runtime.context
+        api.prepare_memory(context.claim_id, context.thread_id)
+        memory.save_decision(runtime.store, context.memory_claim, state["decision"])
     return {}
+
+
+def after_memory(state: ClaimState, runtime: Runtime[ClaimContext]) -> str:
+    """Settle approvals from older checkpoints that reached memory first."""
+    if state["status"] == api.Status.WAITING_FOR_SIGN_OFF:
+        return PAUSE if runtime.context.evaluation_id is None else END
+    return PAY if state["status"] == api.Status.IN_PROGRESS else END
 
 
 def claim_graph(
@@ -418,9 +424,9 @@ def claim_graph(
     builder.add_conditional_edges(
         TOOLS, after_tools, [AGENT, SAVE_MEMORY, PAUSE, PAY, END]
     )
-    builder.add_conditional_edges(SAVE_MEMORY, after_decision, [PAUSE, PAY, END])
-    builder.add_edge(PAUSE, PAY)
-    builder.add_conditional_edges(PAY, after_payment, [PAUSE, END])
+    builder.add_conditional_edges(SAVE_MEMORY, after_memory, [PAY, PAUSE, END])
+    builder.add_conditional_edges(PAUSE, after_payment, [SAVE_MEMORY, END])
+    builder.add_conditional_edges(PAY, after_payment, [PAUSE, SAVE_MEMORY, END])
     return builder.compile(checkpointer=saver, store=store)
 
 
@@ -534,6 +540,13 @@ def run_claim_graph(
                     progress()
 
         contextvars.Context().run(execute, graph)
+        if (
+            signed_off
+            and start is None
+            and graph.get_state(thread_of(claim)).interrupts
+        ):
+            start = Command(resume=True)
+            contextvars.Context().run(execute, graph)
     except (ModelRateLimitError, ModelTimeoutError):
         raise
     except Exception as problem:  # a claim that fails must not stop the run
@@ -562,14 +575,17 @@ def settle(claim_id: str, error: str | None) -> str:
 
 def resume_input(graph: ClaimGraph, claim: dict[str, Any]) -> Start:
     """Resume a paused checkpoint or restart a thread with no saved first step."""
-    if paid_on_sign_off(claim):
-        return Command(resume=True)
     saved = graph.get_state(thread_of(claim))
-    if saved.next == (PAUSE,):
+    if saved.interrupts and paid_on_sign_off(claim):
         return Command(resume=True)
     if saved.created_at is None and claim["decision"] is None:
         return begin(claim["claim_id"])
     return None
+
+
+def paused(claim: dict[str, Any]) -> bool:
+    """Check for an actual pending interrupt on the existing claim thread."""
+    return bool(execution_graph().get_state(thread_of(claim)).interrupts)
 
 
 def paid_on_sign_off(claim: dict[str, Any]) -> bool:

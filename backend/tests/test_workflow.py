@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select, update
@@ -219,10 +220,13 @@ def test_limit_is_checked_before_looking_up_the_claim(client):
 
 
 def test_sign_off_pays_and_returns_the_one_persisted_payment(client, agent_answers):
-    def unreachable(request):
-        pytest.fail("Sign-off called the agent service")
+    def check_commit(request):
+        assert request.url.path == "/api/claims/CLM-1002/resume"
+        claim = client.get("/api/claims/CLM-1002").json()
+        assert claim["payment"]["amount"] == 1350
+        return httpx.Response(202, json={"status": "accepted"})
 
-    agent_answers(unreachable)
+    agent_answers(check_commit)
     start(client, "CLM-1002")
     decide(client, "CLM-1002", "approve", 1350)
     assert sign_off(client, "CLM-1002", "HND-99").status_code == 403
@@ -237,6 +241,28 @@ def test_sign_off_pays_and_returns_the_one_persisted_payment(client, agent_answe
     assert client.get("/api/claims/CLM-1002").json() == claim
     assert pay(client, "CLM-1002", 1350).status_code == 403
     assert sign_off(client, "CLM-1002", "HND-01").status_code == 409
+
+
+@pytest.mark.parametrize("failure", ["connection", "timeout", "refused", "malformed"])
+def test_sign_off_survives_a_failed_handoff(client, agent_answers, caplog, failure):
+    def fail(request):
+        if failure == "connection":
+            raise httpx.ConnectError("Connection failed", request=request)
+        if failure == "timeout":
+            raise httpx.ReadTimeout("Read timed out", request=request)
+        if failure == "malformed":
+            return httpx.Response(502, json=[])
+        return httpx.Response(409, json={"detail": "Claim has no pending interrupt"})
+
+    agent_answers(fail)
+    claim_id = "CLM-1002"
+    start(client, claim_id)
+    decide(client, claim_id, "approve", 1350)
+    signed = sign_off(client, claim_id, "HND-01")
+    assert signed.status_code == 200
+    assert signed.json() == client.get(f"/api/claims/{claim_id}").json()
+    assert signed.json()["payment"]["amount"] == 1350
+    assert f"Could not resume claim {claim_id} after review" in caplog.text
 
 
 def test_concurrent_sign_off_settles_once(client):

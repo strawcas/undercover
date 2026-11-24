@@ -63,10 +63,11 @@ def test_a_paid_sign_off_can_finish_the_saved_checkpoint(
     client, serve, agent_calls, traces, monkeypatch
 ):
     model = stub(*decide("approve", 1350.0))
-    graph = graph_on(model, InMemorySaver())
+    saver = InMemorySaver()
+    graph = graph_on(model, saver)
     harness.work_claim("CLM-1002", graph)
     signed = client.post("/api/claims/CLM-1002/sign-off", json={"handler_id": "HND-01"})
-    assert agent_calls == []
+    assert agent_calls == ["/api/claims/CLM-1002/resume"]
     assert signed.json()["payment"]["amount"] == 1350
 
     def unexpected_payment(*args):
@@ -74,7 +75,7 @@ def test_a_paid_sign_off_can_finish_the_saved_checkpoint(
 
     monkeypatch.setattr(harness.api, "pay_claim", unexpected_payment)
 
-    agent = serve(graph)
+    agent = serve(graph_on(stub(), saver))
     response = resume(agent, "CLM-1002")
     assert response.status_code == 202
     claim = claim_of(client, "CLM-1002")
@@ -90,7 +91,7 @@ def test_a_paid_sign_off_can_finish_the_saved_checkpoint(
         (session, "Carry on"),
     ]
 
-    assert resume(agent, "CLM-1002").status_code == 202
+    assert resume(agent, "CLM-1002").status_code == 409
     assert claim_of(client, "CLM-1002")["payment"] == claim["payment"]
 
 
@@ -141,3 +142,33 @@ def test_sign_off_is_queued_before_current_worker_releases(client, monkeypatch):
     task.func(*task.args, **task.kwargs)
     assert not harness.is_reserved("CLM-1002")
     assert client.get("/api/claims/CLM-1002").json()["payment"]["amount"] == 1350
+
+
+def test_resume_handoff_reaches_the_interrupt_after_the_claim_was_paid(
+    client, monkeypatch
+):
+    graph = graph_on(stub(*decide("approve", 1350)))
+    monkeypatch.setattr(
+        harness, "execution_graph", lambda version=None, **kwargs: graph
+    )
+    original = harness.interrupt
+
+    def stop_before_interrupt(value):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(harness, "interrupt", stop_before_interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        harness.work_claim("CLM-1002", graph)
+    claim = claim_of(client, "CLM-1002")
+    thread = harness.thread_of(claim)
+    assert graph.get_state(thread).next == (harness.PAUSE,)
+    assert not graph.get_state(thread).interrupts
+    client.post("/api/claims/CLM-1002/sign-off").raise_for_status()
+    assert harness.reserve_claim("CLM-1002")
+    background = BackgroundTasks()
+    service.resume_claim("CLM-1002", background)
+    monkeypatch.setattr(harness, "interrupt", original)
+    harness.release_claim("CLM-1002")
+    task = background.tasks[0]
+    task.func(*task.args, **task.kwargs)
+    assert graph.get_state(thread).next == ()

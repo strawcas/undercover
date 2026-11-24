@@ -245,7 +245,7 @@ def resume_claim(claim_id: str, background: BackgroundTasks) -> dict[str, str]:
         or not payment["signed_off_by"]
     ):
         raise HTTPException(409, f"Claim {claim_id} has no paid sign-off to resume")
-    if not queue_resume(claim_id):
+    if not queue_resume(claim):
         raise HTTPException(409, f"Claim {claim_id} is already being worked")
     background.add_task(resume_owned, claim)
     return {"status": "accepted"}

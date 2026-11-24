@@ -155,6 +155,41 @@ def test_stopped_on_the_way_into_the_pause_is_paid_after_the_sign_off(
     assert claim_of(client, "CLM-1002")["payment"]["signed_off_by"] == "Dana Whitfield"
 
 
+@pytest.mark.parametrize(
+    ("claim_id", "amount"), [("CLM-1001", 420), ("CLM-1002", 1350)]
+)
+def test_saved_memory_before_settlement_can_finish_with_the_new_graph(
+    client, monkeypatch, claim_id, amount
+):
+    def lose_worker(state, runtime):
+        raise KeyboardInterrupt
+
+    saver = InMemorySaver()
+    with monkeypatch.context() as previous:
+        previous.setattr(
+            harness,
+            "after_tools",
+            lambda state, runtime: (
+                harness.SAVE_MEMORY if state["decision"] else harness.AGENT
+            ),
+        )
+        previous.setattr(harness, "save_memory", lose_worker)
+        with pytest.raises(KeyboardInterrupt):
+            harness.work_claim(
+                claim_id, graph_on(stub(*decide("approve", amount)), saver)
+            )
+    claim = claim_of(client, claim_id)
+    graph = graph_on(stub(), saver)
+    assert graph.get_state(harness.thread_of(claim)).next == (harness.SAVE_MEMORY,)
+    harness.carry_on(claim, graph)
+    updated = claim_of(client, claim_id)
+    if claim_id == "CLM-1001":
+        assert updated["payment"]["amount"] == amount
+    else:
+        assert updated["payment"] is None
+        assert graph.get_state(harness.thread_of(updated)).interrupts
+
+
 @pytest.mark.parametrize("after_write", [False, True])
 def test_signed_off_decision_resumes_before_tool_checkpoint(
     client, monkeypatch, after_write

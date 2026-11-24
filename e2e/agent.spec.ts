@@ -60,9 +60,6 @@ test("the claim page shows the agent at work", async ({ page, request }) => {
       results: ["A previous baggage loss"],
     },
   });
-  await post(request, "/api/claims/CLM-1003/prepare-memory", {
-    thread_id: "e2e-1",
-  });
   await expect(heading.getByText("In progress")).toBeVisible();
   await expect(page.locator(".steps li").first()).toContainText(
     "Security check Passed. Ordinary submission.",
@@ -97,6 +94,11 @@ test("the claim page shows the agent at work", async ({ page, request }) => {
   await expect(
     decision.getByRole("table", { name: "Payout calculation" }),
   ).toContainText("Less the deductible");
+  await expect(heading.getByText("In progress")).toBeVisible();
+  await post(request, "/api/claims/CLM-1003/payment", { amount: 500 });
+  await post(request, "/api/claims/CLM-1003/prepare-memory", {
+    thread_id: "e2e-1",
+  });
   await post(request, "/api/claims/CLM-1003/finish-memory", {
     thread_id: "e2e-1",
     messages: [
@@ -107,8 +109,6 @@ test("the claim page shows the agent at work", async ({ page, request }) => {
   await expect(page.getByText("Saved to memory")).toBeVisible();
   await page.getByText("Agent decision", { exact: true }).click();
   await expect(page.getByText("Recorded approval contents")).toBeVisible();
-  await expect(heading.getByText("In progress")).toBeVisible();
-  await post(request, "/api/claims/CLM-1003/payment", { amount: 500 });
   await post(request, "/api/claims/CLM-1003/steps", {
     kind: "message",
     content: "Approved and paid $500.00.",
@@ -151,5 +151,5 @@ test("a sign-off on the dashboard records a payment and the signer", async ({
   await expect(
     page.getByText(/^Paid \$1,350\.00, signed off by Dana Whitfield, /),
   ).toBeVisible();
-  expect(await resumed(request)).not.toContain("CLM-1020");
+  expect(await resumed(request)).toContain("CLM-1020");
 });

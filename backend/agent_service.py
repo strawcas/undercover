@@ -1,5 +1,6 @@
 """Forward authenticated backend requests to the agent service."""
 
+import logging
 import os
 from http import HTTPStatus
 from typing import Any
@@ -14,6 +15,20 @@ from backend.models import Handler
 AGENT_URL = os.getenv("UNDERCOVER_AGENT", "http://127.0.0.1:8002")
 
 agent = httpx.Client(base_url=f"{AGENT_URL}/api", timeout=10)
+log = logging.getLogger(__name__)
+
+
+def _response_body(response: httpx.Response) -> dict[str, Any]:
+    """Read an agent reply without treating unrelated JSON as a valid reply."""
+    try:
+        body = response.json()
+    except ValueError as error:
+        raise HTTPException(
+            503, "The agent's service could not start the run"
+        ) from error
+    if not isinstance(body, dict):
+        raise HTTPException(503, "The agent's service could not start the run")
+    return body
 
 
 def _start(path: str, body: dict[str, Any]) -> dict[str, str]:
@@ -28,19 +43,30 @@ def _start(path: str, body: dict[str, Any]) -> dict[str, str]:
             raise HTTPException(
                 503, "The agent service rejected the backend credential"
             ) from error
-        if "application/json" not in error.response.headers.get("content-type", ""):
+        detail = _response_body(error.response).get("detail")
+        if detail is None:
             raise HTTPException(
                 503, "The agent's service could not start the run"
             ) from error
-        raise HTTPException(
-            error.response.status_code, error.response.json()["detail"]
-        ) from error
-    return response.json()
+        raise HTTPException(error.response.status_code, detail) from error
+    return _response_body(response)
 
 
 def start_dispatch(concurrency: int) -> dict[str, str]:
     """Ask the agent service to start a dispatch at the chosen concurrency."""
     return _start("/dispatches", {"concurrency": concurrency})
+
+
+def resume_claim(claim_id: str) -> None:
+    """Hand off a committed handler review without making it depend on the agent."""
+    try:
+        reply = _start(f"/claims/{claim_id}/resume", {})
+        if reply.get("status") != "accepted":
+            raise HTTPException(503, "The agent did not acknowledge the handoff")
+    except HTTPException as error:
+        log.warning(
+            "Could not resume claim %s after review: %s", claim_id, error.detail
+        )
 
 
 def start_evaluation(set_name: str, tiny: bool, concurrency: int) -> dict[str, str]:

@@ -78,15 +78,20 @@ def store(monkeypatch):
 def test_saves_two_events_once_across_a_partial_save_and_sign_off(client, store):
     saver = InMemorySaver()
     model = stub(calculate(1350), record("approve", 1350))
-    store.interrupt = True
-    with pytest.raises(KeyboardInterrupt):
-        harness.work_claim(CLAIM, graph_on(model, saver))
+    assert "waiting for sign-off" in harness.work_claim(CLAIM, graph_on(model, saver))
     claim = claim_of(client, CLAIM)
     assert claim["payment"] is None
+    assert not store.events
+    signed = client.post(f"/api/claims/{CLAIM}/sign-off").json()
+    memory.recover_pending()
+    assert not store.events
+    store.interrupt = True
+    with pytest.raises(KeyboardInterrupt):
+        harness.carry_on(signed, graph_on(stub(), saver))
     assert len(store.events) == 1
     store.interrupt = False
     graph = graph_on(stub(), saver)
-    assert "waiting for sign-off" in harness.carry_on(claim, graph)
+    assert "waiting for sign-off" not in harness.carry_on(signed, graph)
     assert len(store.events) == 2
     assert store.writes[0] == store.writes[1]
     assert {actor for actor, _ in store.events} == {(CUSTOMER, CLAIM)}
@@ -110,8 +115,6 @@ def test_saves_two_events_once_across_a_partial_save_and_sign_off(client, store)
             "reason",
         )
     }
-    signed = client.post(f"/api/claims/{CLAIM}/sign-off").json()
-    harness.carry_on(signed, graph)
     assert len(store.writes) == 3
     [saved] = [
         step for step in steps_of(client, CLAIM) if step["kind"] == "memory_save"
@@ -139,7 +142,7 @@ def test_search_skips_this_claim_and_any_other_customer(client, store):
 
 
 def test_confirmed_partial_memory_save_is_visible_until_recovery(client, store):
-    model = stub(calculate(1350), record("approve", 1350))
+    model = stub(calculate(420), record("approve", 420))
     store.fail_agent = True
     harness.work_claim(CLAIM, graph_on(model))
     assert api.list_pending_memory() == [CLAIM]
@@ -171,7 +174,7 @@ def test_confirmed_partial_memory_save_is_visible_until_recovery(client, store):
     assert len(store.writes) == write_count
 
 
-@pytest.mark.parametrize(("decision", "payout"), [("decline", 0), ("approve", 1350)])
+@pytest.mark.parametrize(("decision", "payout"), [("decline", 0), ("approve", 420)])
 def test_next_dispatch_recovers_memory_for_a_settled_claim(
     client, store, decision, payout
 ):
@@ -183,8 +186,6 @@ def test_next_dispatch_recovers_memory_for_a_settled_claim(
         harness.work_claim(CLAIM, graph_on(model))
     assert api.list_pending_memory() == [CLAIM]
     assert len(store.events) == 1
-    if payout:
-        client.post(f"/api/claims/{CLAIM}/sign-off").raise_for_status()
     assert claim_of(client, CLAIM)["status"] == "decided"
     store.interrupt = False
 

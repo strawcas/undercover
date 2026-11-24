@@ -1,5 +1,11 @@
 # Status
 
+Held originals pause on their claim thread. A senior sign-off commits the payment before asking the agent to resume that thread. The resumed graph saves the settled claim to customer memory when memory is enabled. Evaluation copies finish without pausing.
+
+If the agent never resumes a paid sign-off, the payment and handler attribution stand and the claim may still be missing from memory. Recovery retries memory writes that have already started.
+
+The Runtime phase 1 review corrected older checkpoints that had reached memory before payment and malformed agent replies after sign-off. The isolated imports, 396 Python tests and 122 dashboard tests passed. All 11 Playwright tests passed after updating the stand-in's payment and memory sequence.
+
 The AgentCore Gateway contract now requires a string `thread_id` for `calculate_payout`. Direct payout previews accept `null`, and approvals still require a calculation for the current attempt. To apply the fix on AWS, deploy the updated app, fetch its new `/api/agent/openapi.json`, and update the existing `undercover-app` target with that schema.
 
 Context phase 5 gives tool calls, sourced lookups, memory searches and confirmed memory saves structured timeline entries. Refusals identify their source and show readable section 14 errors. Every timeline write carries the attempt ID checked under the claim lock; only the private memory receipt route can report provider-confirmed events. Partial saves are visible and replay-safe. The claim page groups sources under Context used and shows the maker, timestamp, manual version and calculation lines. At 390px the page has no horizontal document overflow; the stand-in passed light/dark Playwright MCP inspection with no console errors after a clean load. A narrow-screen regression accompanies that navigation adjustment.

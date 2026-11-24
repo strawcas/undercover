@@ -43,6 +43,9 @@ def verified_email(credentials: Credentials) -> str:
     return str(payload["email"])
 
 
+VerifiedEmail = Annotated[str, Depends(verified_email)]
+
+
 def handler_for_email(email: str, db: Connection) -> Handler:
     """Look up the handler identified by a verified token."""
     row = (
@@ -53,9 +56,7 @@ def handler_for_email(email: str, db: Connection) -> Handler:
     return Handler(**row)
 
 
-def current_handler(
-    email: Annotated[str, Depends(verified_email)], db: Database
-) -> Handler:
+def current_handler(email: VerifiedEmail, db: Database) -> Handler:
     """Resolve a verified access token to a seeded handler."""
     return handler_for_email(email, db)
 
@@ -88,7 +89,7 @@ def agent_or_handler(
         handler_for_email(email, db)
 
 
-def senior_handler(handler: CurrentHandler) -> Handler:
+def require_senior(handler: Handler) -> Handler:
     """Require authority to sign off payouts over the limit."""
     if not handler.can_approve_over_limit:
         raise HTTPException(
@@ -96,6 +97,11 @@ def senior_handler(handler: CurrentHandler) -> Handler:
             f"{handler.name} cannot perform this action. A senior handler is required",
         )
     return handler
+
+
+def senior_handler(handler: CurrentHandler) -> Handler:
+    """Resolve a handler with senior permissions for the current transaction."""
+    return require_senior(handler)
 
 
 SeniorHandler = Annotated[Handler, Depends(senior_handler)]

@@ -194,8 +194,6 @@ def record_decision(
 ) -> Command:
     """Record the decision on your claim, once, which ends your work on it."""
     context = runtime.context
-    if runtime.store is not None:
-        api.prepare_memory(context.claim_id, context.thread_id)
     claim = api.record_decision(
         context.claim_id,
         {

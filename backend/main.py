@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException
 from mangum import Mangum
-from sqlalchemy import Connection, RowMapping, insert, select, update
+from sqlalchemy import Connection, RowMapping, insert, or_, select, update
 
 from backend import (
     agent_service,
@@ -19,7 +19,15 @@ from backend import (
 from backend import runs as run_records
 from backend import settings as platform_settings
 from backend.agent_contract import agent_contract
-from backend.auth import CurrentHandler, SeniorHandler, agent_or_handler, require_agent
+from backend.auth import (
+    CurrentHandler,
+    SeniorHandler,
+    VerifiedEmail,
+    agent_or_handler,
+    handler_for_email,
+    require_agent,
+    require_senior,
+)
 from backend.clock import now
 from backend.configuration_models import ClaimConfiguration, ConfigurationHistory
 from backend.dashboard import install_dashboard
@@ -389,7 +397,13 @@ def list_pending_memory(db: Database) -> list[str]:
     query = (
         select(claims.c.claim_id)
         .join(decisions, decisions.c.claim_id == claims.c.claim_id)
-        .where(claims.c.memory_pending.is_(True), claims.c.evaluation_id.is_(None))
+        .outerjoin(payments, payments.c.claim_id == claims.c.claim_id)
+        .where(
+            claims.c.memory_pending.is_(True),
+            claims.c.evaluation_id.is_(None),
+            claims.c.status == "decided",
+            or_(decisions.c.decision != "approve", payments.c.paid_at.is_not(None)),
+        )
         .order_by(decisions.c.decided_at, claims.c.claim_id)
     )
     return list(db.execute(query).scalars())
@@ -405,14 +419,13 @@ def prepare_memory(
 ) -> dict[str, str]:
     """Mark an original attempt to save memory after recording its decision."""
     claim = original_for_memory(db, claim_id, request.thread_id)
-    if claim["decision"] is None:
-        if claim["status"] != "in_progress":
-            raise HTTPException(409, "The claim is not in progress")
-        db.execute(
-            update(claims)
-            .where(claims.c.claim_id == claim_id)
-            .values(memory_pending=True)
-        )
+    if claim["status"] != "decided" or (
+        claim["decision"] == "approve" and claim["paid_at"] is None
+    ):
+        raise HTTPException(409, "The claim has no settled decision")
+    db.execute(
+        update(claims).where(claims.c.claim_id == claim_id).values(memory_pending=True)
+    )
     return {"status": "ready"}
 
 
@@ -639,13 +652,25 @@ def settle_payment(db: Connection, claim_id: str, amount: float, paid_at: str) -
 
 
 @app.post("/api/claims/{claim_id}/sign-off", operation_id="sign_off_claim")
-def sign_off_claim(claim_id: str, handler: SeniorHandler, db: Database) -> Claim:
+def sign_off_claim(claim_id: str, email: VerifiedEmail) -> Claim:
     """Record the senior handler's sign-off and pay the approved payout."""
+    with engine().begin() as db:
+        handler = require_senior(handler_for_email(email, db))
+        signed = sign_off_payment(db, claim_id, handler)
+    agent_service.resume_claim(claim_id)
+    return signed
+
+
+def sign_off_payment(db: Connection, claim_id: str, handler: Handler) -> Claim:
+    """Settle the locked approval in the handler's transaction."""
     claim = find_claim(db, claim_id, lock=True)
     if claim["evaluation_id"] is not None:
         raise HTTPException(409, "Evaluation claims cannot be signed off")
     if not can_settle_sign_off(claim, platform_settings.approval_limit(db, lock=True)):
         raise HTTPException(409, f"Claim {claim_id} is not waiting for sign-off")
+    db.execute(
+        update(claims).where(claims.c.claim_id == claim_id).values(memory_pending=False)
+    )
     paid_at = now()
     if claim["signed_off_by"] is None:
         db.execute(
@@ -657,24 +682,30 @@ def sign_off_claim(claim_id: str, handler: SeniorHandler, db: Database) -> Claim
 
 
 @app.post(
-    "/api/claims/{claim_id}/hold-evaluation-payment",
-    operation_id="hold_evaluation_payment",
+    "/api/claims/{claim_id}/hold-limit-payment",
+    operation_id="hold_limit_payment",
     dependencies=agent_only,
 )
-def hold_evaluation_payment(claim_id: str, db: Database) -> Claim:
-    """Retain a held result when the agent's payment for an evaluation was refused."""
+def hold_limit_payment(claim_id: str, db: Database) -> Claim:
+    """Hold an unpaid approval refused under the current approval limit."""
     run_id = find_claim(db, claim_id)["evaluation_id"]
-    if run_id is None:
-        raise HTTPException(409, "Only an unpaid evaluation approval can be held")
-    run_records.validate_run(db, run_id)
+    if run_id is not None:
+        run_records.validate_run(db, run_id)
     claim = find_claim(db, claim_id, lock=True)
+    if claim["paid_at"] is not None and claim["signed_off_by"] is not None:
+        return to_claim(claim)
     if (
         claim["decision"] != "approve"
         or claim["paid_at"] is not None
         or claim["status"] not in {"in_progress", "waiting_for_sign_off"}
     ):
-        raise HTTPException(409, "Only an unpaid evaluation approval can be held")
+        raise HTTPException(409, "Only an unpaid approval can be held")
     if claim["status"] == "in_progress":
+        limit = platform_settings.approval_limit(db, lock=True)
+        if run_id is None and not needs_sign_off(
+            claim["payout"], min(limit, claim["approval_limit"])
+        ):
+            raise HTTPException(409, "This payout does not need sign-off")
         set_status(db, claim_id, "waiting_for_sign_off")
     return to_claim(find_claim(db, claim_id))
 
