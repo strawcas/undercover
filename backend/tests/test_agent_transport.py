@@ -34,7 +34,10 @@ def test_uncertain_laptop_invocations_ask_the_handler_to_reload(
     assert len(calls) == 1
 
 
-def test_runtime_receives_fresh_session_ids_and_one_attempt(monkeypatch):
+@pytest.mark.parametrize("runtime_user_id", [None, "test-lambda-role"])
+def test_runtime_receives_fresh_sessions_and_optional_user_id(
+    monkeypatch, runtime_user_id
+):
     requested, returned = [], []
 
     class Runtime:
@@ -53,6 +56,8 @@ def test_runtime_receives_fresh_session_ids_and_one_attempt(monkeypatch):
     agent_service.runtime_client.cache_clear()
     monkeypatch.setattr(agent_service.boto3, "client", create)
     monkeypatch.setenv("UNDERCOVER_AGENT_RUNTIME", "test-runtime")
+    if runtime_user_id is not None:
+        monkeypatch.setenv(agent_service.RUNTIME_USER_ID_ENV, runtime_user_id)
     try:
         for _ in range(2):
             assert agent_service.invoke("resume_claim", claim_id="CLM-1001") == {
@@ -67,6 +72,10 @@ def test_runtime_receives_fresh_session_ids_and_one_attempt(monkeypatch):
     assert all(len(session) >= 33 for session in sessions)
     for call in requested:
         assert call["agentRuntimeArn"] == "test-runtime"
+        if runtime_user_id is None:
+            assert "runtimeUserId" not in call
+        else:
+            assert call["runtimeUserId"] == runtime_user_id
         assert json.loads(call["payload"]) == {
             "operation": "resume_claim",
             "claim_id": "CLM-1001",

@@ -26,6 +26,7 @@ def database(tmp_path, monkeypatch):
     monkeypatch.delenv(LAMBDA_MARKER, raising=False)
     monkeypatch.delenv("MODEL_NAME", raising=False)
     monkeypatch.delenv("UNDERCOVER_AGENT_RUNTIME", raising=False)
+    monkeypatch.delenv(agent_service.RUNTIME_USER_ID_ENV, raising=False)
     monkeypatch.setenv(agent_key.ENV_NAME, TEST_AGENT_KEY)
     monkeypatch.setenv("UNDERCOVER_DB", str(path))
     seed(engine())

@@ -8,6 +8,8 @@ The Phase 4 and whole-branch reviews added atomic SQLite run guards, enforced th
 
 ### Runtime live verification
 
+The AWS lab uses an explicit invocation identity for credential delivery. The notebook health check sends the notebook's IAM user ID. The notebook also redeploys the Lambda backend with `UNDERCOVER_AGENT_RUNTIME_USER_ID` set to the Lambda role ID and grants `InvokeAgentRuntimeForUser` on the UnderCover runtime. The backend sends `runtimeUserId` when that setting is present. The notebook health check passed with the user ID. The Lambda invocation is pending live verification through the lab's tiny evaluation.
+
 Dana's browser dispatch `3465bc48-9f22-4cf1-a790-c3bed96cbfb8` recorded N=25 and rejected a second start with HTTP 409. It selected all 26 original claims and finished in 56.0 seconds. It recorded 17 approvals, four declines and four referrals, with CLM-1024 left for a handler. Dana returned CLM-1008 with a policy-specific note. The browser showed its previous and replacement $2,240 approvals, the note in the timeline, and Dana's name and time. Dana signed off CLM-1003, leaving a completed checkpoint and one attributed $3,750 payment.
 
 The Scoreboard evaluation `061ce674-6faa-48d0-b9b1-e0f0c92f8aaf` finished five copies in 20.5 seconds at N=5. The 26 original records matched their snapshot after evaluation. Both runs used the default Luna model at low effort, local context and disabled memory. Recorded spend was $0.035261855 for dispatch, $0.005812310 for evaluation claim work, $0.000150276 for judging and $0.001671550 for the send-back resume. The total was $0.042895991.

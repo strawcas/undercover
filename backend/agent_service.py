@@ -27,6 +27,7 @@ DEFAULT_AGENT = "http://127.0.0.1:8080"
 INVOCATIONS = "/invocations"
 UNAVAILABLE = "The agent's service is unavailable"
 UNCERTAIN = "The agent may have started this work. Reload to see what happened."
+RUNTIME_USER_ID_ENV = "UNDERCOVER_AGENT_RUNTIME_USER_ID"
 RUNTIME_LIMITS = Config(
     retries={"total_max_attempts": 1}, connect_timeout=5, read_timeout=20
 )
@@ -79,6 +80,8 @@ def runtime_reply(arn: str, payload: dict[str, Any]) -> bytes:
         client = runtime_client()
     except (BotoCoreError, ClientError) as error:
         raise InvocationError(UNAVAILABLE) from error
+    runtime_user_id = os.getenv(RUNTIME_USER_ID_ENV)
+    runtime_options = {"runtimeUserId": runtime_user_id} if runtime_user_id else {}
     try:
         response = client.invoke_agent_runtime(
             agentRuntimeArn=arn,
@@ -86,6 +89,7 @@ def runtime_reply(arn: str, payload: dict[str, Any]) -> bytes:
             accept="application/json",
             runtimeSessionId=str(uuid.uuid4()),
             payload=json.dumps(payload).encode(),
+            **runtime_options,
         )
     except (ConnectionError, NoCredentialsError, ParamValidationError) as error:
         raise InvocationError(UNAVAILABLE) from error
