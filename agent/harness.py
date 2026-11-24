@@ -196,13 +196,18 @@ def work_returned(
         with heartbeat(partial(api.review_heartbeat, claim_id, owner, working=True)):
             return execute_attempts(claim, run_id, version)
     finally:
-        try:
-            api.review_heartbeat(claim_id, owner, working=False)
-        except Refused as error:
-            if error.status_code != HTTPStatus.CONFLICT:
-                log.warning("%s could not release review work: %s", claim_id, error)
-        except httpx.RequestError as error:
+        release_review(claim_id, owner)
+
+
+def release_review(claim_id: str, owner: str) -> None:
+    """Release the current worker's lease without masking the original result."""
+    try:
+        api.review_heartbeat(claim_id, owner, working=False)
+    except Refused as error:
+        if error.status_code != HTTPStatus.CONFLICT:
             log.warning("%s could not release review work: %s", claim_id, error)
+    except httpx.RequestError as error:
+        log.warning("%s could not release review work: %s", claim_id, error)
 
 
 def execute_claim(claim_id: str, run_id: str, version: int) -> str:

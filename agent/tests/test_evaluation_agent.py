@@ -1,16 +1,15 @@
 """Evaluations use the normal claim agent and delete every copy checkpoint."""
 
 import json
-from contextlib import nullcontext
 
 import pytest
-from fastapi import BackgroundTasks, HTTPException
-from fastapi.testclient import TestClient
+from fastapi import BackgroundTasks
 from langchain_core.exceptions import ModelTimeoutError
 from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy import update
 
 from agent import api, checkpoints, dispatcher, harness, service
+from agent.backend_client import Refused
 from agent.tests.records import latest
 from agent.tests.stubs import (
     calculate_for_claim,
@@ -107,7 +106,7 @@ def test_same_admission_slot_covers_both_kinds_before_background_creation(client
         background,
     )
     try:
-        with pytest.raises(HTTPException) as busy:
+        with pytest.raises(Refused) as busy:
             service.start_dispatch(
                 service.DispatchRequest(concurrency=25), BackgroundTasks()
             )
@@ -198,11 +197,9 @@ def test_startup_cleans_stopped_evaluation_threads_but_preserves_records(monkeyp
     )
     before = api.get_claim(claim_id)
     assert saver.get_tuple(harness.thread_of(before)) is not None
-    monkeypatch.setattr(service, "checkpointer", lambda: nullcontext(None))
     monkeypatch.setattr(checkpoints.state, "pool", object())
     monkeypatch.setattr(checkpoints, "PostgresSaver", lambda pool: saver)
-    with TestClient(service.app) as agent:
-        assert agent.get("/api/health").status_code == 200
+    service.recover()
     assert api.get_run(run["run_id"])["status"] == "stopped"
 
     assert api.get_claim(claim_id) == before

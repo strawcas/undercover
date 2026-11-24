@@ -61,10 +61,12 @@ Require the Gateway configuration on Runtime. Send model app tools, context call
 
 Set `prepare_threshold=None` in the shared checkpoint pool. Add `bedrock-agentcore`, a minimal locked `runtime` group and `boto3` in the `server` group. Resolve cross-package imports at the wire and configuration boundaries so the staged agent runs independently and the Lambda app and context packages keep their existing layout. Verify that the agent's tool input schemas and screening defaults still match the services and the configured model override. Add `runtime/` to Ruff and Pyright. Add an isolated, locked, offline import of `runtime.main` to `npm run check`, with a staged-package check that cannot pick up `backend/` or `context/` from the checkout. Move the Playwright stand-in to `/invocations` and readiness to `/ping`. Clear inherited Runtime settings in automated tests.
 
-- [ ] Starlette `TestClient` proves import and startup open no pool or AWS client, initialization fetches the three credentials once per process, and a failed first request can be retried. Test missing and wrong inputs, every operation's success or refusal, and healthy, busy, and healthy again on both success and worker failure.
-- [ ] Tests prove missing and wrong laptop keys return 401, laptop health needs no key, and Runtime work uses AWS authorization without a bearer key. Runtime uses signed Gateway tools and uses its role for configured Memory calls.
-- [ ] Both transport stand-ins check payloads, local bearer authentication or AWS session ID and timeouts, acceptance, refusal, connection failure, explicit error, and timeouts or truncated replies after sending. Confirm one attempt and the ambiguity classification.
-- [ ] Agent pool tests assert prepared statements are disabled. The staged and isolated Runtime imports pass alongside server and context imports in `npm run check`. `npm run build` passes on Windows.
+- [x] Starlette `TestClient` proves import and startup open no pool or AWS client, initialization fetches the three credentials once per process, and a failed first request can be retried. Test missing and wrong inputs, every operation's success or refusal, and healthy, busy, and healthy again on both success and worker failure.
+- [x] Tests prove missing and wrong laptop keys return 401, laptop health needs no key, and Runtime work uses AWS authorization without a bearer key. Runtime uses signed Gateway tools and uses its role for configured Memory calls.
+- [x] Both transport stand-ins check payloads, local bearer authentication or AWS session ID and timeouts, acceptance, refusal, connection failure, explicit error, and timeouts or truncated replies after sending. Confirm one attempt and the ambiguity classification.
+- [x] Agent pool tests assert prepared statements are disabled. The staged and isolated Runtime imports pass alongside server and context imports in `npm run check`. `npm run build` passes on Windows.
+
+The review fixed worker startup cleanup, pending memory replay after initialization and definite pre-send error handling. The Identity test uses the SDK's workload access token header. Delivery of that header by the hosted IAM invocation still needs an AWS smoke check during the deployment lab.
 
 ## Phase 4 — Coordinate work in the backend
 

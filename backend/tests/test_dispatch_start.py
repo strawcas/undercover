@@ -12,17 +12,18 @@ def test_dispatch_forwarding(client, agent_answers, n):
 
     def accept(request):
         requests.append((request.url.path, json.loads(request.content)))
-        return httpx.Response(202, json={"status": "accepted"})
+        assert request.headers["Authorization"] == "Bearer offline-test-agent-key"
+        return httpx.Response(200, json={"accepted": True})
 
     agent_answers(accept)
     assert client.post("/api/dispatches", json={"concurrency": n}).status_code == 202
-    assert requests == [("/api/dispatches", {"concurrency": n})]
+    assert requests == [("/invocations", {"operation": "start_dispatch", "agents": n})]
     assert client.get("/api/runs/latest").json() is None
 
 
 def test_busy_and_unavailable_create_nothing(client, agent_answers):
     agent_answers(
-        lambda request: httpx.Response(409, json={"detail": "Already running"})
+        lambda request: httpx.Response(200, json={"refused": "Already running"})
     )
     assert client.post("/api/dispatches", json={"concurrency": 3}).status_code == 409
 
@@ -48,10 +49,20 @@ def test_evaluation_forwarding_is_state_free(client, agent_answers):
 
     def accept(request):
         calls.append((request.url.path, json.loads(request.content)))
-        return httpx.Response(202, json={"status": "accepted"})
+        return httpx.Response(200, json={"accepted": True})
 
     agent_answers(accept)
     body = {"set_name": "held_out", "tiny": True, "concurrency": 5}
     assert client.post("/api/evaluations", json=body).status_code == 202
-    assert calls == [("/api/evaluations", body)]
+    assert calls == [
+        (
+            "/invocations",
+            {
+                "operation": "start_evaluation",
+                "set_name": "held_out",
+                "tiny": True,
+                "agents": 5,
+            },
+        )
+    ]
     assert client.get("/api/evaluations").json() == []

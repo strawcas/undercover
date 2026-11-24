@@ -65,7 +65,7 @@ def test_return_keeps_the_complete_approval_and_adds_a_timeline_step(
     assert timeline[-1]["content"] == {
         key: review[key] for key in ("handler", "note", "reviewed_at")
     }
-    assert agent_calls == [f"/api/claims/{CLAIM}/resume"]
+    assert agent_calls == [{"operation": "resume_claim", "claim_id": CLAIM}]
     assert send_back(client).status_code == 409
 
 

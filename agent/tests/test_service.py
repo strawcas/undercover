@@ -1,42 +1,81 @@
 import pytest
-from fastapi import BackgroundTasks, HTTPException
-from fastapi.testclient import TestClient
+from fastapi import BackgroundTasks
 from langgraph.checkpoint.memory import InMemorySaver
 
 from agent import harness, improver_api, service
+from agent.backend_client import Refused
 from agent.tests.records import claim_of, steps_of
+from agent.tests.runtime_support import invoke, runtime_client, wait_for_idle
 from agent.tests.stubs import decide, graph_on, stub
-from api_rules import rule_breaks
-from backend import agent_key
-from backend.tests.auth_support import AGENT_HEADERS
 
 
 @pytest.fixture
-def serve(monkeypatch):
+def serve(monkeypatch, runtime_defaults):
     """Run the agent's service, without its lifespan, on a given claim graph."""
 
     def with_graph(graph):
         monkeypatch.setattr(
             harness, "execution_graph", lambda version=None, **options: graph
         )
-        return TestClient(service.app, headers=AGENT_HEADERS)
+        return runtime_client()
 
     return with_graph
 
 
 def resume(agent, claim_id):
-    return agent.post(f"/api/claims/{claim_id}/resume")
+    response = invoke(agent, "resume_claim", claim_id=claim_id)
+    wait_for_idle(agent)
+    return response
 
 
-def test_the_service_follows_the_api_rules():
-    assert rule_breaks(service.app.openapi()) == []
-
-
+@pytest.mark.usefixtures("runtime_defaults")
 def test_health():
-    assert TestClient(service.app).get("/api/health").json() == {"status": "ok"}
+    assert invoke(runtime_client({}), "health").json() == {"healthy": True}
 
 
-@pytest.mark.parametrize("headers", [{}, {agent_key.HEADER: "wrong"}])
+@pytest.mark.parametrize(
+    ("operation", "inputs"),
+    [
+        ("start_dispatch", {"agents": 25}),
+        ("start_evaluation", {"agents": 5, "set_name": "evaluation", "tiny": True}),
+        ("start_round", {}),
+        ("stop_round", {"round_id": "round"}),
+        (
+            "decide_proposal",
+            {
+                "round_id": "round",
+                "proposal_id": "p",
+                "decision": "reject",
+                "reason": "Check the clause",
+            },
+        ),
+        ("resume_claim", {"claim_id": "CLM-1001"}),
+    ],
+)
+@pytest.mark.usefixtures("runtime_defaults")
+def test_invocation_accepts_and_passes_on_refusal(
+    client, monkeypatch, operation, inputs
+):
+    if operation in {"start_round", "stop_round", "decide_proposal"}:
+        inputs = inputs | {"handler": client.get("/api/me").json()}
+    reply = {"status": "accepted"}
+    expected: dict[str, bool | str] = {"accepted": True}
+    if operation == "start_round":
+        reply["round_id"] = expected["round_id"] = "round"
+    monkeypatch.setattr(service, operation, lambda *args: reply)
+    agent = runtime_client()
+    assert invoke(agent, operation, **inputs).json() == expected
+
+    def refuse(*args):
+        raise Refused(409, "The work is unavailable")
+
+    monkeypatch.setattr(service, operation, refuse)
+    assert invoke(agent, operation, **inputs).json() == {
+        "refused": "The work is unavailable"
+    }
+
+
+@pytest.mark.parametrize("headers", [{}, {"Authorization": "Bearer wrong"}])
 def test_round_writes_refuse_direct_unauthenticated_service_calls(
     client, monkeypatch, headers
 ):
@@ -47,13 +86,20 @@ def test_round_writes_refuse_direct_unauthenticated_service_calls(
     monkeypatch.setattr(improver_api, "finish", unexpected)
     monkeypatch.setattr(improver_api, "decide", unexpected)
     handler = client.get("/api/me").json()
-    routes = TestClient(service.app, headers=headers)
-    assert routes.post("/api/rounds", json=handler).status_code == 401
-    assert routes.post("/api/rounds/1/stop", json=handler).status_code == 401
+    routes = runtime_client(headers)
+    assert invoke(routes, "start_round", handler=handler).status_code == 401
     assert (
-        routes.post(
-            "/api/rounds/1/proposals/1/decision",
-            json={"handler": handler, "decision": "approve", "reason": None},
+        invoke(routes, "stop_round", round_id="1", handler=handler).status_code == 401
+    )
+    assert (
+        invoke(
+            routes,
+            "decide_proposal",
+            handler=handler,
+            round_id="1",
+            proposal_id="1",
+            decision="approve",
+            reason=None,
         ).status_code
         == 401
     )
@@ -67,7 +113,7 @@ def test_a_paid_sign_off_can_finish_the_saved_checkpoint(
     graph = graph_on(model, saver)
     harness.work_claim("CLM-1002", graph)
     signed = client.post("/api/claims/CLM-1002/sign-off", json={"handler_id": "HND-01"})
-    assert agent_calls == ["/api/claims/CLM-1002/resume"]
+    assert agent_calls == [{"operation": "resume_claim", "claim_id": "CLM-1002"}]
     assert signed.json()["payment"]["amount"] == 1350
 
     def unexpected_payment(*args):
@@ -77,7 +123,7 @@ def test_a_paid_sign_off_can_finish_the_saved_checkpoint(
 
     agent = serve(graph_on(stub(), saver))
     response = resume(agent, "CLM-1002")
-    assert response.status_code == 202
+    assert response.json() == {"accepted": True}
     claim = claim_of(client, "CLM-1002")
     assert claim["status"] == "decided"
     assert claim["payment"]["amount"] == 1350.0
@@ -91,7 +137,7 @@ def test_a_paid_sign_off_can_finish_the_saved_checkpoint(
         (session, "Carry on"),
     ]
 
-    assert resume(agent, "CLM-1002").status_code == 409
+    assert "refused" in resume(agent, "CLM-1002").json()
     assert claim_of(client, "CLM-1002")["payment"] == claim["payment"]
 
 
@@ -100,8 +146,8 @@ def test_a_claim_waiting_for_sign_off_is_not_picked_up(client, serve):
     harness.work_claim("CLM-1002", graph)
     before = steps_of(client, "CLM-1002")
     response = resume(serve(graph), "CLM-1002")
-    assert response.status_code == 409
-    assert response.json()["detail"] == (
+    assert response.status_code == 200
+    assert response.json()["refused"] == (
         "Claim CLM-1002 has no paid sign-off to resume"
     )
     assert claim_of(client, "CLM-1002")["status"] == "waiting_for_sign_off"
@@ -111,7 +157,7 @@ def test_a_claim_waiting_for_sign_off_is_not_picked_up(client, serve):
 def test_a_claim_in_progress_without_a_sign_off_is_left_to_its_agent(client, serve):
     client.post("/api/claims/CLM-1001/start", json={"thread_id": "working"})
     response = resume(serve(graph_on(stub())), "CLM-1001")
-    assert response.status_code == 409
+    assert "refused" in response.json()
     claim = claim_of(client, "CLM-1001")
     assert (claim["status"], claim["attempts"]) == ("in_progress", 1)
     assert steps_of(client, "CLM-1001") == []
@@ -120,7 +166,7 @@ def test_a_claim_in_progress_without_a_sign_off_is_left_to_its_agent(client, ser
 def test_an_unknown_claim(serve):
     response = resume(serve(graph_on(stub())), "CLM-9999")
     assert response.status_code == 404
-    assert response.json()["detail"] == "Claim CLM-9999 not found"
+    assert response.json()["error"] == "Claim CLM-9999 not found"
 
 
 def test_sign_off_is_queued_before_current_worker_releases(client, monkeypatch):
@@ -133,7 +179,7 @@ def test_sign_off_is_queued_before_current_worker_releases(client, monkeypatch):
     assert harness.reserve_claim("CLM-1002")
     background = BackgroundTasks()
     assert service.resume_claim("CLM-1002", background) == {"status": "accepted"}
-    with pytest.raises(HTTPException) as duplicate:
+    with pytest.raises(Refused) as duplicate:
         service.resume_claim("CLM-1002", BackgroundTasks())
     assert duplicate.value.status_code == 409
     harness.release_claim("CLM-1002")

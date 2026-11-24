@@ -1,5 +1,9 @@
 # Status
 
+The agent runs as an AgentCore HTTP app. On a laptop it listens on `127.0.0.1:8080` with bearer authentication for work and an open health invocation. The backend can send the same payload to the ARN in `UNDERCOVER_AGENT_RUNTIME`. On Runtime, the first invocation fetches three Identity credentials and opens the four-connection checkpoint pool with prepared statements disabled. `/ping` reports accepted jobs as busy until their workers finish.
+
+The locked `runtime` group and a package staged with just `runtime/` and `agent/` both imported in isolation. The production build passed on Windows. The offline checks passed with 433 Python tests, 123 dashboard tests and 12 Playwright tests. The review fixed worker startup cleanup, restored pending memory replay after the first request, and distinguished pre-send failures from incomplete replies. The real AWS workload token handoff remains for the deployment lab.
+
 Senior handlers can send a held approval back for a new decision. The claim page shows the original decision, note, reviewer and time, and keeps the note in the timeline. The agent reuses the claim thread and has a fresh model-call allowance. A dispatch picks up a missed handoff or a review worker that has gone five minutes without a heartbeat.
 
 The Runtime phase 2 review added fresh claim reads after locking, scoped the saved run outcome to its own claim work, and fenced stale writes and tool calls. The Gateway still has six operations. Existing deployments must create the additive Runtime tables and refresh the app target schema when they take the Runtime build.

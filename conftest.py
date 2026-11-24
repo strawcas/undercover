@@ -1,5 +1,7 @@
 """Fixtures for the backend's and the agent's tests."""
 
+import json
+
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -23,6 +25,7 @@ def database(tmp_path, monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv(LAMBDA_MARKER, raising=False)
     monkeypatch.delenv("MODEL_NAME", raising=False)
+    monkeypatch.delenv("UNDERCOVER_AGENT_RUNTIME", raising=False)
     monkeypatch.setenv(agent_key.ENV_NAME, TEST_AGENT_KEY)
     monkeypatch.setenv("UNDERCOVER_DB", str(path))
     seed(engine())
@@ -46,12 +49,12 @@ def agent_answers(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def agent_calls(agent_answers):
-    """Stand in for the agent's service, keeping the path of each call to it."""
-    calls: list[str] = []
+    """Stand in for AgentCore and keep the payload of each invocation."""
+    calls: list[dict] = []
 
     def accept(request: httpx.Request) -> httpx.Response:
-        calls.append(request.url.path)
-        return httpx.Response(202, json={"status": "accepted"})
+        calls.append(json.loads(request.content))
+        return httpx.Response(200, json={"accepted": True, "round_id": "stand-in"})
 
     agent_answers(accept)
     return calls

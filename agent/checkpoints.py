@@ -41,7 +41,7 @@ def checkpointer() -> Iterator[PostgresSaver]:
     """Keep at most four connections open in the agent's private schema."""
     options = {
         "autocommit": True,
-        "prepare_threshold": 0,
+        "prepare_threshold": None,
         "row_factory": dict_row,
         "options": f"-c search_path={SCHEMA}",
         "application_name": f"undercover-agent-{os.getpid()}",

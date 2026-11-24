@@ -5,7 +5,7 @@ from contextvars import ContextVar
 from threading import Event
 
 import pytest
-from fastapi import BackgroundTasks, HTTPException
+from fastapi import BackgroundTasks
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
@@ -182,7 +182,7 @@ def test_busy_decision_writes_nothing_and_pause_frees_slot(client, monkeypatch):
     background = BackgroundTasks()
     service.start_dispatch(service.DispatchRequest(concurrency=1), background)
     try:
-        with pytest.raises(HTTPException, match="dispatch") as busy:
+        with pytest.raises(Refused, match="dispatch") as busy:
             service.decide_proposal(
                 current["round_id"],
                 pending["proposal_id"],
@@ -328,7 +328,7 @@ def test_stop_or_limit_refuses_new_claims_and_holds_slot_until_drain(
             with pytest.raises(Refused):
                 api.start_claim(second, "must-not-start")
             assert service.run_slot.locked()
-            with pytest.raises(HTTPException, match="improvement round"):
+            with pytest.raises(Refused, match="improvement round"):
                 service.start_dispatch(
                     service.DispatchRequest(concurrency=1), BackgroundTasks()
                 )

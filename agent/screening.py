@@ -10,7 +10,6 @@ from langchain_core.runnables import Runnable
 from pydantic import BaseModel, Field
 
 from agent import api, measurements, models
-from backend.configuration_defaults import initial_model
 
 SECTION = "Security check"
 MAX_ATTEMPTS = 3
@@ -64,7 +63,7 @@ class ScreenAttempt(TypedDict):
 
 def checker() -> Runnable[LanguageModelInput, ScreenReply]:
     """Build the structured-output checker with one provider call per try."""
-    model = models.build_model(initial_model("none"), max_retries=0)
+    model = models.build_model(models.screening_model(), max_retries=0)
     return cast(
         Runnable[LanguageModelInput, ScreenReply],
         model.with_structured_output(

@@ -7,6 +7,16 @@ from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_SCREEN_MODEL = "openai/gpt-6-luna"
+
+
+def screening_model() -> dict[str, str]:
+    """Use the course's screen or the installation's shared model override."""
+    override = os.getenv("MODEL_NAME")
+    return {
+        "model": override or DEFAULT_SCREEN_MODEL,
+        "reasoning_effort": "default" if override else "none",
+    }
 
 
 def build_model(

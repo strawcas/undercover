@@ -24,6 +24,7 @@ export default defineConfig({
         UNDERCOVER_DB: "e2e/undercover.db",
         DATABASE_URL: "",
         UNDERCOVER_AGENT: AGENT_STAND_IN,
+        UNDERCOVER_AGENT_RUNTIME: "",
         UNDERCOVER_API_KEY: TEST_AGENT_KEY,
         VITE_SUPABASE_URL: AUTH_STAND_IN,
         OPENROUTER_DECISIONS_URL: JUDGE_STAND_IN,
@@ -41,7 +42,7 @@ export default defineConfig({
     },
     {
       command: "node e2e/agent_stand_in.ts",
-      url: `${AGENT_STAND_IN}/api/health`,
+      url: `${AGENT_STAND_IN}/ping`,
       env: { PORT: new URL(AGENT_STAND_IN).port, UNDERCOVER_API: TEST_BACKEND },
     },
     {

@@ -1,29 +1,29 @@
-"""Immediate admission, background lifecycle and startup recovery."""
+"""AgentCore admission, initialization and task lifecycle."""
 
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import nullcontext
+import os
+from contextlib import contextmanager
 from threading import Event
 
-import httpx
 import pytest
-from fastapi import BackgroundTasks, HTTPException
-from fastapi.testclient import TestClient
+from bedrock_agentcore.runtime.models import IDENTITY_WAT_HEADER
+from fastapi import BackgroundTasks
 
-from agent import api, checkpoints, dispatcher, service
+from agent import api, checkpoints, dispatcher, memory, runtime_settings, service
+from agent.backend_client import Refused
 from agent.tests.records import latest
+from agent.tests.runtime_support import invoke, runtime_client, wait_for_idle
 from backend import agent_key
-from backend.tests.auth_support import AGENT_HEADERS
 from backend.tests.run_requests import configuration
 
 
-def test_admission_reserves_before_creating_backend_run(client, monkeypatch):
+def test_admission_reserves_before_creating_backend_run(client):
     background = BackgroundTasks()
     assert service.start_dispatch(
         service.DispatchRequest(concurrency=25), background
     ) == {"status": "accepted"}
     try:
         assert latest(client) is None
-        with pytest.raises(HTTPException) as busy:
+        with pytest.raises(Refused, match="dispatch") as busy:
             service.start_dispatch(
                 service.DispatchRequest(concurrency=1), BackgroundTasks()
             )
@@ -32,95 +32,159 @@ def test_admission_reserves_before_creating_backend_run(client, monkeypatch):
         service.run_slot.release()
 
 
-def test_background_failure_releases_admission(monkeypatch, caplog):
-    def fail(*args):
-        raise RuntimeError("cannot create run")
-
-    monkeypatch.setattr(api, "start_run", fail)
-    monkeypatch.setattr(checkpoints, "clear_threads", lambda threads: None)
-    assert service.run_slot.acquire(blocking=False)
-    service.work_run(configuration())
-    assert not service.run_slot.locked()
-    assert "cannot create run" in caplog.text
-
-
-def test_background_dispatch_does_not_block_health(client, monkeypatch):
+@pytest.mark.parametrize("fails", [False, True])
+@pytest.mark.usefixtures("runtime_defaults")
+def test_worker_keeps_ping_busy_until_it_finishes(client, monkeypatch, fails):
     entered, finish = Event(), Event()
 
     def dispatch(*args):
         entered.set()
         assert finish.wait(timeout=10)
+        if fails:
+            raise RuntimeError("stand-in worker failed")
 
     monkeypatch.setattr(dispatcher, "dispatch", dispatch)
-    monkeypatch.setenv("MODEL_NAME", "stub")
-    monkeypatch.setattr(service, "checkpointer", lambda: nullcontext(None))
-    monkeypatch.setattr(checkpoints, "clear_threads", lambda threads: None)
-    with (
-        TestClient(service.app, headers=AGENT_HEADERS) as agent,
-        ThreadPoolExecutor(max_workers=1) as workers,
-    ):
-        response = workers.submit(
-            agent.post, "/api/dispatches", json={"concurrency": 1}
-        )
+    with runtime_client() as agent:
+        assert agent.get("/ping").json()["status"] == "Healthy"
         try:
+            assert invoke(agent, "start_dispatch", agents=1).json() == {
+                "accepted": True
+            }
             assert entered.wait(timeout=10)
-            assert agent.get("/api/health").json() == {"status": "ok"}
-            assert (
-                agent.post("/api/dispatches", json={"concurrency": 3}).status_code
-                == 409
-            )
+            assert agent.get("/ping").json()["status"] == "HealthyBusy"
+            assert invoke(agent, "health").json() == {"healthy": True}
+            busy = invoke(agent, "start_dispatch", agents=3)
+            assert busy.status_code == 200
+            assert "dispatch" in busy.json()["refused"]
         finally:
             finish.set()
-        assert response.result().status_code == 202
-    run = latest(client)
-    assert run is not None
-    assert run["status"] == "finished"
+        wait_for_idle(agent)
+    assert latest(client)["status"] == ("stopped" if fails else "finished")
     assert not service.run_slot.locked()
 
 
-@pytest.mark.parametrize("n", [0, 26])
-def test_service_concurrency_limits(n):
-    assert (
-        TestClient(service.app, headers=AGENT_HEADERS)
-        .post("/api/dispatches", json={"concurrency": n})
-        .status_code
-        == 422
-    )
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"operation": "unknown"},
+        {"operation": "start_dispatch"},
+        {"operation": "start_dispatch", "agents": 26},
+        {"operation": "start_dispatch", "agents": "1"},
+        {"operation": "resume_claim", "claim_id": ""},
+    ],
+)
+@pytest.mark.usefixtures("runtime_defaults")
+def test_invalid_invocations_return_400(body):
+    reply = runtime_client().post("/invocations", json=body)
+    assert reply.status_code == 400
+    assert reply.json()["error"]
 
 
-def test_startup_requires_the_agent_key_before_initializing_checkpoints(monkeypatch):
+@pytest.mark.usefixtures("runtime_defaults")
+def test_initialization_checks_key_before_opening_a_pool(monkeypatch):
     monkeypatch.delenv(agent_key.ENV_NAME)
     monkeypatch.setattr(
-        service, "checkpointer", lambda: pytest.fail("opened checkpoints")
+        checkpoints, "checkpointer", lambda: pytest.fail("opened checkpoints")
     )
-    with (
-        pytest.raises(RuntimeError, match="UNDERCOVER_API_KEY is missing"),
-        TestClient(service.app),
-    ):
-        pass
+    with runtime_client({}) as agent:
+        assert agent.get("/ping").json()["status"] == "Healthy"
+        assert invoke(agent, "health").status_code == 503
 
 
-def test_startup_waits_then_stops_abandoned_runs(monkeypatch):
+@pytest.mark.usefixtures("runtime_defaults")
+def test_first_request_initialization_can_retry(monkeypatch):
+    transitions = []
+
+    @contextmanager
+    def pool():
+        transitions.append("open")
+        try:
+            yield None
+        finally:
+            transitions.append("close")
+
+    def recover():
+        if len(transitions) == 1:
+            raise RuntimeError("initialization failed")
+
+    monkeypatch.setattr(checkpoints, "checkpointer", pool)
+    monkeypatch.setattr(service, "recover", recover)
+    with runtime_client() as agent:
+        assert not transitions
+        assert agent.get("/ping").json()["status"] == "Healthy"
+        assert not transitions
+        assert invoke(agent, "health").status_code == 503
+        assert transitions == ["open", "close"]
+        assert invoke(agent, "health").json() == {"healthy": True}
+        assert invoke(agent, "health").json() == {"healthy": True}
+        assert transitions == ["open", "close", "open"]
+    assert transitions == ["open", "close", "open", "close"]
+
+
+@pytest.mark.usefixtures("runtime_defaults")
+def test_managed_runtime_loads_three_identity_credentials_once(monkeypatch):
+    calls = []
+    pools = []
+    for name, setting in runtime_settings.PROVIDERS.items():
+        monkeypatch.setenv(setting, f"provider-{name}")
+        monkeypatch.setenv(name, "original")
+    monkeypatch.setenv("UNDERCOVER_GATEWAY_URL", "https://gateway.invalid/mcp")
+
+    def identity(*, provider_name):
+        def decorate(receive):
+            async def resolve():
+                assert (
+                    runtime_settings.BedrockAgentCoreContext.get_workload_access_token()
+                    == "stand-in-wat"
+                )
+                calls.append(provider_name)
+                return await receive(f"from-{provider_name}")
+
+            return resolve
+
+        return decorate
+
+    @contextmanager
+    def pool():
+        pools.append({name: os.environ[name] for name in runtime_settings.CREDENTIALS})
+        yield None
+
+    monkeypatch.setattr(runtime_settings, "requires_api_key", identity)
+    monkeypatch.setattr(checkpoints, "checkpointer", pool)
+    monkeypatch.setattr(
+        service, "resume_claim", lambda claim_id, background: {"status": "accepted"}
+    )
+    with runtime_client({IDENTITY_WAT_HEADER: "stand-in-wat"}) as agent:
+        assert not calls
+        assert not pools
+        assert invoke(agent, "resume_claim", claim_id="CLM-1001").json() == {
+            "accepted": True
+        }
+        assert invoke(agent, "health").json() == {"healthy": True}
+    assert calls == [f"provider-{name}" for name in runtime_settings.CREDENTIALS]
+    assert pools == [
+        {name: f"from-provider-{name}" for name in runtime_settings.CREDENTIALS}
+    ]
+
+
+@pytest.mark.usefixtures("runtime_defaults")
+def test_first_request_replays_started_memory_receipts(monkeypatch):
+    retried = []
+    monkeypatch.setenv("UNDERCOVER_MEMORY_ID", "stand-in-memory")
+    monkeypatch.setattr(memory, "recover_pending", lambda: retried.append("once"))
+    with runtime_client({}) as agent:
+        assert not retried
+        assert invoke(agent, "health").json() == {"healthy": True}
+        wait_for_idle(agent)
+        assert invoke(agent, "health").json() == {"healthy": True}
+    assert retried == ["once"]
+
+
+def test_interim_recovery_stops_abandoned_runs_without_changing_the_thread(monkeypatch):
     run_id = api.start_run(configuration())["run_id"]
     api.start_claim("CLM-1001", "saved-thread")
-    calls = []
-
-    def health():
-        calls.append("health")
-        if len(calls) == 1:
-            raise httpx.ConnectError("backend still starting")
-        return {"status": "ok"}
-
-    async def wait(delay):
-        calls.append("wait")
-
-    cleared = []
-    monkeypatch.setattr(api, "health", health)
-    monkeypatch.setattr(service.asyncio, "sleep", wait)
-    monkeypatch.setattr(service, "checkpointer", lambda: nullcontext(None))
-    monkeypatch.setattr(checkpoints, "clear_threads", cleared.extend)
-    with TestClient(service.app) as agent:
-        assert agent.get("/api/health").status_code == 200
-    assert calls == ["health", "wait", "health"]
+    monkeypatch.setattr(checkpoints, "clear_threads", lambda threads: None)
+    service.recover()
     assert api.get_run(run_id)["status"] == "stopped"
     assert api.get_claim("CLM-1001")["thread_id"] == "saved-thread"

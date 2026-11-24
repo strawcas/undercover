@@ -303,7 +303,7 @@ test("improvement approvals retain feedback, refuse busy work and show the verdi
   await expect(
     detail.getByRole("button", { name: "Approve testing" }),
   ).toBeVisible();
-  await post(request, `${AGENT_STAND_IN}/api/dispatches`, { concurrency: 25 });
+  await post(request, "/api/dispatches", { concurrency: 25 });
   await detail.getByRole("button", { name: "Approve testing" }).click();
   await dialog.getByRole("button", { name: "Approve proposal" }).click();
   await expect(dialog.getByText(/already running/)).toBeVisible();

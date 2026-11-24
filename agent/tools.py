@@ -11,10 +11,9 @@ from langgraph.graph.message import add_messages
 from langgraph.types import Command
 
 from agent import api, memory
-from agent.context_client import ContextClient
+from agent.context_client import ContextClient, DocumentName, PlanName, RecordName
 from agent.gateway import Gateway
 from agent.screening import ScreenAttempt
-from context.catalog import DocumentName, PlanName, RecordName
 
 
 @dataclass

@@ -2,11 +2,15 @@
 
 import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from agent import gateway
 from agent.mcp_client import McpClient
-from context.endpoint import DEFAULT_URL
+
+DEFAULT_URL = "http://127.0.0.1:8006/mcp"
+DocumentName = Literal["policy_wording", "claims_manual"]
+RecordName = Literal["claim", "policy", "previous_claim"]
+PlanName = Literal["economy", "premium", "first"]
 
 
 @dataclass(frozen=True)

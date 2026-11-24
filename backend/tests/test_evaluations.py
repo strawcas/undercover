@@ -150,7 +150,7 @@ def test_original_work_is_not_copied_and_copies_cannot_be_signed_off(
         ).status_code
         == 200
     )
-    assert agent_calls == ["/api/claims/CLM-1001/resume"]
+    assert agent_calls == [{"operation": "resume_claim", "claim_id": "CLM-1001"}]
 
 
 @pytest.mark.parametrize(

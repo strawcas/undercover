@@ -169,17 +169,20 @@ def test_held_out_sentinels_never_enter_any_improver_report(client):
 
 
 @pytest.mark.parametrize(
-    ("path", "body"),
+    ("path", "body", "operation"),
     [
-        ("/api/rounds", None),
-        ("/api/rounds/unknown/stop", None),
+        ("/api/rounds", None, "start_round"),
+        ("/api/rounds/unknown/stop", None, "stop_round"),
         (
             "/api/rounds/unknown/proposals/p/decision",
             {"decision": "approve", "reason": None},
+            "decide_proposal",
         ),
     ],
 )
-def test_handler_round_actions_require_senior_identity(client, agent_calls, path, body):
+def test_handler_round_actions_require_senior_identity(
+    client, agent_calls, path, body, operation
+):
     for headers, expected in (
         ({"Authorization": ""}, 401),
         (authorization("HND-02"), 403),
@@ -187,7 +190,7 @@ def test_handler_round_actions_require_senior_identity(client, agent_calls, path
         assert client.post(path, json=body, headers=headers).status_code == expected
     assert agent_calls == []
     assert client.post(path, json=body).status_code == 202
-    assert agent_calls == [path]
+    assert [call["operation"] for call in agent_calls] == [operation]
 
 
 def test_budget_counts_idempotent_billing_and_rollback_without_tests(client):

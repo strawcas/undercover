@@ -5,7 +5,7 @@ from typing import Any
 
 import httpx
 
-from backend import agent_key
+from agent.credentials import app_headers
 
 BACKEND_URL = os.getenv("UNDERCOVER_API", "http://127.0.0.1:8000")
 
@@ -25,9 +25,7 @@ def client() -> httpx.Client:
 
 def call(backend: httpx.Client, method: str, path: str, **request: Any) -> Any:
     """Send a typed client's request and preserve backend refusals."""
-    response = backend.request(
-        method, path, headers=agent_key.request_headers(), **request
-    )
+    response = backend.request(method, path, headers=app_headers(), **request)
     if response.is_error:
         raise Refused(response.status_code, response.json()["detail"])
     return response.json()

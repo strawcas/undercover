@@ -1,58 +1,26 @@
-"""Run the local agent service alongside the backend and dashboard."""
+"""Admit and execute the agent's work for the AgentCore entrypoint."""
 
-import asyncio
 import logging
 import uuid
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, suppress
+from collections.abc import Callable
 from dataclasses import dataclass
 from threading import Lock
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
-import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from starlette.concurrency import run_in_threadpool
 
 from agent import api, checkpoints, improver, improver_api, memory, run_execution
 from agent.backend_client import Refused
-from agent.checkpoints import checkpointer
-from agent.console import show_reports
 from agent.harness import (
     cancel_resume,
     carry_on,
     queue_resume,
     release_claim,
+    release_review,
     take_resume,
     work_returned,
 )
-from backend import agent_key
-from backend.auth import require_agent
-from backend.improvement_models import HandlerDecision
-from backend.models import Handler
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Keep the claim graph's checkpointer open while the service runs."""
-    if not agent_key.configured_key():
-        raise RuntimeError(f"{agent_key.ENV_NAME} is missing")
-    show_reports()
-    with checkpointer() as saver:
-        app.state.saver = saver
-        await recover()
-        recovery = asyncio.create_task(run_in_threadpool(memory.recover_pending))
-        try:
-            yield
-        finally:
-            recovery.cancel()
-            with suppress(asyncio.CancelledError):
-                await recovery
-
-
-app = FastAPI(title="UnderCover Agent", lifespan=lifespan)
-internal = APIRouter(dependencies=[Depends(require_agent)])
 run_slot = Lock()
 
 
@@ -74,17 +42,30 @@ class EvaluationRequest(DispatchRequest):
     tiny: bool
 
 
-async def recover() -> None:
-    """Wait for the concurrently started backend, then close abandoned runs."""
-    while True:
-        try:
-            await run_in_threadpool(api.health)
-            break
-        except httpx.RequestError:
-            await asyncio.sleep(0.25)
-    threads = await run_in_threadpool(api.stop_runs)
-    await run_in_threadpool(checkpoints.clear_threads, threads)
-    await run_in_threadpool(improver_api.recover)
+class Handler(BaseModel):
+    handler_id: str
+    name: str
+    role: str
+    email: str
+    can_approve_over_limit: bool
+
+
+class HandlerDecision(BaseModel):
+    decision: Literal["approve", "reject"]
+    reason: str | None
+    handler: Handler
+
+
+class Scheduler(Protocol):
+    def add_task[**P](
+        self, func: Callable[P, Any], /, *args: P.args, **kwargs: P.kwargs
+    ) -> None: ...
+
+
+def recover() -> None:
+    """Close abandoned local runs before admitting another work stretch."""
+    checkpoints.clear_threads(api.stop_runs())
+    improver_api.recover()
 
 
 def work_run(selection: dict[str, Any]) -> None:
@@ -109,23 +90,22 @@ def work_run(selection: dict[str, Any]) -> None:
 def reserve(owner: str) -> None:
     """Name the current work while holding the service's single admission lock."""
     if not run_slot.acquire(blocking=False):
-        raise HTTPException(409, f"Cannot start while {slot.owner} is running")
+        raise Refused(409, f"Cannot start while {slot.owner} is running")
     slot.owner = owner
 
 
-def accept_run(
-    selection: dict[str, Any], background: BackgroundTasks
-) -> dict[str, str]:
+def accept_run(selection: dict[str, Any], background: Scheduler) -> dict[str, str]:
     """Reserve the single dispatch/evaluation slot before scheduling any work."""
     reserve(selection["kind"])
-    background.add_task(work_run, selection)
+    try:
+        background.add_task(work_run, selection)
+    except RuntimeError:
+        run_slot.release()
+        raise
     return {"status": "accepted"}
 
 
-@internal.post("/api/dispatches", operation_id="start_dispatch", status_code=202)
-def start_dispatch(
-    request: DispatchRequest, background: BackgroundTasks
-) -> dict[str, str]:
+def start_dispatch(request: DispatchRequest, background: Scheduler) -> dict[str, str]:
     """Accept a dispatch immediately or refuse while another run owns the slot."""
     return accept_run(
         {
@@ -138,18 +118,11 @@ def start_dispatch(
     )
 
 
-@internal.post("/api/evaluations", operation_id="start_evaluation", status_code=202)
 def start_evaluation(
-    request: EvaluationRequest, background: BackgroundTasks
+    request: EvaluationRequest, background: Scheduler
 ) -> dict[str, str]:
     """Accept an evaluation in the same single admission slot as dispatches."""
     return accept_run({"kind": "evaluation", **request.model_dump()}, background)
-
-
-@app.exception_handler(Refused)
-def refused(_: Request, error: Refused) -> JSONResponse:
-    """Pass on the backend's refusal, such as a claim it doesn't know."""
-    return JSONResponse({"detail": error.detail}, status_code=error.status_code)
 
 
 def work_round(round_id: str, decision: dict | None = None) -> None:
@@ -170,52 +143,43 @@ def work_round(round_id: str, decision: dict | None = None) -> None:
         run_slot.release()
 
 
-@internal.post("/api/rounds", operation_id="start_round", status_code=202)
-def start_round(handler: Handler, background: BackgroundTasks) -> dict[str, str]:
+def start_round(handler: Handler, background: Scheduler) -> dict[str, str]:
     """Reserve a stretch before creating and scheduling a senior handler's round."""
     reserve("improvement round")
     try:
         current = improver_api.start_round(handler.model_dump())
+        background.add_task(work_round, current["round_id"])
     except Exception:
         run_slot.release()
         raise
-    background.add_task(work_round, current["round_id"])
     return {"status": "accepted", "round_id": current["round_id"]}
 
 
-@internal.post(
-    "/api/rounds/{round_id}/stop", operation_id="stop_round", status_code=202
-)
 def stop_round(round_id: str, handler: Handler) -> dict[str, str]:
     """Mark a round stopped immediately, leaving in-flight work to drain."""
     if not handler.can_approve_over_limit:
-        raise HTTPException(403, "A senior handler must stop rounds")
+        raise Refused(403, "A senior handler must stop rounds")
     improver_api.finish(round_id, True, f"Stopped by {handler.name}")
     return {"status": "accepted"}
 
 
-@internal.post(
-    "/api/rounds/{round_id}/proposals/{proposal_id}/decision",
-    operation_id="decide_proposal",
-    status_code=202,
-)
 def decide_proposal(
     round_id: str,
     proposal_id: str,
     request: HandlerDecision,
-    background: BackgroundTasks,
+    background: Scheduler,
 ) -> dict[str, str]:
     """Record a decision only after admission, then resume the saved tool call."""
     reserve(f"improvement round {round_id}")
-    try:
-        improver_api.decide(round_id, proposal_id, request.model_dump())
-    except Exception:
-        run_slot.release()
-        raise
     decision: dict[str, Any] = {"type": request.decision}
     if request.decision == "reject":
         decision["message"] = request.reason
-    background.add_task(work_round, round_id, decision)
+    try:
+        improver_api.decide(round_id, proposal_id, request.model_dump())
+        background.add_task(work_round, round_id, decision)
+    except Exception:
+        run_slot.release()
+        raise
     return {"status": "accepted"}
 
 
@@ -232,16 +196,7 @@ def resume_owned(claim: dict[str, Any], owner: str | None = None) -> None:
         release_claim(claim_id)
 
 
-@app.get("/api/health", operation_id="health")
-def health() -> dict[str, str]:
-    """Check that the agent's service is running."""
-    return {"status": "ok"}
-
-
-@internal.post(
-    "/api/claims/{claim_id}/resume", operation_id="resume_claim", status_code=202
-)
-def resume_claim(claim_id: str, background: BackgroundTasks) -> dict[str, str]:
+def resume_claim(claim_id: str, background: Scheduler) -> dict[str, str]:
     """Accept a checkpoint resume after a recorded senior handler review."""
     claim = api.get_claim(claim_id)
     payment = claim["payment"]
@@ -251,18 +206,17 @@ def resume_claim(claim_id: str, background: BackgroundTasks) -> dict[str, str]:
         or not payment
         or not payment["signed_off_by"]
     ):
-        raise HTTPException(409, f"Claim {claim_id} has no paid sign-off to resume")
+        raise Refused(409, f"Claim {claim_id} has no paid sign-off to resume")
     if not queue_resume(claim):
-        raise HTTPException(409, f"Claim {claim_id} is already being worked")
+        raise Refused(409, f"Claim {claim_id} is already being worked")
     owner = str(uuid.uuid4()) if sent_back else None
     try:
         if owner is not None:
             claim = api.take_review(claim_id, owner)
+        background.add_task(resume_owned, claim, owner)
     except Exception:
         cancel_resume(claim_id)
+        if owner is not None:
+            release_review(claim_id, owner)
         raise
-    background.add_task(resume_owned, claim, owner)
     return {"status": "accepted"}
-
-
-app.include_router(internal)

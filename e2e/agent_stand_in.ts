@@ -1,5 +1,4 @@
-// Stands in for the agent's service in the end-to-end tests: it accepts each claim
-// the backend asks it to resume, and lists them at /api/resumed.
+// Stands in for AgentCore while the browser tests exercise the backend and dashboard.
 import {
   createServer,
   type IncomingMessage,
@@ -9,102 +8,101 @@ import { TEST_BACKEND } from "./addresses.ts";
 import { agentHeaders, TEST_AGENT_KEY } from "./agent_credentials.ts";
 
 const backend = process.env.UNDERCOVER_API ?? TEST_BACKEND;
-
 const resumed: string[] = [];
 const starts: unknown[] = [];
+const busyReason = "A dispatch or evaluation is already running";
+const accepted = { accepted: true };
 let busy = false;
+
+interface Invocation {
+  operation: string;
+  claim_id: string;
+  round_id: string;
+  proposal_id: string;
+  handler: Record<string, unknown>;
+  decision: string;
+  reason: string | null;
+  agents: number;
+  set_name: string;
+  tiny: boolean;
+}
 
 function reply(response: ServerResponse, status: number, body: unknown) {
   response.writeHead(status, { "Content-Type": "application/json" });
   response.end(JSON.stringify(body));
 }
 
-async function forwardRound(
-  request: IncomingMessage,
-  response: ServerResponse,
-) {
-  if (busy && !request.url?.endsWith("/stop")) {
-    reply(response, 409, {
-      detail: "A dispatch or evaluation is already running",
-    });
+async function forwardRound(response: ServerResponse, invocation: Invocation) {
+  const { operation, round_id, proposal_id, handler, decision, reason } =
+    invocation;
+  if (busy && operation !== "stop_round") {
+    reply(response, 200, { refused: busyReason });
     return;
   }
+
+  const rounds = "/api/improver/rounds";
+  let path = rounds;
+  let body: object = handler;
+  if (operation === "stop_round") {
+    path = `${rounds}/${round_id}/finish`;
+    body = { stopped: true, reason: "Stopped by Dana Whitfield" };
+  } else if (operation === "decide_proposal") {
+    path = `${rounds}/${round_id}/proposals/${proposal_id}/decision`;
+    body = { handler, decision, reason };
+  }
+  const result = await fetch(backend + path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...agentHeaders },
+    body: JSON.stringify(body),
+  });
+  const value = (await result.json()) as { round_id?: string; detail?: string };
+  if (result.status === 409) {
+    reply(response, 200, { refused: value.detail });
+  } else {
+    reply(
+      response,
+      result.ok ? 200 : result.status,
+      result.ok ? { ...accepted, round_id: value.round_id } : value,
+    );
+  }
+}
+
+async function invoke(request: IncomingMessage, response: ServerResponse) {
   let body = "";
   for await (const chunk of request) body += String(chunk);
-  const path = (request.url ?? "").replace(
-    "/api/rounds",
-    "/api/improver/rounds",
-  );
-  const stopping = path.endsWith("/stop");
-  const result = await fetch(
-    `${backend}${stopping ? path.replace(/\/stop$/, "/finish") : path}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...agentHeaders },
-      body: stopping
-        ? JSON.stringify({ stopped: true, reason: "Stopped by Dana Whitfield" })
-        : body,
-    },
-  );
-  const value = (await result.json()) as { round_id?: string };
-  reply(
-    response,
-    result.ok ? 202 : result.status,
-    result.ok ? { status: "accepted", round_id: value.round_id } : value,
-  );
-}
-
-function isRound(request: IncomingMessage) {
-  return (
-    request.method === "POST" && Boolean(request.url?.startsWith("/api/rounds"))
-  );
-}
-
-function anonymous(request: IncomingMessage, privatePaths: boolean[]) {
-  return (
-    request.method === "POST" &&
-    privatePaths.some(Boolean) &&
-    request.headers["x-api-key"] !== TEST_AGENT_KEY
-  );
-}
-
-function acceptRun(request: IncomingMessage, response: ServerResponse) {
-  if (busy) {
-    reply(response, 409, {
-      detail: "A dispatch or evaluation is already running",
-    });
-    return;
+  const input = JSON.parse(body) as Invocation;
+  if (input.operation === "health") {
+    reply(response, 200, { healthy: true });
+  } else if (request.headers.authorization !== `Bearer ${TEST_AGENT_KEY}`) {
+    reply(response, 401, { error: "A valid bearer key is required" });
+  } else if (input.operation === "resume_claim") {
+    resumed.push(input.claim_id);
+    reply(response, 200, accepted);
+  } else if (
+    input.operation === "start_dispatch" ||
+    input.operation === "start_evaluation"
+  ) {
+    if (busy) {
+      reply(response, 200, { refused: busyReason });
+      return;
+    }
+    busy = true;
+    const selection =
+      input.operation === "start_evaluation"
+        ? { set_name: input.set_name, tiny: input.tiny }
+        : {};
+    starts.push({ concurrency: input.agents, ...selection });
+    reply(response, 200, accepted);
+  } else {
+    await forwardRound(response, input);
   }
-  busy = true;
-  let body = "";
-  request.on("data", (chunk: Buffer) => {
-    body += chunk.toString();
-  });
-  request.on("end", () => {
-    starts.push(JSON.parse(body));
-    reply(response, 202, { status: "accepted" });
-  });
 }
 
 createServer((request, response) => {
-  const resume = /^\/api\/claims\/([^/]+)\/resume$/.exec(request.url ?? "");
-  const startsRun =
-    request.url === "/api/dispatches" || request.url === "/api/evaluations";
-  if (anonymous(request, [isRound(request), Boolean(resume), startsRun])) {
-    reply(response, 401, { detail: "A valid agent API key is required" });
-    return;
-  }
-  if (isRound(request)) {
-    void forwardRound(request, response).catch(() => {
-      reply(response, 503, {
-        detail: "Round stand-in could not reach the backend",
-      });
+  if (request.method === "POST" && request.url === "/invocations") {
+    void invoke(request, response).catch(() => {
+      reply(response, 503, { error: "The stand-in could not take the work" });
     });
-  } else if (request.method === "POST" && resume) {
-    resumed.push(decodeURIComponent(resume[1]));
-    reply(response, 202, { status: "accepted" });
-  } else if (request.method === "POST" && startsRun) {
-    acceptRun(request, response);
   } else if (request.url === "/api/starts") {
     reply(response, 200, starts);
   } else if (request.method === "POST" && request.url === "/api/release") {
@@ -112,8 +110,8 @@ createServer((request, response) => {
     reply(response, 200, { status: "released" });
   } else if (request.url === "/api/resumed") {
     reply(response, 200, resumed);
-  } else if (request.url === "/api/health") {
-    reply(response, 200, { status: "ok" });
+  } else if (request.url === "/ping") {
+    reply(response, 200, { status: busy ? "HealthyBusy" : "Healthy" });
   } else {
     reply(response, 404, { detail: "Not found" });
   }

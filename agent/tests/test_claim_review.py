@@ -1,14 +1,13 @@
 import pytest
-from fastapi.testclient import TestClient
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
-from agent import api, dispatcher, harness, service
+from agent import api, dispatcher, harness
 from agent.tests.queue_setup import leave_waiting
 from agent.tests.records import claim_of
+from agent.tests.runtime_support import invoke, runtime_client, wait_for_idle
 from agent.tests.stubs import calculate, call, graph_on, record, stub
 from backend import claim_reviews, main
-from backend.tests.auth_support import AGENT_HEADERS
 from backend.tests.run_requests import configuration
 
 CLAIM = "CLM-1002"
@@ -30,11 +29,13 @@ def use_graph(monkeypatch, graph):
 
 
 def resume():
-    return TestClient(service.app, headers=AGENT_HEADERS).post(
-        f"/api/claims/{CLAIM}/resume"
-    )
+    agent = runtime_client()
+    response = invoke(agent, "resume_claim", claim_id=CLAIM)
+    wait_for_idle(agent)
+    return response.json()
 
 
+@pytest.mark.usefixtures("runtime_defaults")
 def test_repeated_reviews_keep_the_screen_and_reset_model_calls(client, monkeypatch):
     saver = InMemorySaver()
     original = stub(
@@ -52,7 +53,7 @@ def test_repeated_reviews_keep_the_screen_and_reset_model_calls(client, monkeypa
         {"version": 2, "prompt": "A decision can't be changed afterwards."},
     )
     use_graph(monkeypatch, graph)
-    assert resume().status_code == 202
+    assert resume() == {"accepted": True}
     claim = claim_of(client, CLAIM)
     assert claim["status"] == "waiting_for_sign_off"
     assert claim["decision"]["payout"] == 1250
@@ -74,7 +75,7 @@ def test_repeated_reviews_keep_the_screen_and_reset_model_calls(client, monkeypa
     use_graph(
         monkeypatch, graph_on(stub(calculate(420), record("approve", 420)), saver)
     )
-    assert resume().status_code == 202
+    assert resume() == {"accepted": True}
     paid = claim_of(client, CLAIM)
     assert paid["payment"]["amount"] == 420
     assert paid["thread_id"] == first["thread_id"]
@@ -87,6 +88,7 @@ def test_repeated_reviews_keep_the_screen_and_reset_model_calls(client, monkeypa
 
 
 @pytest.mark.parametrize("taken", [False, True])
+@pytest.mark.usefixtures("runtime_defaults")
 def test_dispatch_recovers_a_missed_handoff_or_an_expired_review(
     client, monkeypatch, taken
 ):
@@ -102,7 +104,7 @@ def test_dispatch_recovers_a_missed_handoff_or_an_expired_review(
     run = api.start_run(configuration(concurrency=1))
     if taken:
         api.take_review(CLAIM, "lost")
-        assert resume().status_code == 409
+        assert "refused" in resume()
         selected = dispatcher.list_work(
             {
                 "run_id": run["run_id"],

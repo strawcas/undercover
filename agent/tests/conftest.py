@@ -1,11 +1,22 @@
+from contextlib import nullcontext
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 from langchain_core.callbacks import BaseCallbackHandler
 
-from agent import api, harness, improver, improver_api, screening
+from agent import (
+    api,
+    checkpoints,
+    entrypoint,
+    harness,
+    improver,
+    improver_api,
+    screening,
+    service,
+)
 from agent.mcp_client import McpClient
+from agent.runtime_settings import PROVIDERS, RuntimeSettings
 from agent.tests.context_support import ContextStandIn
 from backend.main import app
 
@@ -17,6 +28,7 @@ def local_tool_settings(monkeypatch):
         "UNDERCOVER_GATEWAY_URL",
         "UNDERCOVER_CONTEXT",
         "UNDERCOVER_MEMORY_ID",
+        *PROVIDERS.values(),
     ):
         monkeypatch.delenv(name, raising=False)
     original = McpClient.call
@@ -28,6 +40,14 @@ def local_tool_settings(monkeypatch):
 
     monkeypatch.setattr(McpClient, "call", local_or_gateway)
     return original
+
+
+@pytest.fixture
+def runtime_defaults(monkeypatch):
+    """Give each AgentCore invocation test its own lazy settings and offline pool."""
+    monkeypatch.setattr(entrypoint, "settings", RuntimeSettings())
+    monkeypatch.setattr(checkpoints, "checkpointer", lambda: nullcontext(None))
+    monkeypatch.setattr(service, "recover", lambda: None)
 
 
 @pytest.fixture(autouse=True)

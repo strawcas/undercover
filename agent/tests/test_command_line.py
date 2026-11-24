@@ -61,7 +61,7 @@ def test_the_checkpointer_settings(monkeypatch):
         assert pool.conninfo == "postgresql://u:p@pooler.example.com/db"
         assert (pool.settings["min_size"], pool.settings["max_size"]) == (1, 4)
         kwargs = pool.settings["kwargs"]
-        assert (kwargs["autocommit"], kwargs["prepare_threshold"]) == (True, 0)
+        assert (kwargs["autocommit"], kwargs["prepare_threshold"]) == (True, None)
         assert kwargs["row_factory"] is checkpoints.dict_row
         assert kwargs["options"] == "-c search_path=undercover"
         assert kwargs["application_name"].startswith("undercover-agent-")

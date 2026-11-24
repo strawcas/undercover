@@ -1,3 +1,4 @@
+import json
 from concurrent.futures import ThreadPoolExecutor
 
 import httpx
@@ -214,10 +215,14 @@ def test_limit_is_checked_before_looking_up_the_claim(client):
 
 def test_sign_off_pays_and_returns_the_one_persisted_payment(client, agent_answers):
     def check_commit(request):
-        assert request.url.path == "/api/claims/CLM-1002/resume"
+        assert request.url.path == "/invocations"
+        assert json.loads(request.content) == {
+            "operation": "resume_claim",
+            "claim_id": "CLM-1002",
+        }
         claim = client.get("/api/claims/CLM-1002").json()
         assert claim["payment"]["amount"] == 1350
-        return httpx.Response(202, json={"status": "accepted"})
+        return httpx.Response(200, json={"accepted": True})
 
     agent_answers(check_commit)
     start(client, "CLM-1002")
@@ -245,7 +250,7 @@ def test_sign_off_survives_a_failed_handoff(client, agent_answers, caplog, failu
             raise httpx.ReadTimeout("Read timed out", request=request)
         if failure == "malformed":
             return httpx.Response(502, json=[])
-        return httpx.Response(409, json={"detail": "Claim has no pending interrupt"})
+        return httpx.Response(200, json={"refused": "Claim has no pending interrupt"})
 
     agent_answers(fail)
     claim_id = "CLM-1002"
