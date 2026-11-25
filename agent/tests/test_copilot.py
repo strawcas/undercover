@@ -193,3 +193,35 @@ def test_criteria_uses_saved_figures_and_checks_coverage_when_evaluation_fails()
     assert "71.0% | Met" in completed
     assert "79.0% | Missed" in completed
     assert "$1,000.00" in completed
+
+
+def test_copilot_model_defaults_to_luna_and_accepts_an_override(monkeypatch):
+    assert worker.copilot_model() == {
+        "model": "openai/gpt-6-luna",
+        "reasoning_effort": "low",
+    }
+    monkeypatch.setenv("MODEL_NAME", "stand-in/model")
+    assert worker.copilot_model() == {
+        "model": "stand-in/model",
+        "reasoning_effort": "default",
+    }
+
+
+def test_wait_polls_only_the_admitted_run_and_limits_time_in_code(monkeypatch):
+    paths, times = [], [0.0]
+
+    def respond(request):
+        paths.append(request.url.path)
+        return httpx.Response(200, json={"status": "running"})
+
+    def advance(seconds):
+        times[0] += seconds
+
+    install_app(monkeypatch, respond)
+    monkeypatch.setattr(actions, "monotonic", lambda: times[0])
+    monkeypatch.setattr(actions, "sleep", advance)
+    result = actions.poll(working_context(), "admitted", evaluation=True)
+    assert times[0] == 15 * 60
+    assert set(paths) == {"/api/evaluations/admitted/measures"}
+    assert result["status"] == "timed_out"
+    assert "Scoreboard" in result["reason"]

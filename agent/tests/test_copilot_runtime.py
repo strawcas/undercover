@@ -67,3 +67,24 @@ def test_handler_memory_ignores_mismatched_namespaces():
         "preferences",
         "facts",
     ]
+
+
+def test_memory_saves_only_the_chat_pair_with_a_stable_event_key(monkeypatch):
+    calls = []
+    store = DeferredMemory("offline-memory")
+    sdk = SimpleNamespace(
+        client=SimpleNamespace(create_event=lambda **fields: calls.append(fields))
+    )
+    monkeypatch.setitem(store.__dict__, "sdk", sdk)
+    session, event = str(uuid4()), uuid4().hex
+    store.save_turn("HND-01", session, event, ("Question", "Answer"))
+    (saved,) = calls
+    assert (saved["actorId"], saved["sessionId"], saved["clientToken"]) == (
+        "HND-01",
+        session,
+        event,
+    )
+    assert saved["payload"] == [
+        {"conversational": {"content": {"text": "Question"}, "role": "USER"}},
+        {"conversational": {"content": {"text": "Answer"}, "role": "ASSISTANT"}},
+    ]

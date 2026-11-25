@@ -6,6 +6,13 @@ from importlib import import_module
 from importlib.util import find_spec
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
+
+from starlette.testclient import TestClient
+
+
+async def stand_in_checkpoint_pool(_managed: bool) -> None:
+    """Exercise the staged protocol without connecting to a database."""
 
 
 def verify() -> None:
@@ -22,7 +29,15 @@ def verify() -> None:
                 "The staged Runtime must import without the app or context package"
             )
         import_module("main")
-        import_module("copilot")
+        copilot = import_module("copilot")
+        settings = import_module("agent.copilot.entrypoint").settings
+        with (
+            patch.object(settings, "initialize", stand_in_checkpoint_pool),
+            TestClient(copilot.app) as client,
+        ):
+            result = client.post("/invocations", json={"operation": "health"})
+        if result.status_code != 200 or result.json() != {"healthy": True}:
+            raise RuntimeError("The staged Copilot did not answer its health check")
 
 
 if __name__ == "__main__":
