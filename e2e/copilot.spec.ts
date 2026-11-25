@@ -22,6 +22,11 @@ test("a handler can reload and answer a Copilot confirmation", async ({
   await expect(
     sidebar.getByRole("heading", { name: "Hi, Dana." }),
   ).toBeVisible();
+  const columns = await page.getByRole("main").evaluate((main) => ({
+    mainRight: main.getBoundingClientRect().right,
+    sidebarLeft: main.nextElementSibling?.getBoundingClientRect().left ?? 0,
+  }));
+  expect(columns.mainRight).toBeLessThanOrEqual(columns.sidebarLeft + 1);
   const composer = sidebar.getByRole("textbox", { name: "Ask the Copilot" });
   await composer.fill("Look up and sign off");
   await composer.press("Enter");
@@ -56,4 +61,12 @@ test("a handler can reload and answer a Copilot confirmation", async ({
   await expect(
     sidebar.getByRole("heading", { name: "UnderCover Copilot" }),
   ).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const overlay = await sidebar.evaluate((element) => ({
+    left: element.getBoundingClientRect().left,
+    right: element.getBoundingClientRect().right,
+    available: document.documentElement.clientWidth,
+  }));
+  expect(overlay.left).toBeGreaterThanOrEqual(0);
+  expect(overlay.right).toBeLessThanOrEqual(overlay.available);
 });

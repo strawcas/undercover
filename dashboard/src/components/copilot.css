@@ -6,6 +6,11 @@
   margin: auto;
 }
 
+.copilot-shell > .page {
+  width: 100%;
+  min-width: 0;
+}
+
 .copilot-sidebar {
   position: sticky;
   top: 12px;
@@ -291,7 +296,7 @@
   }
 
   .copilot-sidebar {
-    width: min(390px, calc(100vw - 24px));
+    width: min(390px, calc(100% - 24px));
     height: min(720px, calc(100dvh - 24px));
   }
 }
