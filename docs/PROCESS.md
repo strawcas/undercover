@@ -1,10 +1,10 @@
 # Process
 
-`uv sync` and `npm install` at the repo root install everything, including a git pre-commit hook. `npm run dev` starts the backend, agent service, context service and dashboard. `npm run seed` rebuilds the database used by dev, on Supabase when `DATABASE_URL` is in `.env`. The agent always needs `DATABASE_URL` for its checkpoints. The local context service needs only the governance files in its package.
+`uv sync` and `npm install` at the repo root install everything, including a git pre-commit hook. `npm run dev` starts the backend, agent service, Copilot, context service and dashboard. `npm run seed` rebuilds the database used by dev, on Supabase when `DATABASE_URL` is in `.env`. Both agents need `DATABASE_URL` for their checkpoints. The local context service needs only the governance files in its package.
 
 `npm run check` runs every check:
 
-- The backend, context server and Runtime entrypoint import in separate isolated environments containing the locked `server`, `context` and `runtime` groups. The staged Runtime import includes only the platform entrypoint and agent package. uv uses its local cache.
+- The backend, context server and Runtime apps import in separate isolated environments containing the locked `server`, `context` and `runtime` groups. The staged Runtime check uses the two platform entry files and the agent package. uv uses its local cache.
 - Python: ruff (lint and format), pyright, and pytest with 80% coverage
 - TypeScript: ESLint, Prettier, tsc, and vitest with 80% coverage
 - Playwright end-to-end tests
@@ -54,6 +54,10 @@ The checks show that the code works, but not that it is fit to merge. Every code
 - Never push.
 - Don't open `data/evals/` unless you're asked to.
 - Everything must work on Windows: write `package.json` scripts as `uv run` commands or `.mjs` files.
+
+## Copilot live verification
+
+Follow [PLAN_COPILOT.md](PLAN_COPILOT.md) using one disposable PostgreSQL seed. Verify the handover in Dana's conversation, compare the assessment with the Scoreboard and saved payouts, restart the dev services and verify Marcus's access. Keep the direct context route, default model and Memory disabled during the local handover. Day 5 Lab 1 verifies the deployed Memory.
 
 ## Runtime live verification
 

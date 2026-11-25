@@ -1,5 +1,17 @@
 # Status
 
+## Copilot
+
+The signed-in dashboard includes a Copilot sidebar. It keeps private conversation history and shows tool progress, referrals and payout confirmation. The Copilot uses the handler's verified sign-in for claim reads, dispatches, evaluations and reviews. It computes the pilot criteria from the held-out evaluation, Settings and original payout records.
+
+Run `npm run dev` to start the Copilot on `127.0.0.1:8081` with the other services. Both agents use PostgreSQL for checkpoints. Apply the additive database upgrade before deploying the backend to Lambda, then follow Week 3 Day 5 Lab 1 to deploy both V2 runtimes. Optional handler Memory uses `UNDERCOVER_COPILOT_MEMORY_ID`.
+
+The Copilot reviews corrected expiry versus callback ordering, credential reflection, lost action replies, revision-bound payment verification, interrupted progress display, sidebar recovery and the Day 5 Runtime invocation identity. See the verification record in [PLAN_COPILOT.md](PLAN_COPILOT.md).
+
+The live Windows handover used one disposable PostgreSQL seed. Dana completed a ten-agent dispatch, returned CLM-1008 and confirmed the single $3,750 payment on CLM-1003. After the initial approval request asked her to choose, the prompt was updated and the same saved conversation produced the card. The whole held-out evaluation recorded 80% straight-through, 88% accuracy within $1 and full sign-off coverage. Marcus's separate conversation refused sign-off on CLM-1011. Recorded charges totaled $0.072362157. Hosted Runtime and Memory remain part of Day 5 Lab 1.
+
+The final offline check passed with 476 Python tests, 127 dashboard unit tests and 14 Playwright tests. The production build, isolated imports and staged Copilot health check also passed. The offline run restored the original `.env` bytes and verified the hash. Additional grouped acceptance cases remain listed in the implementation plan.
+
 The backend admits one dispatch, evaluation or working improvement round at a time. It commits the request before invoking the agent, and the worker takes the saved record by ID. Pending proposals remain available while another kind of work runs. A definite refusal stops a new run or round, or restores an unclaimed proposal review. An uncertain reply leaves the record available to reload.
 
 Workers renew their leases each minute. Starting work recovers records that have gone five minutes without a heartbeat. Dashboard polls release stale start controls and show saved reasons after a dispatch, evaluation or round stops. Stopping a round also stops its running evaluation. Late state writes are fenced, and replies already billed can still be recorded against their original attempts.
@@ -196,8 +208,8 @@ The pilot, harness and durable state builds are complete. The Swarm implementati
 
 ## Running it
 
-- `uv sync` and `npm install` install dependencies and hooks. `npm run seed` rebuilds the database selected by `.env`, including pristine evaluation sources and isolated handler labels. It resets the queue and clears runs, measurements, evaluation copies and the scoreboard. Reseed when moving from an earlier schema.
-- `npm run dev` starts the backend on 8000, AgentCore HTTP app on 8080, context service on 8006 and dashboard at http://localhost:5173. Stop Lab 1's `agentcore dev` first so port 8080 is free. The backend uses Supabase when `DATABASE_URL` is set, otherwise SQLite. The agent needs Postgres for checkpoints and `UNDERCOVER_API_KEY` for service traffic. Both database clients keep at most four connections.
+- `uv sync` and `npm install` install dependencies and hooks. `npm run seed` rebuilds the database selected by `.env`, including pristine evaluation sources and isolated handler labels. It resets the queue and clears runs, measurements, evaluation copies, the scoreboard, Copilot conversations and their checkpoints. Apply the additive upgrade to keep existing work.
+- `npm run dev` starts the backend on 8000, both AgentCore HTTP apps on 8080 and 8081, context on 8006 and the dashboard at http://localhost:5173. Stop Lab 1's `agentcore dev` first so port 8080 is free. The backend uses Supabase when `DATABASE_URL` is set, otherwise SQLite. Both agents need PostgreSQL for checkpoints. Claim-agent service traffic uses `UNDERCOVER_API_KEY`, and the Copilot uses the handler's bearer.
 - Start a dispatch from the queue. Choose N from 1 to 25, default 3. The service accepts immediately and reserves one dispatch/evaluation slot; a second start gets 409. An unavailable service produces 503 and no run record.
 - `uv run -m agent CLM-1001` still works one waiting claim. A claim id is required; queue mode and `--cap` are removed. The API address comes from the shell's UNDERCOVER_API (default localhost 8000); model/database/tracing configuration can come from `.env`.
 - A senior handler can sign off a held original on its claim page. The backend pays the claim in the same transaction and the dashboard shows the paid result immediately.

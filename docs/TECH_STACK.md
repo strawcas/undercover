@@ -38,16 +38,24 @@ Round billing totals use one portable SQL aggregate across improver, claim and j
 
 `context/` preloads the governance catalog and serves seven read-only tools through FastMCP with stateless streamable HTTP and JSON responses. The local server listens at `http://127.0.0.1:8006/mcp`. The Lambda handler creates an MCP app for each invocation over the same loaded catalog.
 
-Python 3.12 with uv and Node 26. `.env` supplies OpenRouter, Supabase, Langfuse and the local agent key. `npm run dev` starts the app, agent service, context service and dashboard. The CLI loads environment settings after imports and resolves the Gateway, context and memory settings when it builds a claim graph.
+Python 3.12 with uv and Node 26. `.env` supplies OpenRouter, Supabase, Langfuse and the local agent key. `npm run dev` starts the app, claim agent, Copilot, context service and dashboard. The CLI loads environment settings after imports and resolves the Gateway, context and memory settings when it builds a claim graph.
+
+## Copilot
+
+- The backend keeps conversation ownership, turns, action receipts and progress with additive SQLAlchemy tables. A transaction admits one turn per conversation. A working stretch expires after 20 minutes, and a payout confirmation survives until the handler answers. Seeding clears Copilot conversation and checkpoint records.
+- The Copilot's synchronous LangGraph uses a separate PostgreSQL checkpoint thread per turn and loads the previous completed thread for follow-up questions. The worker passes the current bearer through runtime context and calls the existing handler operations. Revision and action receipts fence payment, return and run starts against expired work and duplicate delivery. The dashboard polls progress only during work and refreshes short-lived sessions before sending.
 
 ## Deployment
+
+- The Copilot runs as a second AgentCore V2 app using the same staged `runtime/` and `agent/` package and the locked Runtime MCP adapter. Locally it listens on `127.0.0.1:8081`. The backend uses `UNDERCOVER_COPILOT` for a local address or `UNDERCOVER_COPILOT_RUNTIME` for an ARN. Runtime and Memory use the conversation ID as their session ID.
+- On Runtime the Copilot fetches `OPENROUTER_API_KEY` and the port 6543 `DATABASE_URL` from Identity. Supply `UNDERCOVER_API`, `UNDERCOVER_GATEWAY_URL` and `UNDERCOVER_COPILOT_MEMORY_ID` in `agentcore/.env.local`. Day 5 Lab 1 configures both invocation permissions and the app role's invocation identity. It also creates the optional holder of handler preferences and facts, `undercover_copilot_memory`.
 
 - `npm run build` compiles Vite to `dashboard/dist`. The build uses `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` from the root `.env` or shell and bundles those two public values.
 - Package `backend/`, its runtime data under `data/`, `dashboard/dist/` and the pinned `server` dependencies. Build Python 3.12 Linux x86-64 wheels into the archive.
 - Lambda invokes `backend.main.handler` through Mangum with lifespan off. For a standalone web server, run `uv run -m uvicorn backend.main:app`. The packaged app serves the dashboard and its navigation paths alongside the JSON API.
 - The Function URL app uses `DATABASE_URL`, `VITE_SUPABASE_URL` and `UNDERCOVER_API_KEY`. Seed the database before using it. With `AWS_LAMBDA_FUNCTION_NAME` set, the backend uses SQLAlchemy `NullPool`, disables psycopg prepared statements and selects the schema inside each transaction. Set `DATABASE_URL` to the Supabase transaction pooler on port 6543 for that runtime.
 - For an existing database, apply the additive schema update before replacing the Function URL app. Run `uv run --env-file .env python -c "from backend.database import engine, upgrade; upgrade(engine())"` with the deployment database settings. The Lambda judge needs its own `OPENROUTER_API_KEY` when grading is enabled.
-- Week 3 Day 4 Lab 1 supplies `agentcore/` and `runtime/`. The platform project deploys the agent with `agentcore deploy`. It stages the Runtime entrypoint with `agent/` beside it, omits tests, and installs the locked `runtime` group for Linux ARM and Python 3.12.
+- Week 3 Day 4 Lab 1 supplies `agentcore/` and `runtime/`. The platform project stages both Runtime entry files with `agent/` beside them, omits tests, and installs the locked `runtime` group for Linux ARM and Python 3.12. One `agentcore deploy` deploys both apps.
 - AgentCore Identity provides `OPENROUTER_API_KEY`, `UNDERCOVER_API_KEY` and `DATABASE_URL` on the first request. Give the database credential the Supabase transaction pooler address on port 6543. Put `UNDERCOVER_API`, `UNDERCOVER_GATEWAY_URL` and the optional `UNDERCOVER_MEMORY_ID` in `agentcore/.env.local`.
 - `runtime/policy.json` grants the Runtime role access to the Gateway and Memory. When the app changes, refresh the Gateway's app target with the deployed `/api/agent/openapi.json`. Give the Function URL app role `bedrock-agentcore:InvokeAgentRuntime` for the ARN in `UNDERCOVER_AGENT_RUNTIME`. [AWS invoke API](https://docs.aws.amazon.com/bedrock-agentcore/latest/APIReference/API_InvokeAgentRuntime.html)
 - `npm run check:server` imports the backend in a separate offline environment with only the locked `server` group.

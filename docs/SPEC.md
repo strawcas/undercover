@@ -56,11 +56,19 @@ Every dashboard page has a clear header and consistent controls in light and dar
 - Our handlers' own decisions on these claims are in `data/evals/`. We use them to check the agent's work. The agent must never see them.
 - Amounts are in US dollars.
 
+## Pilot success criteria
+
+- The agent handles at least 70% of the whole held-out set straight through.
+- Payout accuracy within $1 on the whole held-out set meets the accuracy objective in Settings.
+- Every paid original claim above the current approval limit records a handler's sign-off. This criterion is met when there are no payments above that limit.
+
 ## Handler sign-in
 
 Handlers sign in with their existing Supabase email/password accounts. There is no sign-up. Every dashboard page needs a signed-in handler and shows their identity and a way to sign out. Starting a dispatch or evaluation requires a verified handler. Payout sign-off records the signed-in handler and requires senior authority: Dana Whitfield can sign off over the limit; Marcus Oyelaran and Priya Raman cannot. The backend enforces these permissions independently of the screen.
 
 Private calls between the backend and the agent service use the shared agent API key. Shared claim and configuration reads also accept a verified handler. The health endpoint is public.
+
+The dashboard Copilot looks up business records and context, starts dispatches and evaluations, and submits reviews with the signed-in handler's permissions. It keeps private conversation history and requires a separate confirmation for the specific payout before signing off and paying.
 
 ## Our records
 
