@@ -6,6 +6,7 @@ import os
 import uuid
 from collections.abc import Iterable
 from contextvars import ContextVar
+from datetime import UTC, datetime
 from functools import cached_property
 from threading import Lock
 from typing import Any
@@ -65,6 +66,22 @@ class DeferredMemory(BaseStore):
 
     async def abatch(self, ops: Iterable[Op]) -> list[Result]:
         return await self.sdk.abatch(ops)
+
+    def save_turn(
+        self, actor: str, session: str, token: str, messages: tuple[str, str]
+    ) -> None:
+        """Write a chat pair as one idempotent event in the configured store."""
+        self.sdk.client.create_event(
+            memoryId=self.memory_id,
+            actorId=actor,
+            sessionId=session,
+            eventTimestamp=datetime.now(UTC),
+            clientToken=token,
+            payload=[
+                {"conversational": {"content": {"text": text}, "role": role}}
+                for role, text in zip(("USER", "ASSISTANT"), messages, strict=True)
+            ],
+        )
 
 
 def configured(*, evaluation: bool) -> BaseStore | None:

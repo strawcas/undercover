@@ -1,0 +1,17 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CallTheGateway",
+      "Effect": "Allow",
+      "Action": "bedrock-agentcore:InvokeGateway",
+      "Resource": "arn:aws:bedrock-agentcore:*:*:gateway/undercover-gateway-*"
+    },
+    {
+      "Sid": "UseHandlerMemory",
+      "Effect": "Allow",
+      "Action": ["bedrock-agentcore:CreateEvent", "bedrock-agentcore:RetrieveMemoryRecords"],
+      "Resource": "arn:aws:bedrock-agentcore:*:*:memory/undercover_copilot_memory-*"
+    }
+  ]
+}

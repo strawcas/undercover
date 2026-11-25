@@ -23,13 +23,22 @@ def client() -> httpx.Client:
     return httpx.Client(base_url=f"{BACKEND_URL}/api", timeout=30)
 
 
-def call(backend: httpx.Client, method: str, path: str, **request: Any) -> Any:
+def call(
+    backend: httpx.Client,
+    method: str,
+    path: str,
+    *,
+    headers: dict[str, str] | None = None,
+    **request: Any,
+) -> Any:
     """Send a typed client's request and preserve backend refusals."""
-    response = backend.request(method, path, headers=app_headers(), **request)
+    response = backend.request(
+        method, path, headers=app_headers() if headers is None else headers, **request
+    )
     if response.is_error:
         try:
             detail = response.json()["detail"]
         except (ValueError, TypeError, KeyError):
             detail = response.reason_phrase
         raise Refused(response.status_code, detail)
-    return response.json()
+    return response.json() if response.content else None

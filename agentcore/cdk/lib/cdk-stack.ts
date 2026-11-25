@@ -14,7 +14,11 @@ export interface AgentCoreStackProps extends StackProps {
 // The agent's settings that aren't secrets, from agentcore/.env.local beside the credentials'
 // values, or else from the environment agentcore deploy runs in, so nobody's addresses are
 // written into agentcore.json
-const SETTINGS = ['UNDERCOVER_API', 'UNDERCOVER_GATEWAY_URL', 'UNDERCOVER_MEMORY_ID'];
+const SETTINGS = ['UNDERCOVER_API', 'UNDERCOVER_GATEWAY_URL'];
+const MEMORY: Record<string, string> = {
+  agent: 'UNDERCOVER_MEMORY_ID',
+  copilot: 'UNDERCOVER_COPILOT_MEMORY_ID',
+};
 
 /**
  * The stack the AgentCore CLI deploys. Everything declared in agentcore/agentcore.json is
@@ -38,7 +42,7 @@ export class AgentCoreStack extends Stack {
     const localFile = join(root, 'agentcore', '.env.local');
     const local = existsSync(localFile) ? parseEnv(readFileSync(localFile, 'utf8')) : {};
     for (const runtime of props.application.spec.runtimes) {
-      for (const name of SETTINGS) {
+      for (const name of [...SETTINGS, MEMORY[runtime.name]]) {
         const value = local[name] ?? process.env[name];
         if (value) {
           this.application.runtime(runtime.name).addEnvironmentVariable(name, value);

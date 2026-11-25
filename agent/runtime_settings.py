@@ -54,7 +54,7 @@ async def credential(provider_name: str) -> str:
     return await cast(Callable[[], Awaitable[str]], receive)()
 
 
-async def managed_credentials() -> dict[str, str]:
+async def managed_credentials(required: tuple[str, ...]) -> dict[str, str]:
     """Resolve all platform secrets before modifying process settings."""
     if not os.getenv("UNDERCOVER_GATEWAY_URL"):
         raise RuntimeError("AgentCore Runtime requires UNDERCOVER_GATEWAY_URL")
@@ -62,24 +62,25 @@ async def managed_credentials() -> dict[str, str]:
         raise RuntimeError("AgentCore Runtime did not provide a workload access token")
     random.seed()
     return {
-        setting: await credential(os.environ[provider])
-        for setting, provider in PROVIDERS.items()
+        setting: await credential(os.environ[PROVIDERS[setting]])
+        for setting in required
     }
 
 
 class RuntimeSettings:
     """Keep the one initialized pool and allow the next request to retry failures."""
 
-    def __init__(self) -> None:
+    def __init__(self, required: tuple[str, ...] = CREDENTIALS) -> None:
         self.lock = asyncio.Lock()
         self.resources: ExitStack | None = None
+        self.required = required
 
     async def initialize(self, managed: bool) -> bool:
         """Return whether this request opened the pool and published credentials."""
         async with self.lock:
             if self.resources is not None:
                 return False
-            received = await managed_credentials() if managed else {}
+            received = await managed_credentials(self.required) if managed else {}
             previous = {name: os.getenv(name) for name in received}
             os.environ.update(received)
             try:
@@ -95,9 +96,10 @@ class RuntimeSettings:
 
     def open(self) -> ExitStack:
         """Open the checkpoint pool after credentials are ready."""
-        if not configured_key():
-            raise RuntimeError(f"{API_KEY} is missing")
-        show_reports()
+        if API_KEY in self.required:
+            if not configured_key():
+                raise RuntimeError(f"{API_KEY} is missing")
+            show_reports()
         with ExitStack() as resources:
             resources.enter_context(checkpoints.checkpointer())
             return resources.pop_all()

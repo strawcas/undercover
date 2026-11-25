@@ -22,6 +22,7 @@ def verify() -> None:
                 "The staged Runtime must import without the app or context package"
             )
         import_module("main")
+        import_module("copilot")
 
 
 if __name__ == "__main__":
