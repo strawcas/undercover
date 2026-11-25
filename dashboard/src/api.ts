@@ -351,6 +351,8 @@ export interface Round {
   };
 }
 
+export const HTTP_TOO_MANY_REQUESTS = 429;
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -382,6 +384,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (response.status === 401 && requestToken === accessToken) {
     accessToken = null;
     authFailures.dispatchEvent(new Event("expired"));
+  }
+  if (response.status === HTTP_TOO_MANY_REQUESTS) {
+    throw new ApiError(
+      response.status,
+      "The app is busy. Try again in a moment.",
+    );
   }
   if (!response.ok) {
     const body = (await response.json()) as { detail?: unknown };

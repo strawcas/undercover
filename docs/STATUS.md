@@ -8,6 +8,8 @@ The Phase 4 and whole-branch reviews added atomic SQLite run guards, enforced th
 
 ### Runtime live verification
 
+The AWS lab's dashboard dispatch reached AgentCore Runtime. With 25 agents, the app's Lambda recorded 56 throttled requests against the account's regional concurrency quota of 10. The dispatcher stopped when its error handler also received a 429, leaving waiting and in-progress claims available for another dispatch. The dashboard now retains a verified handler on an HTTP 429 during session revalidation and shows a busy message. A different handler still requires verification. The dashboard fix is ready to redeploy with the lab's app package.
+
 The AWS lab uses an explicit invocation identity for credential delivery. The notebook health check sends the notebook's IAM user ID. The notebook also redeploys the Lambda backend with `UNDERCOVER_AGENT_RUNTIME_USER_ID` set to the Lambda role ID and grants `InvokeAgentRuntimeForUser` on the UnderCover runtime. The backend sends `runtimeUserId` when that setting is present. The notebook health check passed with the user ID. The Lambda invocation is pending live verification through the lab's tiny evaluation.
 
 Dana's browser dispatch `3465bc48-9f22-4cf1-a790-c3bed96cbfb8` recorded N=25 and rejected a second start with HTTP 409. It selected all 26 original claims and finished in 56.0 seconds. It recorded 17 approvals, four declines and four referrals, with CLM-1024 left for a handler. Dana returned CLM-1008 with a policy-specific note. The browser showed its previous and replacement $2,240 approvals, the note in the timeline, and Dana's name and time. Dana signed off CLM-1003, leaving a completed checkpoint and one attributed $3,750 payment.

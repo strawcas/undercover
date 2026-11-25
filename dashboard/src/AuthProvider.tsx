@@ -1,6 +1,13 @@
 import { type ReactNode, useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
-import { api, onUnauthorized, setAccessToken, type Handler } from "./api";
+import {
+  api,
+  ApiError,
+  HTTP_TOO_MANY_REQUESTS,
+  onUnauthorized,
+  setAccessToken,
+  type Handler,
+} from "./api";
 import { AuthContext } from "./auth";
 import { authClient } from "./supabase";
 
@@ -26,9 +33,11 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
     let active = true;
     let revision = 0;
     let identity: string | undefined;
+    let verified = false;
     const unsubscribe = onUnauthorized(() => {
       ++revision;
       identity = undefined;
+      verified = false;
       setHandler(null);
       setLoading(false);
       setError("Your sign-in expired. Sign in again.");
@@ -38,6 +47,7 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
       const isCurrent = () => active && current === revision;
       setAccessToken(session?.access_token ?? null);
       if (identity !== session?.user.id) {
+        verified = false;
         setHandler(null);
         setLoading(true);
         identity = session?.user.id;
@@ -45,13 +55,20 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
       try {
         const next = session ? await api.getCurrentHandler() : null;
         if (isCurrent()) {
+          verified = next !== null;
           setHandler(next);
           setError(null);
         }
       } catch (reason) {
         if (isCurrent()) {
-          setHandler(null);
-          setAccessToken(null);
+          const throttled =
+            reason instanceof ApiError &&
+            reason.status === HTTP_TOO_MANY_REQUESTS;
+          if (!verified || !throttled) {
+            verified = false;
+            setHandler(null);
+            setAccessToken(null);
+          }
           setError(
             reason instanceof Error
               ? reason.message

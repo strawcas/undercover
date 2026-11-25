@@ -134,6 +134,51 @@ it("keeps the page mounted when its access token refreshes and signs out", async
   expect(sdk.signOut).toHaveBeenCalledOnce();
 });
 
+it("keeps a verified handler signed in when Lambda throttles a session recheck", async () => {
+  sdk.getSession.mockResolvedValue({ data: { session }, error: null });
+  const fetch = show("/nowhere");
+  const heading = await screen.findByText("Page not found");
+  fetch.mockResolvedValueOnce(
+    new Response("Too Many Requests", { status: 429 }),
+  );
+  await act(async () => {
+    listener("TOKEN_REFRESHED", { ...session, access_token: "refreshed" });
+    await Promise.resolve();
+  });
+  expect(await screen.findByRole("alert")).toHaveProperty(
+    "textContent",
+    "The app is busy. Try again in a moment.",
+  );
+  expect(screen.getByText("Page not found")).toBe(heading);
+  expect(screen.getByText("Dana Whitfield")).toBeDefined();
+  await expect(api.getCurrentHandler()).resolves.toEqual(signedIn.handler);
+  const headers = fetch.mock.lastCall?.[1]?.headers as Headers;
+  expect(headers.get("Authorization")).toBe("Bearer refreshed");
+});
+
+it("requires fresh verification when a different handler signs in during throttling", async () => {
+  sdk.getSession.mockResolvedValue({ data: { session }, error: null });
+  const fetch = show("/nowhere");
+  await screen.findByText("Page not found");
+  fetch.mockResolvedValueOnce(
+    new Response("Too Many Requests", { status: 429 }),
+  );
+  await act(async () => {
+    listener("SIGNED_IN", {
+      ...session,
+      access_token: "other-token",
+      user: { ...session.user, id: "HND-02" },
+    });
+    await Promise.resolve();
+  });
+  expect(await screen.findByRole("alert")).toHaveProperty(
+    "textContent",
+    "The app is busy. Try again in a moment.",
+  );
+  expect(screen.queryByText("Dana Whitfield")).toBeNull();
+  expect(screen.queryByRole("navigation")).toBeNull();
+});
+
 it("refuses a session that the backend cannot verify", async () => {
   sdk.getSession.mockResolvedValue({ data: { session }, error: null });
   vi.spyOn(api, "getCurrentHandler").mockRejectedValue(
