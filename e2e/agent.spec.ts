@@ -146,7 +146,10 @@ test("a sign-off on the dashboard records a payment and the signer", async ({
   const heading = page.locator(".page-header");
   await expect(heading.getByText("Waiting for sign-off")).toBeVisible();
   expect(await resumed(request)).not.toContain("CLM-1020");
-  await page.getByRole("button", { name: "Sign off" }).click();
+  await page
+    .getByRole("main")
+    .getByRole("button", { name: "Sign off", exact: true })
+    .click();
   await expect(heading.getByText("Decided")).toBeVisible();
   await expect(
     page.getByText(/^Paid \$1,350\.00, signed off by Dana Whitfield, /),
@@ -169,7 +172,11 @@ test("a senior returns an approval and can see the note and both decisions", asy
     reason: "The clinic charge is covered.",
   });
   await page.goto(`/claims/${claimId}`);
-  await expect(page.getByRole("button", { name: "Sign off" })).toBeVisible();
+  await expect(
+    page
+      .getByRole("main")
+      .getByRole("button", { name: "Sign off", exact: true }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Send back" }).click();
   const input = page.getByRole("textbox", {
     name: "What should the agent look at again?",

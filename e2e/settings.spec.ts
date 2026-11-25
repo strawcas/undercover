@@ -33,7 +33,9 @@ test("a senior handler confirms a setting and remembers the browser theme", asyn
   expect(before.values.objectives.accuracy).toBeCloseTo(0.6, 10);
   await page.getByRole("button", { name: "Save settings" }).click();
   await dialog.getByRole("button", { name: "Save changes" }).click();
-  await expect(page.getByRole("status")).toHaveText("Settings saved.");
+  await expect(page.getByRole("main").getByRole("status")).toHaveText(
+    "Settings saved.",
+  );
   const saved = await request.get("/api/settings");
   const after = (await saved.json()) as {
     values: {

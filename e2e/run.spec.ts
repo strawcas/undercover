@@ -225,7 +225,7 @@ test("evaluations show scores, copied decisions and stopped runs without changin
     page.getByRole("heading", { name: "Evaluation results" }),
   ).toBeVisible();
   await expect(page.getByText("Evaluation rationale")).toBeVisible();
-  const comparison = page.getByRole("table");
+  const comparison = page.getByRole("main").getByRole("table");
   await expect(comparison.getByText("A", { exact: true })).toHaveCount(1);
   await expect(comparison.getByText("F", { exact: true })).toHaveCount(4);
   await expect(comparison.getByText("Same grounds: Yes")).toBeVisible();
@@ -235,7 +235,11 @@ test("evaluations show scores, copied decisions and stopped runs without changin
   ).toHaveCount(4);
   await comparison.getByRole("link").first().click();
   await expect(page.getByText(/Evaluation claim/)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Sign off" })).toHaveCount(0);
+  await expect(
+    page
+      .getByRole("main")
+      .getByRole("button", { name: "Sign off", exact: true }),
+  ).toHaveCount(0);
   await expect(page.getByText(/complete without sign-off/)).toBeVisible();
   const queueAfter = await request.get("/api/claims");
   const after = (await queueAfter.json()) as { claim_id: string }[];
@@ -331,7 +335,10 @@ test("improvement approvals retain feedback, refuse busy work and show the verdi
   await expect(
     page.getByRole("heading", { name: "Configuration", exact: true }),
   ).toBeVisible();
-  await page.getByLabel("Version", { exact: true }).selectOption("2");
+  await page
+    .getByRole("region", { name: "Configuration versions" })
+    .getByRole("combobox")
+    .selectOption("2");
   await expect(
     page.getByText("+Use the evidence to support the general policy rule.", {
       exact: true,
