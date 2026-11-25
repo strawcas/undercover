@@ -331,7 +331,7 @@ test("improvement approvals retain feedback, refuse busy work and show the verdi
   await expect(
     page.getByRole("heading", { name: "Configuration", exact: true }),
   ).toBeVisible();
-  await page.getByRole("combobox").selectOption("2");
+  await page.getByLabel("Version", { exact: true }).selectOption("2");
   await expect(
     page.getByText("+Use the evidence to support the general policy rule.", {
       exact: true,
