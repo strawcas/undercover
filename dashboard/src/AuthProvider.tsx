@@ -11,6 +11,8 @@ import {
 import { AuthContext } from "./auth";
 import { authClient } from "./supabase";
 
+const COPILOT_MINIMUM_SECONDS = 20 * 60;
+
 export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
   const [connection] = useState(() => {
     try {
@@ -114,8 +116,30 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
     setHandler(null);
   }
 
+  async function copilotToken() {
+    const client = authClient();
+    const { data, error: failure } = await client.auth.getSession();
+    if (failure) throw failure;
+    let session = data.session;
+    if (!session || session.user.email !== handler?.email)
+      throw new Error("Sign in again to use the Copilot.");
+    if (
+      (session.expires_at ?? 0) - Date.now() / 1000 <
+      COPILOT_MINIMUM_SECONDS
+    ) {
+      const refreshed = await client.auth.refreshSession();
+      if (refreshed.error) throw refreshed.error;
+      session = refreshed.data.session;
+    }
+    if (!session || session.user.email !== handler?.email)
+      throw new Error("Sign in again to use the Copilot.");
+    return session.access_token;
+  }
+
   return (
-    <AuthContext.Provider value={{ handler, loading, error, signIn, signOut }}>
+    <AuthContext.Provider
+      value={{ handler, loading, error, signIn, signOut, copilotToken }}
+    >
       {children}
     </AuthContext.Provider>
   );

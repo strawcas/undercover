@@ -7,6 +7,7 @@ export interface AuthState {
   error: string | null;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  copilotToken: () => Promise<string>;
 }
 
 export const AuthContext = createContext<AuthState | null>(null);

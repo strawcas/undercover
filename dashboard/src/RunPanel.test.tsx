@@ -322,6 +322,11 @@ it("refreshes the same row from selected through work to completion", async () =
   expect(within(row).getByText("$0.000456")).toBeDefined();
   expect(view.getByText("Worked 1 claim: 1 referred.")).toBeDefined();
   expect(new Set(vi.mocked(fetch).mock.calls.map(([path]) => path))).toEqual(
-    new Set(["/api/claims", "/api/runs/latest", "/api/runs/active"]),
+    new Set([
+      "/api/claims",
+      "/api/runs/latest",
+      "/api/runs/active",
+      "/api/copilot/conversations",
+    ]),
   );
 });

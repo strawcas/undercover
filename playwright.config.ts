@@ -3,6 +3,7 @@ import { TEST_AGENT_KEY } from "./e2e/agent_credentials";
 import {
   AGENT_STAND_IN,
   AUTH_STAND_IN,
+  COPILOT_STAND_IN,
   JUDGE_STAND_IN,
   TEST_BACKEND,
 } from "./e2e/addresses";
@@ -25,6 +26,8 @@ export default defineConfig({
         DATABASE_URL: "",
         UNDERCOVER_AGENT: AGENT_STAND_IN,
         UNDERCOVER_AGENT_RUNTIME: "",
+        UNDERCOVER_COPILOT: COPILOT_STAND_IN,
+        UNDERCOVER_COPILOT_RUNTIME: "",
         UNDERCOVER_API_KEY: TEST_AGENT_KEY,
         VITE_SUPABASE_URL: AUTH_STAND_IN,
         OPENROUTER_DECISIONS_URL: JUDGE_STAND_IN,
@@ -35,6 +38,14 @@ export default defineConfig({
     {
       command: "node e2e/auth_stand_in.ts",
       url: `${AUTH_STAND_IN}/auth/v1/.well-known/jwks.json`,
+    },
+    {
+      command: "node e2e/copilot_stand_in.ts",
+      url: `${COPILOT_STAND_IN}/ping`,
+      env: {
+        PORT: new URL(COPILOT_STAND_IN).port,
+        UNDERCOVER_API: TEST_BACKEND,
+      },
     },
     {
       command: "node e2e/judge_stand_in.ts",

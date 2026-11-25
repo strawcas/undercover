@@ -376,10 +376,12 @@ export function setAccessToken(token: string | null) {
   accessToken = token;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const requestToken = accessToken;
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
-  if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+  const explicit = headers.get("Authorization");
+  const requestToken = explicit?.replace(/^Bearer /, "") ?? accessToken;
+  if (accessToken && !explicit)
+    headers.set("Authorization", `Bearer ${accessToken}`);
   const response = await fetch(path, { ...init, headers });
   if (response.status === 401 && requestToken === accessToken) {
     accessToken = null;
@@ -400,7 +402,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-function post<T>(
+export function post<T>(
   path: string,
   body: object,
   headers: Record<string, string> = {},

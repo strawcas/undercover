@@ -49,8 +49,11 @@ export class Refusal {
 export function stubApi(routes: Routes) {
   const fetchMock = vi.fn((path: string, init?: RequestInit) => {
     const key = `${init?.method ?? "GET"} ${path}`;
-    const answer =
-      key === "GET /api/runs/active" ? (routes[key] ?? null) : routes[key];
+    const defaults: Routes = {
+      "GET /api/runs/active": null,
+      "GET /api/copilot/conversations": [],
+    };
+    const answer = key in routes ? routes[key] : defaults[key];
     if (answer === undefined)
       return Promise.resolve(
         Response.json({ detail: "Not found" }, { status: 404 }),
@@ -87,6 +90,7 @@ export const signedIn: AuthState = {
   error: null,
   signIn: vi.fn().mockResolvedValue(undefined),
   signOut: vi.fn().mockResolvedValue(undefined),
+  copilotToken: vi.fn().mockResolvedValue("offline-handler"),
 };
 
 // Finds the panel headed by the given heading, to look inside it.

@@ -1,5 +1,6 @@
 import { Link, Navigate, Route, Routes } from "react-router";
 import { MainNavigation } from "./components/MainNavigation";
+import { CopilotSidebar } from "./components/CopilotSidebar";
 import { ClaimPage } from "./pages/ClaimPage";
 import { ConfigurationPage } from "./pages/ConfigurationPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -48,27 +49,30 @@ export function App() {
           </button>
         </div>
       </header>
-      <main className="page">
-        {auth.error && (
-          <p className="form-error" role="alert">
-            {auth.error}
-          </p>
-        )}
-        <Routes>
-          <Route path={QUEUE_PAGE} element={<QueuePage />} />
-          <Route path={CLAIM_PAGE} element={<ClaimPage />} />
-          <Route path={CONFIGURATION_PAGE} element={<ConfigurationPage />} />
-          <Route path={SETTINGS_PAGE} element={<SettingsPage />} />
-          <Route path={IMPROVEMENT_PAGE} element={<ImprovementPage />} />
-          <Route
-            path="/instructions"
-            element={<Navigate to={CONFIGURATION_PAGE} replace />}
-          />
-          <Route path={SCOREBOARD_PAGE} element={<ScoreboardPage />} />
-          <Route path={EVALUATION_PAGE} element={<EvaluationPage />} />
-          <Route path="*" element={<NotFoundPage />} />
-        </Routes>
-      </main>
+      <div className="copilot-shell">
+        <main className="page">
+          {auth.error && (
+            <p className="form-error" role="alert">
+              {auth.error}
+            </p>
+          )}
+          <Routes>
+            <Route path={QUEUE_PAGE} element={<QueuePage />} />
+            <Route path={CLAIM_PAGE} element={<ClaimPage />} />
+            <Route path={CONFIGURATION_PAGE} element={<ConfigurationPage />} />
+            <Route path={SETTINGS_PAGE} element={<SettingsPage />} />
+            <Route path={IMPROVEMENT_PAGE} element={<ImprovementPage />} />
+            <Route
+              path="/instructions"
+              element={<Navigate to={CONFIGURATION_PAGE} replace />}
+            />
+            <Route path={SCOREBOARD_PAGE} element={<ScoreboardPage />} />
+            <Route path={EVALUATION_PAGE} element={<EvaluationPage />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
+        </main>
+        <CopilotSidebar key={auth.handler.handler_id} handler={auth.handler} />
+      </div>
     </>
   );
 }

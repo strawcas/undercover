@@ -101,7 +101,9 @@ it("says when a claim doesn't exist, and stops asking for it", async () => {
   renderAt("/claims/CLM-9999");
   expect(await screen.findByText("Claim not found")).toBeDefined();
   await vi.advanceTimersByTimeAsync(5000);
-  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(
+    fetchMock.mock.calls.filter(([path]) => path === "/api/claims/CLM-9999"),
+  ).toHaveLength(1);
   vi.useRealTimers();
 });
 
@@ -123,7 +125,7 @@ it("shows the agent's instructions read only", async () => {
   expect(
     within(claim).getByText(/## Contents of the claims manual/),
   ).toBeDefined();
-  expect(screen.queryByRole("textbox")).toBeNull();
+  expect(within(screen.getByRole("main")).queryByRole("textbox")).toBeNull();
   expect(within(claim).queryByRole("button")).toBeNull();
 });
 
