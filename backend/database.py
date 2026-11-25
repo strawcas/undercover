@@ -123,6 +123,61 @@ handlers = Table(
     Column("email", Text, nullable=False, unique=True),
     Column("can_approve_over_limit", Boolean, nullable=False),
 )
+copilot_conversations = Table(
+    "copilot_conversations",
+    metadata,
+    Column("conversation_id", Text, primary_key=True),
+    Column(
+        "handler_id",
+        Text,
+        ForeignKey("handlers.handler_id"),
+        nullable=False,
+        index=True,
+    ),
+    Column("title", Text),
+    Column("updated_at", Text, nullable=False),
+    Column("current_turn", Text),
+)
+copilot_turns = Table(
+    "copilot_turns",
+    metadata,
+    Column("turn_id", Text, primary_key=True),
+    Column(
+        "conversation_id",
+        Text,
+        ForeignKey("copilot_conversations.conversation_id"),
+        nullable=False,
+        index=True,
+    ),
+    Column("message", Text, nullable=False),
+    Column("status", Text, nullable=False),
+    Column("created_at", Text, nullable=False),
+    Column("started_at", Text, nullable=False),
+    Column("deadline", Text, nullable=False),
+    Column("stretch_id", Text, nullable=False),
+    Column("claimed", Boolean, nullable=False),
+    Column("answer", Text),
+    Column("failure", Text),
+    Column("confirmation", JSON(none_as_null=True)),
+    Column("confirmed", Boolean),
+    Column("usage", JSON(none_as_null=True)),
+)
+copilot_steps = Table(
+    "copilot_steps",
+    metadata,
+    Column("turn_id", Text, ForeignKey("copilot_turns.turn_id"), primary_key=True),
+    Column("step_id", Text, primary_key=True),
+    Column("started_at", Text, nullable=False),
+    Column("record", JSON, nullable=False),
+)
+copilot_actions = Table(
+    "copilot_actions",
+    metadata,
+    Column("turn_id", Text, ForeignKey("copilot_turns.turn_id"), primary_key=True),
+    Column("action_id", Text, primary_key=True),
+    Column("reference", Text, nullable=False),
+)
+COPILOT_TABLES = [copilot_conversations, copilot_turns, copilot_steps, copilot_actions]
 customers = Table(
     "customers",
     metadata,
@@ -415,12 +470,13 @@ def is_seeded(db: Engine) -> bool:
 
 
 def upgrade(db: Engine) -> None:
-    """Add the Runtime tables to a previously seeded business database."""
+    """Add Runtime and Copilot tables to a previously seeded business database."""
     with db.begin() as connection:
         connection.execute(CreateTable(claim_reviews, if_not_exists=True))
         connection.execute(CreateTable(work_gate, if_not_exists=True))
         insert_once(connection, work_gate, {"id": 1})
         connection.execute(update(work_gate).where(work_gate.c.id == 1).values(id=1))
+        metadata.create_all(connection, tables=COPILOT_TABLES)
         existing = {
             column["name"] for column in inspect(connection).get_columns("runs")
         }
@@ -433,6 +489,17 @@ def upgrade(db: Engine) -> None:
 def load(name: str) -> Any:
     """Read one of the JSON files in data/."""
     return json.loads((DATA / name).read_text(encoding="utf-8"))
+
+
+def clear_copilot_checkpoints(db: Connection) -> None:
+    """Remove Copilot turn threads from the shared LangGraph checkpoint tables."""
+    catalog = inspect(db)
+    if not catalog.has_table(copilot_turns.name):
+        return
+    for name in ("checkpoint_writes", "checkpoint_blobs", "checkpoints"):
+        if catalog.has_table(name):
+            table = Table(name, MetaData(), Column("thread_id", Text))
+            db.execute(table.delete().where(table.c.thread_id.like("copilot:%")))
 
 
 def seed(db: Engine) -> dict[str, int]:
@@ -450,6 +517,7 @@ def seed(db: Engine) -> dict[str, int]:
         if on_postgres(db.url):
             connection.execute(CreateSchema(SCHEMA, if_not_exists=True))
         connection.execute(text("DROP TABLE IF EXISTS todos"))
+        clear_copilot_checkpoints(connection)
         metadata.drop_all(connection)
         metadata.create_all(connection)
         connection.execute(insert(work_gate).values(id=1))

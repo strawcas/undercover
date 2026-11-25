@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -12,6 +13,7 @@ from backend import (
     agent_service,
     claim_reviews,
     configurations,
+    copilot_records,
     evaluation_completion,
     evaluations,
     improvement_budget,
@@ -32,6 +34,9 @@ from backend.auth import (
 )
 from backend.clock import now
 from backend.configuration_models import ClaimConfiguration, ConfigurationHistory
+from backend.copilot_models import ActionReceipt
+from backend.copilot_reads import router as copilot_reads_router
+from backend.copilot_routes import router as copilot_router
 from backend.dashboard import install_dashboard
 from backend.database import (
     claim_view,
@@ -117,24 +122,55 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="UnderCover", lifespan=lifespan)
 app.include_router(improvement_router)
+app.include_router(copilot_router)
+app.include_router(copilot_reads_router)
 agent_only = [Depends(require_agent)]
 shared_read = [Depends(agent_or_handler)]
 
 
 @app.post("/api/dispatches", operation_id="start_dispatch", status_code=202)
-def start_dispatch(request: DispatchRequest, email: VerifiedEmail) -> dict[str, str]:
+def start_dispatch(
+    request: DispatchRequest, email: VerifiedEmail, http: Request
+) -> dict[str, str]:
     """Admit and commit one dispatch before asking the agent to work it."""
-    return launch_run("dispatch", request.concurrency, None, None, email)
+    return launch_run(
+        "dispatch",
+        request.concurrency,
+        None,
+        None,
+        RunRequester(email, copilot_receipt(http)),
+    )
 
 
 @app.post("/api/evaluations", operation_id="start_evaluation", status_code=202)
 def start_evaluation(
-    request: EvaluationRequest, email: VerifiedEmail
+    request: EvaluationRequest, email: VerifiedEmail, http: Request
 ) -> dict[str, str]:
     """Admit an evaluation and its copies before asking the agent to work it."""
     return launch_run(
-        "evaluation", request.concurrency, request.set_name, request.tiny, email
+        "evaluation",
+        request.concurrency,
+        request.set_name,
+        request.tiny,
+        RunRequester(email, copilot_receipt(http)),
     )
+
+
+@dataclass(frozen=True)
+class RunRequester:
+    email: str
+    receipt: ActionReceipt | None
+
+
+def copilot_receipt(http: Request) -> ActionReceipt | None:
+    """Resolve the optional lease supplied by the Copilot's action client."""
+    raw = http.headers.get("X-UnderCover-Copilot-Receipt")
+    if raw is None:
+        return None
+    try:
+        return ActionReceipt.from_header(raw)
+    except ValueError as error:
+        raise HTTPException(422, "Invalid Copilot action receipt") from error
 
 
 def launch_run(
@@ -142,11 +178,16 @@ def launch_run(
     concurrency: int,
     set_name: SetName | None,
     tiny: bool | None,
-    email: str,
+    requester: RunRequester,
 ) -> dict[str, str]:
     """Pin and commit backend-owned work before making any remote call."""
+    receipt = requester.receipt
     with engine().begin() as db:
-        handler_for_email(email, db)
+        handler = handler_for_email(requester.email, db)
+        if receipt:
+            copilot_records.take_action(db, handler.handler_id, receipt)
+            if existing := copilot_records.saved_action(db, receipt):
+                return {"status": "accepted", "run_id": existing}
         work_admission.admit(db)
         run = create_run(
             db,
@@ -159,13 +200,19 @@ def launch_run(
                 tiny=tiny,
             ),
         )
-    work_admission.launch(
-        "work_run",
-        {"run_id": run.run_id},
-        lambda db, reason: run_records.stop(
-            db, run.run_id, reason, only_unclaimed=True
-        ),
-    )
+        if receipt:
+            copilot_records.save_action(db, receipt, run.run_id)
+    try:
+        work_admission.launch(
+            "work_run",
+            {"run_id": run.run_id},
+            lambda db, reason: run_records.stop(
+                db, run.run_id, reason, only_unclaimed=True
+            ),
+        )
+    except agent_service.InvocationError as error:
+        if receipt is None or not error.uncertain:
+            raise
     return {"status": "accepted", "run_id": run.run_id}
 
 
@@ -717,7 +764,15 @@ def settle_payment(db: Connection, claim_id: str, amount: float, paid_at: str) -
 def sign_off_claim(claim_id: str, handler: ReviewHandler, http: Request) -> Claim:
     """Record the senior handler's sign-off and pay the approved payout."""
     with engine().begin() as db:
+        receipt = copilot_receipt(http)
+        turn = (
+            copilot_records.take_action(db, handler.handler_id, receipt)
+            if receipt
+            else None
+        )
         claim = lock_review(db, claim_id, http.headers.get("If-Match"))
+        if turn is not None:
+            copilot_records.require_confirmation(turn, claim)
         signed = sign_off_payment(db, claim, handler)
     agent_service.resume_claim(claim_id)
     return signed
@@ -761,6 +816,11 @@ def send_back_claim(
 ) -> Claim:
     """Return a held approval for a fresh decision with a senior handler's note."""
     with engine().begin() as db:
+        receipt = copilot_receipt(http)
+        if receipt:
+            copilot_records.take_action(db, handler.handler_id, receipt)
+            if copilot_records.saved_action(db, receipt) == claim_id:
+                return to_claim(find_claim(db, claim_id))
         claim = lock_review(db, claim_id, http.headers.get("If-Match"))
         if claim["status"] != "waiting_for_sign_off" or claim["signed_off_by"]:
             raise HTTPException(409, f"Claim {claim_id} is not waiting for review")
@@ -769,6 +829,8 @@ def send_back_claim(
         claim_reviews.record_return(db, claim, review)
         add_step(db, claim_id, claim["thread_id"], "claim_review", review)
         returned = to_claim(find_claim(db, claim_id))
+        if receipt:
+            copilot_records.save_action(db, receipt, claim_id)
     agent_service.resume_claim(claim_id)
     return returned
 
