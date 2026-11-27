@@ -1,0 +1,145 @@
+import { VersionScoresTable } from "../components/VersionScoresTable";
+import { PageHeader } from "../components/PageHeader";
+import { ModelComparison } from "../components/ModelComparison";
+import { useState } from "react";
+import { api, type ConfigurationHistory } from "../api";
+import { Diff } from "../components/Diff";
+import { Message } from "../components/Message";
+import { timestamp } from "../format";
+import { REFRESH_MS, useLoad } from "../useLoad";
+
+export function ConfigurationPage() {
+  const current = useLoad(api.getCurrentConfiguration, REFRESH_MS);
+  const history = useLoad(api.listConfigurations, REFRESH_MS);
+  const [selected, setSelected] = useState<number | null>(null);
+  const value = history.data?.find(
+    (item) => item.version === (selected ?? current.data?.version),
+  );
+  const failure = history.error ?? current.error;
+  const retry = () => {
+    current.reload();
+    history.reload();
+  };
+  const placeholder =
+    history.data?.length === 0 && !failure ? (
+      <p className="message">
+        No configurations are available. Contact a senior handler.
+      </p>
+    ) : (
+      <Message error={failure} retry={retry} />
+    );
+  return (
+    <>
+      <PageHeader title="Configuration">
+        Review the claim agent's configuration, its history and the documents it
+        works from.
+      </PageHeader>
+      {value && failure && <Message error={failure} retry={retry} />}
+      {!value ? (
+        placeholder
+      ) : (
+        <div className="column">
+          <section className="panel table-scroll" aria-label="Version scores">
+            <h2>Held-out scores by version</h2>
+            <p className="muted small">
+              Averages of completed whole-set evaluations run by improvement
+              rounds.
+            </p>
+            <VersionScoresTable versions={history.data ?? []} />
+          </section>
+          <section className="panel" aria-label="Configuration versions">
+            <h2>Current version {current.data?.version}</h2>
+            <label>
+              Version
+              <select
+                value={value.version}
+                onChange={(event) => {
+                  setSelected(Number(event.target.value));
+                }}
+              >
+                {history.data?.map((item) => (
+                  <option key={item.version} value={item.version}>
+                    Version {item.version}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <ConfigurationFacts value={value} />
+            <p>{value.reason}</p>
+            <p className="muted">
+              Held-out accuracy:{" "}
+              {value.held_out_scores
+                ? `${(value.held_out_scores.accuracy * 100).toFixed(1)}%`
+                : "No round evaluations yet"}
+            </p>
+          </section>
+          <ConfigurationChanges value={value} history={history.data ?? []} />
+          <section className="panel" aria-label="Working a claim">
+            <h2>Working a claim</h2>
+            <pre className="instructions">{value.prompt}</pre>
+          </section>
+        </div>
+      )}
+    </>
+  );
+}
+
+function ConfigurationChanges({
+  value,
+  history,
+}: Readonly<{ value: ConfigurationHistory; history: ConfigurationHistory[] }>) {
+  return (
+    <section className="panel" aria-label="Changes">
+      <h2>Changes from version {value.parent_version ?? "start"}</h2>
+      <ModelComparison
+        before={history.find(
+          (version) => version.version === value.parent_version,
+        )}
+        after={value}
+        beforeLabel={
+          value.parent_version === null
+            ? "Before"
+            : `Before · version ${String(value.parent_version)}`
+        }
+        afterLabel={`After · version ${String(value.version)}`}
+        emptyBefore="Initial configuration"
+      />
+      <Diff text={value.diff} />
+    </section>
+  );
+}
+
+function ConfigurationFacts({
+  value,
+}: Readonly<{ value: ConfigurationHistory }>) {
+  return (
+    <dl className="facts">
+      <div>
+        <dt>Model</dt>
+        <dd className="mono">{value.model}</dd>
+      </div>
+      <div>
+        <dt>Reasoning effort</dt>
+        <dd>{value.reasoning_effort}</dd>
+      </div>
+      <div>
+        <dt>Created</dt>
+        <dd>{timestamp(value.created_at)}</dd>
+      </div>
+      <div>
+        <dt>Approved by</dt>
+        <dd>{value.approved_by ?? "Initial version"}</dd>
+      </div>
+      <div>
+        <dt>Proposed by</dt>
+        <dd className="mono">{value.proposed_by}</dd>
+      </div>
+      <div>
+        <dt>Approved</dt>
+        <dd>
+          {value.approved_at ? timestamp(value.approved_at) : "Initial version"}
+        </dd>
+      </div>
+    </dl>
+  );
+}

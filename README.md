@@ -82,7 +82,7 @@ Commit your own changes before you switch branches. Your `.env` file isn't in gi
 - To start from my build: `git checkout week2day3-start`
 - Lab: [labs/week2day3.ipynb](labs/week2day3.ipynb), or [labs/week2day3free.ipynb](labs/week2day3free.ipynb) on free models
 - Product brief: [labs/week2day3_product_DURABLE.md](labs/week2day3_product_DURABLE.md), copied to `docs/DURABLE.md`
-- My build: `git checkout week2day3-end`
+- My build: `git checkout week2day3-end`, then `npm run seed` before your first `npm run dev`
 
 **Day 4: Agent Swarms**
 - To start from my build: `git checkout week2day4-start`
@@ -107,7 +107,7 @@ This week UnderCover goes into production on AWS, and the free route uses Render
 - To start from my build: `git checkout week3day2-start`
 - Lab 1: [labs/week3day2_lab1.ipynb](labs/week3day2_lab1.ipynb), or [labs/week3day2_lab1free.ipynb](labs/week3day2_lab1free.ipynb) on free models
 - Product brief: [labs/week3day2_product_SECURE.md](labs/week3day2_product_SECURE.md), copied to `docs/SECURE.md`
-- My build: `git checkout week3day2-end`
+- My build: `git checkout week3day2-end`, then add `UNDERCOVER_API_KEY` to your `.env` with a random value from `uv run python -c "import secrets; print(secrets.token_hex(32))"`
 - Lab 2: [labs/week3day2_lab2.ipynb](labs/week3day2_lab2.ipynb) on AWS, or [labs/week3day2_lab2free.ipynb](labs/week3day2_lab2free.ipynb) on Render
 
 **Day 3: Enterprise Context Layer & Integrations**
