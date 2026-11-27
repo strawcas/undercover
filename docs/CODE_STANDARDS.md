@@ -11,6 +11,8 @@
 
 ## Structure
 
+Modularize React components when it improves reusability, readability, or maintainability, but avoid unnecessary abstraction by keeping small, simple, single-use components within their parent.
+
 7. Give each route one client. `agent/api.py` owns app operations and uses `agent/backend_client.py` for direct requests and the shared app refusal type. The improver gets results through `agent/improver_api.py` on that same direct transport. `agent/gateway.py` owns signed Gateway calls and tool names. `agent/context_client.py` owns direct context access and the choice of context route. Both MCP routes share `agent/mcp_client.py`. `agent/memory.py` owns AgentCore Memory access. The dashboard uses `dashboard/src/api.ts` with one function per operation and `dashboard/src/supabase.ts` for Auth. The backend calls the agent service through `backend/agent_service.py` and Jev through `backend/judge.py`. Keep URLs, request shapes and service-specific error handling in their owning clients. Share page headers, model comparisons and resource loading through their components and hooks.
 8. Each module has one job, and its name says what it is. A module uses another through what that module is for, and never borrows its helpers. A helper two modules need goes in a module of its own. No circular imports. Tests follow the same rule: shared test helpers live in their own module, never in another test file.
 9. Write a literal once. A URL, a path, a status or a message used in more than one place is named once, in the module that owns it.

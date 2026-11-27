@@ -54,6 +54,7 @@ The checks show that the code works, but not that it is fit to merge. Every code
 - Never push.
 - Don't open `data/evals/` unless you're asked to.
 - Everything must work on Windows: write `package.json` scripts as `uv run` commands or `.mjs` files.
+- When asked a question about the code, explain the issue and its cause without modifying any code unless I explicitly ask you to make changes.
 
 ## Copilot live verification
 
